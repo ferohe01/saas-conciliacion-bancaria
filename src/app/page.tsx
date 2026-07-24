@@ -43,12 +43,6 @@ export default function Home() {
         >
           Ingresar
         </Link>
-        <Link
-          href="/wizard"
-          className="inline-flex w-fit items-center rounded-xl border border-neutral-300 px-6 py-3 font-medium text-neutral-800 transition-colors hover:bg-neutral-50"
-        >
-          Ver prototipo del wizard →
-        </Link>
       </div>
     </main>
   );

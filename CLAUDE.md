@@ -181,9 +181,14 @@ el flujo real con datos de Supabase y SheetJS.
   `/dashboard`, `/cuentas`), área autenticada con nav + logout, CRUD de cuentas
   bancarias vía server actions. **Verificado en runtime** contra Supabase
   self-hosted: registro (201), login, RLS con y sin sesión, todo OK.
-- [ ] **Fase 3 — Wizard paso 1:** cargas, parsing (SheetJS), resúmenes,
-  validación de coherencia de período, plantilla Excel + importación a
-  `comprobantes`.
+- [x] **Fase 3 — Wizard paso 1:** parsing Excel/CSV (SheetJS), detección
+  heurística de columnas, resúmenes (registros/suma/rango de fechas), aviso de
+  coherencia de período, plantilla Excel descargable + importación a
+  `comprobantes` (server action + RLS), fuente de internos (archivo /
+  comprobantes / sistema[próximamente]). Wizard movido al área protegida.
+  Funciones puras con tests (normalización fechas/montos, detección,
+  coherencia). **Nota Fase 7:** cargar SheetJS con `dynamic import` (el wizard
+  pesa ~147 kB) y revisar el aviso de seguridad de `xlsx@0.18.5`.
 - [ ] **Fase 4 — Wizard paso 2:** detección de columnas, vista previa, memoria
   de mapeos, normalización canónica.
 - [ ] **Fase 5 — Wizard paso 3 + backend:** `/api/conciliacion/iniciar`,
