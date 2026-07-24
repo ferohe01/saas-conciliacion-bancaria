@@ -175,8 +175,12 @@ el flujo real con datos de Supabase y SheetJS.
 - [x] **Fase 1 — Fundaciones:** Next.js + TS estricto + Tailwind, clientes
   Supabase (anon/server/admin), migraciones + RLS, contrato zod, `.env.example`,
   Vitest, este `CLAUDE.md`.
-- [ ] **Fase 2 — Auth + empresa + cuentas:** registro/login, creación de
-  empresa + membresía, middleware de protección, CRUD de cuentas bancarias.
+- [x] **Fase 2 — Auth + empresa + cuentas:** registro/login (Supabase Auth
+  email+password), registro server-side que crea empresa + membresía admin con
+  `service_role` (rollback si falla), middleware de protección (rutas
+  `/dashboard`, `/cuentas`), área autenticada con nav + logout, CRUD de cuentas
+  bancarias vía server actions. **Pendiente de probar en runtime** hasta
+  conectar las keys de Supabase.
 - [ ] **Fase 3 — Wizard paso 1:** cargas, parsing (SheetJS), resúmenes,
   validación de coherencia de período, plantilla Excel + importación a
   `comprobantes`.

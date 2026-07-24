@@ -30,12 +30,26 @@ export default function Home() {
         </p>
       </div>
 
-      <Link
-        href="/wizard"
-        className="inline-flex w-fit items-center rounded-xl bg-neutral-900 px-6 py-3 font-medium text-white transition-colors hover:bg-neutral-800"
-      >
-        Ver prototipo del wizard →
-      </Link>
+      <div className="flex flex-wrap gap-3">
+        <Link
+          href="/registro"
+          className="inline-flex w-fit items-center rounded-xl bg-neutral-900 px-6 py-3 font-medium text-white transition-colors hover:bg-neutral-800"
+        >
+          Crear cuenta
+        </Link>
+        <Link
+          href="/login"
+          className="inline-flex w-fit items-center rounded-xl border border-neutral-300 px-6 py-3 font-medium text-neutral-800 transition-colors hover:bg-neutral-50"
+        >
+          Ingresar
+        </Link>
+        <Link
+          href="/wizard"
+          className="inline-flex w-fit items-center rounded-xl border border-neutral-300 px-6 py-3 font-medium text-neutral-800 transition-colors hover:bg-neutral-50"
+        >
+          Ver prototipo del wizard →
+        </Link>
+      </div>
     </main>
   );
 }
