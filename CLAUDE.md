@@ -196,8 +196,14 @@ el flujo real con datos de Supabase y SheetJS.
   del contrato (`RegistroInterno[]` / `MovimientoBancario[]`) con la convención
   de signos única. Fuente "comprobantes" → filas canónicas desde la tabla.
   Tests de normalización canónica + integración con el contrato.
-- [ ] **Fase 5 — Wizard paso 3 + backend:** `/api/conciliacion/iniciar`,
-  contrato webhook, idempotencia, mock de n8n, progreso con Realtime.
+- [x] **Fase 5 — Wizard paso 3 + backend:** `POST /api/conciliacion/iniciar`
+  (auth, validación zod del contrato, genera `job_id`, inserta el job,
+  idempotencia por cuenta+período con estado activo, dispara mock o webhook real
+  según `N8N_MOCK`, compara conteos). Mock de n8n (`lib/n8n/mock.ts`) con matcher
+  exacto/difuso/IA que actualiza el job por fases. Callback protegido por token
+  (`/api/webhooks/resultado-conciliacion`). Pantalla `/conciliacion/[jobId]` con
+  progreso en vivo por **Supabase Realtime** (migración `0003_realtime.sql`).
+  **Requiere** aplicar `0003` en la BD para que el Realtime funcione.
 - [ ] **Fase 6 — Resultados + revisión humana:** dos paneles, etiquetas de
   método, cola de IA, conciliación manual, persistencia de decisiones,
   exportación Excel, historial.

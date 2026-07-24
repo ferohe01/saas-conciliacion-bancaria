@@ -1,6 +1,5 @@
 -- ============================================================
--- apply_all.sql — Esquema + RLS combinados (pegar en SQL Editor)
--- Generado a partir de supabase/migrations/0001_schema.sql y 0002_rls.sql
+-- apply_all.sql — Esquema + RLS + Realtime (pegar en SQL Editor)
 -- ============================================================
 
 -- ============================================================================
@@ -226,3 +225,18 @@ create policy comprobantes_update on public.comprobantes
 create policy comprobantes_delete on public.comprobantes
   for delete to authenticated
   using (public.es_miembro(empresa_id));
+
+
+-- ============================================================================
+-- 0003_realtime.sql — Habilita Supabase Realtime en jobs_conciliacion
+--
+-- La pantalla de progreso se suscribe a la fila del job para ver el avance por
+-- fases en vivo. RLS sigue aplicando a Realtime: cada usuario solo recibe los
+-- cambios de los jobs de su empresa.
+-- ============================================================================
+
+alter publication supabase_realtime add table public.jobs_conciliacion;
+
+-- REPLICA IDENTITY FULL para que los payloads de UPDATE incluyan todas las
+-- columnas (necesario para leer `resultado`/`fase_actual` en el cliente).
+alter table public.jobs_conciliacion replica identity full;

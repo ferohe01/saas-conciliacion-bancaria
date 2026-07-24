@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { Stepper, type PasoWizard } from "./Stepper";
 import { UploadZone, type ArchivoResumen } from "./UploadZone";
@@ -12,6 +13,7 @@ import { mesesRecientes } from "@/lib/periodo";
 import { procesarArchivo, type ArchivoProcesado } from "@/lib/parsing/procesar";
 import { validarCoherencia } from "@/lib/parsing/coherencia";
 import { formatearPEN, formatearFecha } from "@/lib/parsing/resumen";
+import { normalizarMonto } from "@/lib/normalizacion/monto";
 import type { MapeoColumnas } from "@/lib/parsing/deteccion";
 import {
   normalizarInternos,
@@ -111,6 +113,7 @@ function resumenParaZona(p: ArchivoProcesado, moneda: string): ArchivoResumen {
 }
 
 export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
+  const router = useRouter();
   const [paso, setPaso] = useState<PasoWizard>(1);
 
   const [periodoValor, setPeriodoValor] = useState(
@@ -266,6 +269,42 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
       setInternosCanon(internosOut);
       setBancariosCanon(bancariosOut);
       setPaso(3);
+    });
+  }
+
+  const puedeIniciar =
+    internosCanon.length > 0 && bancariosCanon.length > 0 && Boolean(cuentaId);
+
+  function iniciarConciliacion() {
+    setError(null);
+    const saldoLibrosNum = normalizarMonto(saldoLibros);
+    if (saldoLibrosNum == null) {
+      setError("Ingresa un saldo según libros válido en el Paso 1.");
+      return;
+    }
+    startTransition(async () => {
+      const res = await fetch("/api/conciliacion/iniciar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cuenta_id: cuentaId,
+          periodo: { desde: periodo.desde, hasta: periodo.hasta },
+          saldos: {
+            saldo_libros_final: saldoLibrosNum,
+            saldo_extracto_inicial: normalizarMonto(saldoExtIni),
+            saldo_extracto_final: normalizarMonto(saldoExtFin),
+          },
+          registros_internos: internosCanon,
+          movimientos_bancarios: bancariosCanon,
+        }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(data.error ?? "No se pudo iniciar la conciliación.");
+        return;
+      }
+      const data = (await res.json()) as { job_id: string };
+      router.push(`/conciliacion/${data.job_id}`);
     });
   }
 
@@ -597,10 +636,17 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
               </dl>
             </div>
 
-            <p className="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-700">
-              Todo listo para conciliar. El envío a n8n y la pantalla de progreso
-              en vivo se conectan en la Fase 5.
-            </p>
+            {!puedeIniciar && bancariosCanon.length === 0 && (
+              <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                No hay movimientos bancarios para conciliar (¿el extracto es un
+                PDF? En el MVP usa Excel/CSV).
+              </p>
+            )}
+            {error && (
+              <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+                {error}
+              </p>
+            )}
           </div>
 
           <div className="mt-8 flex items-center justify-between gap-4">
@@ -613,10 +659,11 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
             </button>
             <button
               type="button"
-              disabled
-              className="rounded-xl bg-neutral-900 px-6 py-3 font-medium text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+              disabled={!puedeIniciar || procesando}
+              onClick={iniciarConciliacion}
+              className="rounded-xl bg-neutral-900 px-6 py-3 font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
             >
-              Iniciar conciliación
+              {procesando ? "Iniciando…" : "Iniciar conciliación"}
             </button>
           </div>
         </>
