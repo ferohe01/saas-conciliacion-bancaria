@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function Home() {
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center gap-6 px-6 py-16">
@@ -27,6 +29,13 @@ export default function Home() {
           siguientes fases.
         </p>
       </div>
+
+      <Link
+        href="/wizard"
+        className="inline-flex w-fit items-center rounded-xl bg-neutral-900 px-6 py-3 font-medium text-white transition-colors hover:bg-neutral-800"
+      >
+        Ver prototipo del wizard →
+      </Link>
     </main>
   );
 }

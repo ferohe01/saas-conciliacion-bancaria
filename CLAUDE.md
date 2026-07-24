@@ -142,9 +142,33 @@ Esquemas exactos: `src/lib/contract/payload.ts` y `resultado.ts`.
 ## Fuera de alcance del MVP
 
 Equipos/roles/invitaciones/SSO · facturación y pagos · pgvector/semántica ·
-OCR y XML UBL de facturas · PDF de extractos · integraciones ERP/bancos/Open
-Banking · tablas normalizadas de transacciones/matches (el JSONB del job basta)
-· el motor de conciliación (vive en n8n).
+OCR y XML UBL de facturas · integraciones ERP/bancos/Open Banking · tablas
+normalizadas de transacciones/matches (el JSONB del job basta) · el motor de
+conciliación (vive en n8n).
+
+### Decisiones que se apartan del spec original
+
+- **PDF de extractos:** el spec lo dejaba fuera del MVP, pero por decisión del
+  producto la UI **sí acepta PDF** desde ya (además de Excel/CSV). El
+  *procesamiento* real del PDF se resolverá en n8n; la interfaz solo lo carga y
+  lo envía normalizado. Mantener el selector preparado para ello.
+
+## Diseño / lenguaje visual
+
+Referencia: `interfaz.jpg` (mockup del Paso 1) — es la dirección de diseño para
+toda la app. Tokens: tarjeta blanca `rounded-3xl` con borde neutral y sombra
+suave sobre fondo `neutral-100`; acento **azul** (`blue-600`) para el paso
+activo; **verde/emerald** para estados de éxito (archivo cargado); botón
+primario **negro** (`neutral-900`); zonas de carga con borde punteado y
+arrastrar-y-soltar; mucho espacio en blanco, tono simple y amable (el usuario no
+es contador). Componentes reutilizables en `src/components/wizard/`
+(`Stepper`, `UploadZone`, íconos SVG inline).
+
+### Prototipo visual (temporal)
+
+Ruta `/wizard` → `src/components/wizard/Paso1CargarDatos.tsx`. Reproduce el
+mockup con interacción local (sin backend ni parsing). En la Fase 3 pasa a ser
+el flujo real con datos de Supabase y SheetJS.
 
 ## Estado por fases
 
