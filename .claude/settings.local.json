@@ -10,7 +10,14 @@
       "Bash(git add *)",
       "Bash(git -c 'user.name=Claude Code' -c user.email=noreply@anthropic.com commit -q -m ' *)",
       "Bash(curl -s -o /dev/null -w \"home %{http_code}\\\\n\" http://localhost:3000/)",
-      "Bash(curl -s -o /dev/null -w \"wizard %{http_code}\\\\n\" http://localhost:3000/wizard)"
+      "Bash(curl -s -o /dev/null -w \"wizard %{http_code}\\\\n\" http://localhost:3000/wizard)",
+      "Bash(echo \"== /auth/v1/health ==\")",
+      "Bash(curl -s -m 15 -o - -w '\\\\n[http %{http_code}]\\\\n' http://supabase-supabase-e53a81-95-111-245-187.sslip.io/auth/v1/health)",
+      "Bash(echo \"== /rest/v1/ \\(con apikey\\) ==\")",
+      "Bash(curl -s -m 15 -o /dev/null -w '[http %{http_code}]\\\\n' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODQ5MjQ5MjYsImV4cCI6MTg5MzQ1NjAwMCwicm9sZSI6ImFub24iLCJpc3MiOiJzdXBhYmFzZSJ9.W4qiD3Hiz8wLUBrlO3kORxG_upQ10o6cUhQuX7Vunxg' http://supabase-supabase-e53a81-95-111-245-187.sslip.io/rest/v1/)",
+      "Bash(curl -s -m 15 -o /dev/null -w 'delete user -> %{http_code}\\\\n' -X DELETE http://supabase-supabase-e53a81-95-111-245-187.sslip.io/auth/v1/admin/users/667bf1ec-aba7-41f1-a50f-49c0dde53355 -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODQ5MjQ5MjYsImV4cCI6MTg5MzQ1NjAwMCwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlzcyI6InN1cGFiYXNlIn0.rc8b0gJ2XuIMY5DicCFuxs1m2_jjlXWZ9mtFnnzgF78' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODQ5MjQ5MjYsImV4cCI6MTg5MzQ1NjAwMCwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlzcyI6InN1cGFiYXNlIn0.rc8b0gJ2XuIMY5DicCFuxs1m2_jjlXWZ9mtFnnzgF78')",
+      "Bash(echo \"verificar \\(users con ese email debe estar vacío\\):\")",
+      "Bash(curl -s -m 15 http://supabase-supabase-e53a81-95-111-245-187.sslip.io/auth/v1/admin/users?filter=smoke_1784927194@test.local -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODQ5MjQ5MjYsImV4cCI6MTg5MzQ1NjAwMCwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlzcyI6InN1cGFiYXNlIn0.rc8b0gJ2XuIMY5DicCFuxs1m2_jjlXWZ9mtFnnzgF78' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODQ5MjQ5MjYsImV4cCI6MTg5MzQ1NjAwMCwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlzcyI6InN1cGFiYXNlIn0.rc8b0gJ2XuIMY5DicCFuxs1m2_jjlXWZ9mtFnnzgF78')"
     ]
   }
 }

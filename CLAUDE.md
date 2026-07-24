@@ -179,8 +179,8 @@ el flujo real con datos de Supabase y SheetJS.
   email+password), registro server-side que crea empresa + membresía admin con
   `service_role` (rollback si falla), middleware de protección (rutas
   `/dashboard`, `/cuentas`), área autenticada con nav + logout, CRUD de cuentas
-  bancarias vía server actions. **Pendiente de probar en runtime** hasta
-  conectar las keys de Supabase.
+  bancarias vía server actions. **Verificado en runtime** contra Supabase
+  self-hosted: registro (201), login, RLS con y sin sesión, todo OK.
 - [ ] **Fase 3 — Wizard paso 1:** cargas, parsing (SheetJS), resúmenes,
   validación de coherencia de período, plantilla Excel + importación a
   `comprobantes`.
