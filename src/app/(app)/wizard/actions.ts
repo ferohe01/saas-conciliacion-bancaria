@@ -4,6 +4,8 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getEmpresaActual } from "@/lib/auth";
 import { FechaISO } from "@/lib/contract/primitives";
+import type { MapeoColumnas } from "@/lib/parsing/deteccion";
+import type { RegistroInterno } from "@/lib/contract/payload";
 
 /**
  * Importación de comprobantes desde la plantilla Excel (§6.4). El cliente ya
@@ -64,4 +66,70 @@ export async function importarComprobantes(
   }
 
   return { ok: true, insertados: registros.length };
+}
+
+/**
+ * Memoria de formatos: guarda el mapeo de columnas confirmado en
+ * `cuentas_bancarias.mapeo_columnas` bajo las claves `extracto` e `internos`,
+ * para autoaplicarlo la próxima vez con los mismos encabezados.
+ */
+export async function guardarMapeoCuenta(
+  cuentaId: string,
+  mapeos: { internos?: MapeoColumnas; extracto?: MapeoColumnas },
+): Promise<{ ok: boolean }> {
+  const supabase = await createClient();
+  // Merge con lo existente (RLS asegura que la cuenta sea de la empresa).
+  const { data: actual } = await supabase
+    .from("cuentas_bancarias")
+    .select("mapeo_columnas")
+    .eq("id", cuentaId)
+    .maybeSingle();
+
+  const previo = (actual?.mapeo_columnas ?? {}) as Record<string, unknown>;
+  const nuevo = {
+    ...previo,
+    ...(mapeos.internos ? { internos: mapeos.internos } : {}),
+    ...(mapeos.extracto ? { extracto: mapeos.extracto } : {}),
+  };
+
+  const { error } = await supabase
+    .from("cuentas_bancarias")
+    .update({ mapeo_columnas: nuevo })
+    .eq("id", cuentaId);
+
+  return { ok: !error };
+}
+
+/**
+ * Registros internos desde la tabla `comprobantes` para el período, ya en forma
+ * canónica RegistroInterno (fuente "Usar mis comprobantes registrados").
+ */
+export async function getComprobantesCanonicos(
+  desde: string,
+  hasta: string,
+): Promise<RegistroInterno[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("comprobantes")
+    .select(
+      "id, fecha, monto, tipo, serie_numero, ruc_contraparte, razon_social_contraparte, descripcion",
+    )
+    .gte("fecha", desde)
+    .lte("fecha", hasta)
+    .order("fecha", { ascending: true });
+
+  const filas = data ?? [];
+  return filas.map((c, i) => {
+    const tipo = c.tipo === "pago" ? "pago" : "cobranza";
+    const monto = Math.abs(Number(c.monto ?? 0));
+    return {
+      id_interno: `REG-${String(i + 1).padStart(4, "0")}`,
+      fecha: String(c.fecha),
+      monto: tipo === "pago" ? -monto : monto,
+      tipo,
+      referencia: c.serie_numero ?? null,
+      contraparte: c.razon_social_contraparte ?? null,
+      descripcion: c.descripcion ?? null,
+    };
+  });
 }

@@ -189,8 +189,13 @@ el flujo real con datos de Supabase y SheetJS.
   Funciones puras con tests (normalización fechas/montos, detección,
   coherencia). **Nota Fase 7:** cargar SheetJS con `dynamic import` (el wizard
   pesa ~147 kB) y revisar el aviso de seguridad de `xlsx@0.18.5`.
-- [ ] **Fase 4 — Wizard paso 2:** detección de columnas, vista previa, memoria
-  de mapeos, normalización canónica.
+- [x] **Fase 4 — Wizard paso 2:** wizard multi-paso (contenedor con estado
+  compartido, Pasos 1→2→3), mapeo editable por dropdowns con vista previa
+  interpretada en vivo, memoria de formatos en `cuentas_bancarias.mapeo_columnas`
+  (autoaplica si los encabezados coinciden), normalización canónica a las formas
+  del contrato (`RegistroInterno[]` / `MovimientoBancario[]`) con la convención
+  de signos única. Fuente "comprobantes" → filas canónicas desde la tabla.
+  Tests de normalización canónica + integración con el contrato.
 - [ ] **Fase 5 — Wizard paso 3 + backend:** `/api/conciliacion/iniciar`,
   contrato webhook, idempotencia, mock de n8n, progreso con Realtime.
 - [ ] **Fase 6 — Resultados + revisión humana:** dos paneles, etiquetas de
