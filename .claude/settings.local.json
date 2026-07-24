@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(git --version)",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(npm audit *)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(git -c 'user.name=Claude Code' -c user.email=noreply@anthropic.com commit -q -m ' *)"
+    ]
+  }
+}

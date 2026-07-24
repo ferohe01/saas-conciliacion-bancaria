@@ -1,0 +1,181 @@
+# CLAUDE.md — Conciliación Bancaria (SaaS para PyMEs · Perú)
+
+Guía para agentes y desarrolladores que trabajen en este repo. Léela antes de
+tocar código.
+
+## Qué es esto
+
+Interfaz web + backend delgado + base de datos para un SaaS de **conciliación
+bancaria asistida por IA** dirigido a PyMEs peruanas. El usuario típico **no es
+contador de profesión**: la UI es guiada, en español (es-PE), con lenguaje
+simple.
+
+**El motor de conciliación NO vive aquí.** Corre como flujos de **n8n**
+externos, invocados por webhook. Este proyecto implementa la interfaz, un
+backend delgado y el esquema Supabase.
+
+## Principio arquitectónico rector
+
+> **La interfaz orquesta, normaliza y presenta; n8n procesa.**
+
+- Todo procesamiento pesado / con IA / de duración variable se delega a n8n con
+  el patrón asíncrono (ver "Contrato con n8n").
+- La interfaz hace el **parsing y mapeo de columnas** de los archivos y envía al
+  webhook **datos normalizados en JSON, nunca archivos crudos**.
+- **Lo que el usuario confirma en pantalla es exactamente lo que viaja al
+  webhook.**
+- El **frontend NUNCA** llama a los webhooks de n8n ni conoce keys
+  privilegiadas. Siempre pasa por el backend propio.
+
+### Las 4 capas de conciliación (contexto; corren en n8n)
+
+1. Match exacto (monto + ID de pago).
+2. Matching difuso/heurístico con tolerancias.
+3. IA con score de confianza que **propone** matches.
+4. Revisión humana en la interfaz.
+
+La IA nunca concilia sola por debajo del `umbral_confianza_auto`.
+
+## Stack
+
+- **Frontend:** Next.js (App Router) + TypeScript **estricto** + Tailwind CSS v4.
+- **Backend:** API Routes de Next.js (backend delgado). El backend es
+  obligatorio entre el frontend y n8n / `service_role`.
+- **Datos/Auth/Storage/Realtime:** Supabase (Postgres + RLS + Auth + Storage +
+  Realtime).
+- **Procesamiento pesado:** n8n externo (webhook con token compartido). n8n
+  escribe resultados directo en Supabase usando `service_role`.
+- **Parsing de archivos:** SheetJS (`xlsx`) — se añade en la fase del wizard.
+
+## Estructura del repo
+
+```
+src/
+  app/                     Rutas (App Router). layout, page, (auth), wizard, api...
+  lib/
+    supabase/
+      client.ts            Cliente navegador (anon). Protegido por RLS.
+      server.ts            Cliente servidor (anon + sesión por cookies).
+      admin.ts             Cliente service_role. SOLO servidor. Salta RLS.
+    contract/              ⭐ Backbone: contrato compartido con n8n (zod).
+      primitives.ts        Fecha ISO, monto, confianza.
+      enums.ts             Literales canónicos (estados, métodos, tipos).
+      config.ts            Tolerancias por request + defaults.
+      payload.ts           JSON de ENTRADA hacia n8n (§7.2).
+      resultado.ts         Estructura de `resultado` desde n8n (§7.3).
+      index.ts             Re-exports.
+supabase/
+  migrations/
+    0001_schema.sql        Tablas.
+    0002_rls.sql           Row Level Security (helper es_miembro + políticas).
+tests/                     Vitest (unit).
+```
+
+## Convenciones (obligatorias)
+
+- **TypeScript estricto** (`strict`, `noUncheckedIndexedAccess`). Sin `any`
+  salvo justificación.
+- **Idioma/formatos:** UI en español (es-PE), moneda PEN (S/) por defecto.
+  Fechas: **dd/mm/yyyy en pantalla**, **ISO 8601 (YYYY-MM-DD) en
+  almacenamiento y transporte**.
+- **Convención de signos ÚNICA en todo el sistema:** abonos/entradas
+  **positivos**, cargos/salidas **negativos**. Se aplica al normalizar en el
+  wizard y nunca se reinterpreta después.
+- **Contrato con n8n:** toda I/O del webhook se valida con los esquemas zod de
+  `src/lib/contract`. Ni el frontend ni n8n redefinen esas formas.
+- **BD:** snake_case, `uuid` por defecto `gen_random_uuid()`, timestamps
+  `timestamptz`.
+- **Commits pequeños por fase.** Actualizar este archivo cuando cambien
+  decisiones de arquitectura.
+- Mensajes de error orientados al usuario: qué pasó y qué hacer.
+
+## Seguridad (no negociable)
+
+- El frontend nunca conoce `N8N_WEBHOOK_URL`/`N8N_WEBHOOK_TOKEN` ni
+  `SUPABASE_SERVICE_ROLE_KEY`.
+- `service_role` **solo en servidor** (`src/lib/supabase/admin.ts`, protegido
+  por `import "server-only"`). El cliente usa `anon` + RLS.
+- RLS habilitado en **todas** las tablas desde la primera migración. La key
+  `anon` jamás permite acceso cruzado entre empresas.
+- Webhooks (salida a n8n y callback de entrada) protegidos por token secreto en
+  header; rechazar requests sin token.
+- Validar y sanear **todo** payload entrante en el backend con zod.
+
+### Variables de entorno (ver `.env.example`)
+
+| Variable | Ámbito | Uso |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | público | Cliente Supabase |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | público | Cliente Supabase (anon + RLS) |
+| `SUPABASE_SERVICE_ROLE_KEY` | **servidor** | Escrituras del sistema (salta RLS) |
+| `N8N_WEBHOOK_URL` | **servidor** | Disparar flujo de conciliación |
+| `N8N_WEBHOOK_TOKEN` | **servidor** | Autenticación del webhook |
+| `N8N_MOCK` | servidor | `true` → simulador local de n8n (desarrollo) |
+| `NEXT_PUBLIC_APP_URL` | público | Construir `callback_url` |
+
+## Contrato con n8n (patrón asíncrono)
+
+1. Frontend confirma (paso 3) → `POST /api/conciliacion/iniciar` (backend).
+2. Backend autentica, valida el payload (zod), genera `job_id`, inserta el job
+   (`estado='pendiente'`, `payload_entrada`) y **recién entonces** hace `POST`
+   al webhook de n8n con el token.
+3. n8n responde de inmediato: `{ status:"accepted", job_id, registros_recibidos,
+   movimientos_recibidos }`. El backend compara conteos enviados vs. recibidos;
+   si difieren → job a `error`.
+4. n8n actualiza `estado='procesando'` y `fase_actual` conforme avanza
+   (escribe directo en Supabase con `service_role`).
+5. Al terminar: escribe `resultado`, `estado='completado'`, `completed_at`.
+6. El frontend, suscrito por **Realtime** a la fila del job, navega a
+   resultados.
+
+- **`job_id`** lo genera el backend: llave de trazabilidad e idempotencia. No
+  crear dos jobs iguales activos.
+- Cada registro/movimiento lleva ID propio (`id_interno`, `id_movimiento`). El
+  `resultado` referencia **solo pares de IDs**; los matches soportan
+  uno-a-muchos y muchos-a-uno (arrays en ambos lados).
+- **Persistir CADA decisión humana** (aceptó/rechazó/modificó/manual) dentro de
+  `resultado`, con usuario y timestamp. Es la materia prima del futuro ciclo de
+  aprendizaje de la IA — no perder ninguna.
+
+Esquemas exactos: `src/lib/contract/payload.ts` y `resultado.ts`.
+
+## Fuera de alcance del MVP
+
+Equipos/roles/invitaciones/SSO · facturación y pagos · pgvector/semántica ·
+OCR y XML UBL de facturas · PDF de extractos · integraciones ERP/bancos/Open
+Banking · tablas normalizadas de transacciones/matches (el JSONB del job basta)
+· el motor de conciliación (vive en n8n).
+
+## Estado por fases
+
+- [x] **Fase 1 — Fundaciones:** Next.js + TS estricto + Tailwind, clientes
+  Supabase (anon/server/admin), migraciones + RLS, contrato zod, `.env.example`,
+  Vitest, este `CLAUDE.md`.
+- [ ] **Fase 2 — Auth + empresa + cuentas:** registro/login, creación de
+  empresa + membresía, middleware de protección, CRUD de cuentas bancarias.
+- [ ] **Fase 3 — Wizard paso 1:** cargas, parsing (SheetJS), resúmenes,
+  validación de coherencia de período, plantilla Excel + importación a
+  `comprobantes`.
+- [ ] **Fase 4 — Wizard paso 2:** detección de columnas, vista previa, memoria
+  de mapeos, normalización canónica.
+- [ ] **Fase 5 — Wizard paso 3 + backend:** `/api/conciliacion/iniciar`,
+  contrato webhook, idempotencia, mock de n8n, progreso con Realtime.
+- [ ] **Fase 6 — Resultados + revisión humana:** dos paneles, etiquetas de
+  método, cola de IA, conciliación manual, persistencia de decisiones,
+  exportación Excel, historial.
+- [ ] **Fase 7 — Endurecimiento:** seguridad, errores, tests, pulido UX.
+
+## Notas de arranque (Supabase)
+
+El entorno se conecta después (scaffold-only). Para levantarlo:
+`supabase link` (o `supabase start` local) → `supabase db push` para aplicar
+`supabase/migrations/`. Copiar `.env.example` a `.env.local` y rellenar keys.
+
+## Comandos
+
+```bash
+npm run dev        # desarrollo
+npm run build      # build de producción
+npm run typecheck  # tsc --noEmit
+npm run test       # vitest run
+```
