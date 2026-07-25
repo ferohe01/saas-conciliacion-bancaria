@@ -43,6 +43,10 @@ const system = [
   "",
   "Devuelve la confianza (0 a 1) y una justificación breve en español citando la",
   "evidencia (nombre coincidente, diferencia de monto, cercanía de fecha).",
+  "",
+  'Responde ÚNICAMENTE con un objeto JSON con la forma {"pares":[{"id_interno":"...",',
+  '"id_movimiento":"...","confianza":0.0,"justificacion":"..."}]}. Sin texto fuera',
+  "del JSON, sin explicaciones adicionales, sin ```.",
 ].join("\n");
 
 const user = [
@@ -99,6 +103,8 @@ return [{
     matches: prev.matches,
     pendientes_internos: internos,
     pendientes_bancarios: bancarios,
-    ia_body,
+    ia_body, // para el nodo HTTP Request (alternativa)
+    ia_system: system, // para el nodo AI Agent (systemMessage)
+    ia_user: user, // para el nodo AI Agent (prompt)
   },
 }];

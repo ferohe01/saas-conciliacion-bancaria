@@ -8,7 +8,7 @@
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "226bbbe9-38ed-4632-a231-fe3743a8d8a3",
+      "id": "6810e847-520a-489f-9072-12f75eeea16b",
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -16,7 +16,7 @@
         -320,
         300
       ],
-      "webhookId": "3f48903f-dbb4-4dd3-8330-1a87c1713541"
+      "webhookId": "41f7f7af-1661-4451-a3b3-ce902f05d748"
     },
     {
       "parameters": {
@@ -24,7 +24,7 @@
         "responseBody": "={{ { \"status\": \"accepted\", \"job_id\": $json.body.job_id, \"registros_recibidos\": ($json.body.registros_internos || []).length, \"movimientos_recibidos\": ($json.body.movimientos_bancarios || []).length } }}",
         "options": {}
       },
-      "id": "82a3c7e9-bbdc-4e3f-b3da-4858091f7df4",
+      "id": "17957f44-b654-47db-b60f-811be66e77c0",
       "name": "Responder aceptado",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
@@ -38,7 +38,7 @@
         "mode": "runOnceForAllItems",
         "jsCode": "// ── Capa 1: Conciliación EXACTA ────────────────────────────────────────────\n// Lee el payload del Webhook (body). Match exacto = mismo monto + misma\n// referencia; respaldo por mismo monto + misma fecha. Signos ya normalizados\n// por la app (cobranza/abono +, pago/cargo −).\n\nconst src = $('Webhook').first().json;\nconst payload = src.body ?? src;\n\nconst internos = payload.registros_internos ?? [];\nconst bancarios = payload.movimientos_bancarios ?? [];\n\nconst cents = (m) => Math.round(Number(m) * 100);\nconst normRef = (r) => String(r ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');\n\nconst idxPorRef = new Map();\nconst idxPorFecha = new Map();\nconst push = (map, k, v) => {\n  if (!map.has(k)) map.set(k, []);\n  map.get(k).push(v);\n};\nbancarios.forEach((b, j) => {\n  const c = cents(b.monto);\n  const ref = normRef(b.referencia_banco);\n  if (ref) push(idxPorRef, `${c}|${ref}`, j);\n  push(idxPorFecha, `${c}|${b.fecha}`, j);\n});\n\nconst bancUsado = new Set();\nconst intUsado = new Set();\nconst matches = [];\n\nconst tomarLibre = (lista) => {\n  if (!lista) return -1;\n  for (const j of lista) if (!bancUsado.has(j)) return j;\n  return -1;\n};\nconst registrar = (i, j) => {\n  intUsado.add(i);\n  bancUsado.add(j);\n  matches.push({\n    ids_internos: [internos[i].id_interno],\n    ids_movimientos: [bancarios[j].id_movimiento],\n    metodo: 'exacta',\n    confianza: null,\n    diferencia_monto: 0,\n    categoria_diferencia: null,\n    justificacion: null,\n    estado_revision: 'auto',\n  });\n};\n\n// Pass 1: monto + referencia (ID de pago)\ninternos.forEach((it, i) => {\n  const ref = normRef(it.referencia);\n  if (!ref) return;\n  const j = tomarLibre(idxPorRef.get(`${cents(it.monto)}|${ref}`));\n  if (j !== -1) registrar(i, j);\n});\n// Pass 2: monto + fecha\ninternos.forEach((it, i) => {\n  if (intUsado.has(i)) return;\n  const j = tomarLibre(idxPorFecha.get(`${cents(it.monto)}|${it.fecha}`));\n  if (j !== -1) registrar(i, j);\n});\n\nreturn [{\n  json: {\n    job_id: payload.job_id,\n    metadata: payload.metadata,\n    config: payload.config,\n    total_internos: internos.length,\n    total_bancarios: bancarios.length,\n    matches,\n    pendientes_internos: internos.filter((_, i) => !intUsado.has(i)),\n    pendientes_bancarios: bancarios.filter((_, j) => !bancUsado.has(j)),\n  },\n}];\n"
       },
-      "id": "f7108ad5-58fc-443d-9da2-1d9b86a6a9a9",
+      "id": "a944b180-aba1-44ac-80d6-a1eda9d402c2",
       "name": "Exacta",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -52,7 +52,7 @@
         "mode": "runOnceForAllItems",
         "jsCode": "// ── Capa 2: Conciliación DIFUSA (tolerancias) ──────────────────────────────\n// Toma los pendientes de la capa exacta y concilia por cercanía de monto y\n// fecha. Diferencia de monto tolerada = max(tolerancia_monto_abs, |monto|*pct).\n// Fecha tolerada = tolerancia_dias. Detecta comisiones bancarias.\n\nconst prev = $json;\nconst { job_id, metadata, config, total_internos, total_bancarios } = prev;\nconst matches = [...prev.matches];\nconst internos = prev.pendientes_internos ?? [];\nconst bancarios = prev.pendientes_bancarios ?? [];\n\nconst tolAbs = Number(config?.tolerancia_monto_abs ?? 0);\nconst tolPct = Number(config?.tolerancia_monto_pct ?? 0);\nconst tolDias = Number(config?.tolerancia_dias ?? 0);\n\nconst dias = (a, b) => Math.abs((Date.parse(a) - Date.parse(b)) / 86400000);\n\nconst bancUsado = new Set();\nconst intUsado = new Set();\n\ninternos.forEach((it, i) => {\n  for (let j = 0; j < bancarios.length; j++) {\n    if (bancUsado.has(j)) continue;\n    const bc = bancarios[j];\n    if (Math.sign(it.monto) !== Math.sign(bc.monto)) continue;\n    const dif = Number((it.monto - bc.monto).toFixed(2));\n    const tol = Math.max(tolAbs, Math.abs(it.monto) * (tolPct / 100));\n    if (Math.abs(dif) <= tol && dias(it.fecha, bc.fecha) <= tolDias) {\n      matches.push({\n        ids_internos: [it.id_interno],\n        ids_movimientos: [bc.id_movimiento],\n        metodo: 'difusa',\n        confianza: null,\n        diferencia_monto: dif,\n        categoria_diferencia: Math.abs(dif) > 0 ? 'comision_bancaria' : null,\n        justificacion:\n          Math.abs(dif) > 0\n            ? `Diferencia de ${dif.toFixed(2)} compatible con comisión bancaria.`\n            : null,\n        estado_revision: 'auto',\n      });\n      intUsado.add(i);\n      bancUsado.add(j);\n      break;\n    }\n  }\n});\n\nreturn [{\n  json: {\n    job_id,\n    metadata,\n    config,\n    total_internos,\n    total_bancarios,\n    matches,\n    pendientes_internos: internos.filter((_, i) => !intUsado.has(i)),\n    pendientes_bancarios: bancarios.filter((_, j) => !bancUsado.has(j)),\n  },\n}];\n"
       },
-      "id": "85477d43-6081-4782-8056-8208a8ed0c87",
+      "id": "3117ad23-f5f0-4626-8508-c057e635dea9",
       "name": "Difusa",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -64,9 +64,9 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// ── IA real (1/2): Preparar prompt para el LLM ────────────────────────────\n// Toma los pendientes de la capa difusa y arma el cuerpo de la petición a la\n// API de Anthropic (Claude), con SALIDA ESTRUCTURADA (JSON garantizado).\n// Arrastra todo el estado para las capas siguientes. Nombra este nodo\n// exactamente \"Preparar IA\" (el nodo de parseo lo referencia por ese nombre).\n\nconst prev = $json;\nconst internos = prev.pendientes_internos ?? [];\nconst bancarios = prev.pendientes_bancarios ?? [];\nconst cfg = prev.config ?? {};\n\n// Compactar para el prompt (solo lo necesario).\nconst compactInt = internos.map((r) => ({\n  id: r.id_interno,\n  fecha: r.fecha,\n  monto: r.monto,\n  nombre: r.contraparte ?? r.descripcion ?? \"\",\n}));\nconst compactBanc = bancarios.map((m) => ({\n  id: m.id_movimiento,\n  fecha: m.fecha,\n  monto: m.monto,\n  glosa: m.glosa ?? \"\",\n}));\n\nconst tolIa = cfg.tolerancia_ia_monto ?? 10;\nconst tolDias = cfg.tolerancia_dias ?? 3;\n\nconst system = [\n  \"Eres un experto en conciliación bancaria peruana. Recibes registros internos\",\n  \"(cobranzas/pagos de una empresa) y movimientos bancarios que NO fueron\",\n  \"conciliados por reglas exactas ni difusas. Propón SOLO los pares que con alta\",\n  \"probabilidad corresponden a la misma transacción real.\",\n  \"\",\n  \"Reglas estrictas:\",\n  \"- Cada registro interno se empareja con UN solo movimiento bancario (1 a 1).\",\n  \"- Mismo signo: montos ambos positivos (ingresos) o ambos negativos (egresos).\",\n  `- La diferencia de monto debe ser pequeña (típicamente <= ${tolIa}; p. ej. comisiones).`,\n  `- Fechas cercanas (a lo sumo unos ${tolDias + 4} días de diferencia).`,\n  \"- Debe haber correspondencia de identidad: el nombre de la contraparte aparece\",\n  \"  (total o parcialmente) en la glosa bancaria. NO emparejes por azar.\",\n  \"- Si no hay un buen candidato, NO lo incluyas. Prefiere precisión sobre cobertura.\",\n  \"\",\n  \"Devuelve la confianza (0 a 1) y una justificación breve en español citando la\",\n  \"evidencia (nombre coincidente, diferencia de monto, cercanía de fecha).\",\n].join(\"\\n\");\n\nconst user = [\n  `Tolerancias: ${JSON.stringify(cfg)}`,\n  \"\",\n  \"Registros internos pendientes:\",\n  JSON.stringify(compactInt),\n  \"\",\n  \"Movimientos bancarios pendientes:\",\n  JSON.stringify(compactBanc),\n].join(\"\\n\");\n\n// Cuerpo completo de la petición a la API de Anthropic (Messages API).\nconst ia_body = {\n  model: \"claude-opus-4-8\",\n  max_tokens: 8000,\n  system,\n  messages: [{ role: \"user\", content: user }],\n  output_config: {\n    format: {\n      type: \"json_schema\",\n      schema: {\n        type: \"object\",\n        additionalProperties: false,\n        required: [\"pares\"],\n        properties: {\n          pares: {\n            type: \"array\",\n            items: {\n              type: \"object\",\n              additionalProperties: false,\n              required: [\"id_interno\", \"id_movimiento\", \"confianza\", \"justificacion\"],\n              properties: {\n                id_interno: { type: \"string\" },\n                id_movimiento: { type: \"string\" },\n                confianza: { type: \"number\" },\n                justificacion: { type: \"string\" },\n              },\n            },\n          },\n        },\n      },\n    },\n  },\n};\n\nreturn [{\n  json: {\n    job_id: prev.job_id,\n    metadata: prev.metadata,\n    config: prev.config,\n    total_internos: prev.total_internos,\n    total_bancarios: prev.total_bancarios,\n    matches: prev.matches,\n    pendientes_internos: internos,\n    pendientes_bancarios: bancarios,\n    ia_body,\n  },\n}];\n"
+        "jsCode": "// ── IA real (1/2): Preparar prompt para el LLM ────────────────────────────\n// Toma los pendientes de la capa difusa y arma el cuerpo de la petición a la\n// API de Anthropic (Claude), con SALIDA ESTRUCTURADA (JSON garantizado).\n// Arrastra todo el estado para las capas siguientes. Nombra este nodo\n// exactamente \"Preparar IA\" (el nodo de parseo lo referencia por ese nombre).\n\nconst prev = $json;\nconst internos = prev.pendientes_internos ?? [];\nconst bancarios = prev.pendientes_bancarios ?? [];\nconst cfg = prev.config ?? {};\n\n// Compactar para el prompt (solo lo necesario).\nconst compactInt = internos.map((r) => ({\n  id: r.id_interno,\n  fecha: r.fecha,\n  monto: r.monto,\n  nombre: r.contraparte ?? r.descripcion ?? \"\",\n}));\nconst compactBanc = bancarios.map((m) => ({\n  id: m.id_movimiento,\n  fecha: m.fecha,\n  monto: m.monto,\n  glosa: m.glosa ?? \"\",\n}));\n\nconst tolIa = cfg.tolerancia_ia_monto ?? 10;\nconst tolDias = cfg.tolerancia_dias ?? 3;\n\nconst system = [\n  \"Eres un experto en conciliación bancaria peruana. Recibes registros internos\",\n  \"(cobranzas/pagos de una empresa) y movimientos bancarios que NO fueron\",\n  \"conciliados por reglas exactas ni difusas. Propón SOLO los pares que con alta\",\n  \"probabilidad corresponden a la misma transacción real.\",\n  \"\",\n  \"Reglas estrictas:\",\n  \"- Cada registro interno se empareja con UN solo movimiento bancario (1 a 1).\",\n  \"- Mismo signo: montos ambos positivos (ingresos) o ambos negativos (egresos).\",\n  `- La diferencia de monto debe ser pequeña (típicamente <= ${tolIa}; p. ej. comisiones).`,\n  `- Fechas cercanas (a lo sumo unos ${tolDias + 4} días de diferencia).`,\n  \"- Debe haber correspondencia de identidad: el nombre de la contraparte aparece\",\n  \"  (total o parcialmente) en la glosa bancaria. NO emparejes por azar.\",\n  \"- Si no hay un buen candidato, NO lo incluyas. Prefiere precisión sobre cobertura.\",\n  \"\",\n  \"Devuelve la confianza (0 a 1) y una justificación breve en español citando la\",\n  \"evidencia (nombre coincidente, diferencia de monto, cercanía de fecha).\",\n  \"\",\n  'Responde ÚNICAMENTE con un objeto JSON con la forma {\"pares\":[{\"id_interno\":\"...\",',\n  '\"id_movimiento\":\"...\",\"confianza\":0.0,\"justificacion\":\"...\"}]}. Sin texto fuera',\n  \"del JSON, sin explicaciones adicionales, sin ```.\",\n].join(\"\\n\");\n\nconst user = [\n  `Tolerancias: ${JSON.stringify(cfg)}`,\n  \"\",\n  \"Registros internos pendientes:\",\n  JSON.stringify(compactInt),\n  \"\",\n  \"Movimientos bancarios pendientes:\",\n  JSON.stringify(compactBanc),\n].join(\"\\n\");\n\n// Cuerpo completo de la petición a la API de Anthropic (Messages API).\nconst ia_body = {\n  model: \"claude-opus-4-8\",\n  max_tokens: 8000,\n  system,\n  messages: [{ role: \"user\", content: user }],\n  output_config: {\n    format: {\n      type: \"json_schema\",\n      schema: {\n        type: \"object\",\n        additionalProperties: false,\n        required: [\"pares\"],\n        properties: {\n          pares: {\n            type: \"array\",\n            items: {\n              type: \"object\",\n              additionalProperties: false,\n              required: [\"id_interno\", \"id_movimiento\", \"confianza\", \"justificacion\"],\n              properties: {\n                id_interno: { type: \"string\" },\n                id_movimiento: { type: \"string\" },\n                confianza: { type: \"number\" },\n                justificacion: { type: \"string\" },\n              },\n            },\n          },\n        },\n      },\n    },\n  },\n};\n\nreturn [{\n  json: {\n    job_id: prev.job_id,\n    metadata: prev.metadata,\n    config: prev.config,\n    total_internos: prev.total_internos,\n    total_bancarios: prev.total_bancarios,\n    matches: prev.matches,\n    pendientes_internos: internos,\n    pendientes_bancarios: bancarios,\n    ia_body, // para el nodo HTTP Request (alternativa)\n    ia_system: system, // para el nodo AI Agent (systemMessage)\n    ia_user: user, // para el nodo AI Agent (prompt)\n  },\n}];\n"
       },
-      "id": "0ca7101b-7b44-4e5d-ae73-3501c08ffada",
+      "id": "b112e6cf-13fa-4f76-b492-2e0752566db0",
       "name": "Preparar IA",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -77,37 +77,39 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://api.anthropic.com/v1/messages",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-api-key",
-              "value": "PEGA_AQUI_TU_ANTHROPIC_API_KEY"
-            },
-            {
-              "name": "anthropic-version",
-              "value": "2023-06-01"
-            },
-            {
-              "name": "content-type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.ia_body) }}",
-        "options": {}
+        "promptType": "define",
+        "text": "={{ $json.ia_user }}",
+        "options": {
+          "systemMessage": "={{ $json.ia_system }}"
+        }
       },
-      "id": "2486d19b-d38a-4189-9fec-e965adb24410",
-      "name": "LLM Anthropic",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "id": "1cfca860-3a69-4006-8026-251f7534b160",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
       "position": [
-        680,
+        700,
         300
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "id",
+          "value": "claude-opus-4-8"
+        },
+        "options": {
+          "maxTokensToSample": 8000
+        }
+      },
+      "id": "91cfa410-d103-43e7-970d-ee96e5cc8156",
+      "name": "Anthropic Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        660,
+        500
       ]
     },
     {
@@ -115,12 +117,12 @@
         "mode": "runOnceForAllItems",
         "jsCode": "// ── IA real (2/2): Parsear respuesta del LLM y fusionar ───────────────────\n// Lee la respuesta de Claude, valida los pares contra los IDs realmente\n// pendientes (descarta cualquier ID inventado), fuerza 1-a-1 y mismo signo,\n// y los agrega a `matches` como método \"ia\". Mantiene la MISMA forma de salida\n// que la capa heurística, así el nodo \"Ensamblar resultado\" no cambia.\n\n// El estado (pendientes, matches, config...) viene del nodo \"Preparar IA\".\nconst prep = $('Preparar IA').first().json;\nconst matches = [...(prep.matches ?? [])];\nconst internos = prep.pendientes_internos ?? [];\nconst bancarios = prep.pendientes_bancarios ?? [];\nconst umbral = Number(prep.config?.umbral_confianza_auto ?? 0.95);\n\n// Extraer el texto JSON de la respuesta de Anthropic (bloque type=text).\nconst resp = $json;\nlet texto = \"\";\nif (Array.isArray(resp.content)) {\n  const tb = resp.content.find((b) => b && b.type === \"text\");\n  texto = tb ? tb.text : \"\";\n} else {\n  texto =\n    resp.text ??\n    resp.output ??\n    (resp.choices && resp.choices[0] && resp.choices[0].message\n      ? resp.choices[0].message.content\n      : \"\") ??\n    \"\";\n}\ntexto = String(texto)\n  .trim()\n  .replace(/^```json/i, \"\")\n  .replace(/^```/, \"\")\n  .replace(/```$/, \"\")\n  .trim();\n\nlet pares = [];\ntry {\n  const parsed = JSON.parse(texto);\n  pares = Array.isArray(parsed) ? parsed : parsed.pares ?? [];\n} catch (e) {\n  pares = [];\n}\n\nconst intById = new Map(internos.map((r, i) => [r.id_interno, i]));\nconst bancById = new Map(bancarios.map((m, j) => [m.id_movimiento, j]));\nconst intUsado = new Set();\nconst bancUsado = new Set();\n\nfor (const p of pares) {\n  const idI = p.id_interno;\n  const idB = p.id_movimiento;\n  if (!intById.has(idI) || !bancById.has(idB)) continue; // ignora IDs inventados\n  const i = intById.get(idI);\n  const j = bancById.get(idB);\n  if (intUsado.has(i) || bancUsado.has(j)) continue; // 1 a 1\n  const it = internos[i];\n  const bc = bancarios[j];\n  if (Math.sign(it.monto) !== Math.sign(bc.monto)) continue; // seguridad de signo\n  const confianza = Math.max(0, Math.min(1, Number(p.confianza ?? 0.8)));\n  matches.push({\n    ids_internos: [idI],\n    ids_movimientos: [idB],\n    metodo: \"ia\",\n    confianza,\n    diferencia_monto: Number((it.monto - bc.monto).toFixed(2)),\n    categoria_diferencia: \"requiere_revision\",\n    justificacion: p.justificacion ?? \"Sugerido por IA.\",\n    estado_revision: confianza >= umbral ? \"auto\" : \"pendiente\",\n  });\n  intUsado.add(i);\n  bancUsado.add(j);\n}\n\nreturn [{\n  json: {\n    job_id: prep.job_id,\n    metadata: prep.metadata,\n    config: prep.config,\n    total_internos: prep.total_internos,\n    total_bancarios: prep.total_bancarios,\n    matches,\n    pendientes_internos: internos.filter((_, i) => !intUsado.has(i)),\n    pendientes_bancarios: bancarios.filter((_, j) => !bancUsado.has(j)),\n  },\n}];\n"
       },
-      "id": "9230e5aa-0266-4e35-8d0f-5abad8caa504",
+      "id": "b17041b5-172f-48b9-9ee1-1404d17f388c",
       "name": "Parsear IA",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        880,
+        920,
         300
       ]
     },
@@ -129,7 +131,7 @@
         "mode": "runOnceForAllItems",
         "jsCode": "// ── Ensamblar RESULTADO (§7.3) + cuadre de saldos ──────────────────────────\n// Junta todos los matches, arma resumen y no_conciliados desde los pendientes,\n// y calcula el cuadre bancario a partir de los saldos. Devuelve el cuerpo listo\n// para el UPDATE a Supabase (un solo campo JSONB `resultado`).\n\nconst prev = $json;\nconst { job_id, metadata, total_internos, total_bancarios } = prev;\nconst matches = prev.matches ?? [];\nconst pendInt = prev.pendientes_internos ?? [];\nconst pendBanc = prev.pendientes_bancarios ?? [];\n\nconst cuenta = (m) => matches.filter((x) => x.metodo === m).length;\n\nconst no_conciliados = [\n  ...pendInt.map((it) => ({\n    id: it.id_interno,\n    lado: 'interno',\n    categoria: 'requiere_investigacion',\n    sugerencia: it.monto >= 0 ? 'Posible depósito en tránsito' : 'Posible cheque no cobrado',\n  })),\n  ...pendBanc.map((bc) => ({\n    id: bc.id_movimiento,\n    lado: 'bancario',\n    categoria: 'ajuste_requerido',\n    sugerencia: 'Cargo/abono no registrado en libros',\n  })),\n];\n\n// Cuadre bancario.\nconst saldos = metadata?.saldos ?? {};\nconst r2 = (n) => Number(Number(n).toFixed(2));\nconst saldoExtractoFinal = Number(saldos.saldo_extracto_final ?? 0);\nconst depositosEnTransito = pendInt.reduce((a, it) => a + (it.monto > 0 ? it.monto : 0), 0);\nconst chequesNoCobrados = pendInt.reduce((a, it) => a + (it.monto < 0 ? it.monto : 0), 0);\nconst cargosNoRegistrados = pendBanc.reduce((a, bc) => a + (bc.monto < 0 ? bc.monto : 0), 0);\nconst saldoBancoAjustado =\n  saldoExtractoFinal + depositosEnTransito + chequesNoCobrados + cargosNoRegistrados;\nconst saldoLibros = Number(saldos.saldo_libros_final ?? 0);\n\nconst resultado = {\n  resumen: {\n    total_internos,\n    total_bancarios,\n    conciliados_exactos: cuenta('exacta'),\n    conciliados_difusos: cuenta('difusa'),\n    sugeridos_ia: cuenta('ia'),\n    sin_conciliar_internos: pendInt.length,\n    sin_conciliar_bancarios: pendBanc.length,\n  },\n  matches,\n  no_conciliados,\n  cuadre: {\n    saldo_extracto_final: r2(saldoExtractoFinal),\n    depositos_en_transito: r2(depositosEnTransito),\n    cheques_no_cobrados: r2(chequesNoCobrados),\n    cargos_no_registrados: r2(cargosNoRegistrados),\n    saldo_banco_ajustado: r2(saldoBancoAjustado),\n    saldo_libros_final: r2(saldoLibros),\n    diferencia: r2(saldoBancoAjustado - saldoLibros),\n  },\n};\n\nreturn [{\n  json: {\n    job_id,\n    resultado_update: {\n      estado: 'completado',\n      fase_actual: 'ia',\n      resultado,\n      completed_at: new Date().toISOString(),\n    },\n  },\n}];\n"
       },
-      "id": "f750d1d7-56fa-467b-bd91-60349db367bb",
+      "id": "e41f2c76-d05d-42a8-94a9-b26f10798a07",
       "name": "Ensamblar resultado",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -164,7 +166,7 @@
         "jsonBody": "={{ JSON.stringify($json.resultado_update) }}",
         "options": {}
       },
-      "id": "4171d84d-548c-45ea-a194-6ec7a525874c",
+      "id": "70bc9591-a512-4d98-8d3e-f1d3bccb4ba8",
       "name": "Actualizar Supabase",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -223,14 +225,14 @@
       "main": [
         [
           {
-            "node": "LLM Anthropic",
+            "node": "AI Agent",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "LLM Anthropic": {
+    "AI Agent": {
       "main": [
         [
           {
@@ -258,6 +260,17 @@
           {
             "node": "Actualizar Supabase",
             "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
             "index": 0
           }
         ]

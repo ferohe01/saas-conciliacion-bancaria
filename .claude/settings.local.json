@@ -35,7 +35,9 @@
       "Bash(node \"C:/Users/FRODRI~1/AppData/Local/Temp/claude/bundled-skills/2.1.212/7952fee20da238226f869ec2f5850271/dataviz/scripts/validate_palette.js\" \"009E73,0072B2,CC79A7,D55E00\" --mode light)",
       "Skill(claude-api)",
       "Bash(node n8n/build_workflow_ia.mjs)",
-      "Bash(node -e \"const w=require\\('./n8n/workflow_conciliacion_ia.json'\\); console.log\\('nodos:', w.nodes.map\\(n=>n.name\\).join\\(' -> '\\)\\); console.log\\('bytes:', JSON.stringify\\(w\\).length\\)\")"
+      "Bash(node -e \"const w=require\\('./n8n/workflow_conciliacion_ia.json'\\); console.log\\('nodos:', w.nodes.map\\(n=>n.name\\).join\\(' -> '\\)\\); console.log\\('bytes:', JSON.stringify\\(w\\).length\\)\")",
+      "WebFetch(domain:docs.n8n.io)",
+      "Bash(node -e ' *)"
     ]
   }
 }

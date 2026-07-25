@@ -8,7 +8,6 @@ const read = (f) => readFileSync(join(here, f), "utf8");
 
 const SUPABASE_URL = "http://supabase-supabase-e53a81-95-111-245-187.sslip.io";
 const SERVICE_ROLE_PLACEHOLDER = "PEGA_AQUI_TU_SERVICE_ROLE";
-const ANTHROPIC_KEY_PLACEHOLDER = "PEGA_AQUI_TU_ANTHROPIC_API_KEY";
 
 const code = (name, jsFile, x, y) => ({
   parameters: { mode: "runOnceForAllItems", jsCode: read(jsFile) },
@@ -51,29 +50,34 @@ const nodes = [
   code("Difusa", "02_difusa.js", 280, 300),
   code("Preparar IA", "ia_llm_01_preparar.js", 480, 300),
   {
+    // Nodo AI Agent: usa el system + prompt que arma "Preparar IA". El modelo
+    // se conecta como sub-nodo (Anthropic Chat Model) por ai_languageModel.
     parameters: {
-      method: "POST",
-      url: "https://api.anthropic.com/v1/messages",
-      sendHeaders: true,
-      headerParameters: {
-        parameters: [
-          { name: "x-api-key", value: ANTHROPIC_KEY_PLACEHOLDER },
-          { name: "anthropic-version", value: "2023-06-01" },
-          { name: "content-type", value: "application/json" },
-        ],
-      },
-      sendBody: true,
-      specifyBody: "json",
-      jsonBody: "={{ JSON.stringify($json.ia_body) }}",
-      options: {},
+      promptType: "define",
+      text: "={{ $json.ia_user }}",
+      options: { systemMessage: "={{ $json.ia_system }}" },
     },
     id: randomUUID(),
-    name: "LLM Anthropic",
-    type: "n8n-nodes-base.httpRequest",
-    typeVersion: 4.2,
-    position: [680, 300],
+    name: "AI Agent",
+    type: "@n8n/n8n-nodes-langchain.agent",
+    typeVersion: 1.7,
+    position: [700, 300],
   },
-  code("Parsear IA", "ia_llm_02_parsear.js", 880, 300),
+  {
+    // Sub-nodo de modelo. Tras importar: selecciona tu credencial de Anthropic
+    // y confirma el modelo (claude-opus-4-8). Se enlaza al AI Agent por
+    // ai_languageModel (no por main).
+    parameters: {
+      model: { __rl: true, mode: "id", value: "claude-opus-4-8" },
+      options: { maxTokensToSample: 8000 },
+    },
+    id: randomUUID(),
+    name: "Anthropic Chat Model",
+    type: "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+    typeVersion: 1.3,
+    position: [660, 500],
+  },
+  code("Parsear IA", "ia_llm_02_parsear.js", 920, 300),
   code("Ensamblar resultado", "04_ensamblar.js", 1080, 300),
   {
     parameters: {
@@ -109,10 +113,16 @@ const connections = {
   ...conn("Responder aceptado", "Exacta"),
   ...conn("Exacta", "Difusa"),
   ...conn("Difusa", "Preparar IA"),
-  ...conn("Preparar IA", "LLM Anthropic"),
-  ...conn("LLM Anthropic", "Parsear IA"),
+  ...conn("Preparar IA", "AI Agent"),
+  ...conn("AI Agent", "Parsear IA"),
   ...conn("Parsear IA", "Ensamblar resultado"),
   ...conn("Ensamblar resultado", "Actualizar Supabase"),
+  // El modelo se conecta al Agent por el enlace especial ai_languageModel.
+  "Anthropic Chat Model": {
+    ai_languageModel: [
+      [{ node: "AI Agent", type: "ai_languageModel", index: 0 }],
+    ],
+  },
 };
 
 const workflow = {
