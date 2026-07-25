@@ -53,10 +53,30 @@ export function ProgresoConciliacion({ jobInicial }: { jobInicial: JobRow }) {
     };
   }, [jobInicial.id]);
 
-  // Al completarse, recarga el server component para pasar a la vista de
-  // revisión completa (ResultadoReview).
+  // Respaldo por polling: el flujo real de n8n hace UNA sola actualización al
+  // final; si el navegador pierde ese único evento de Realtime (caída del
+  // WebSocket durante la espera), Realtime no lo reenvía. El polling garantiza
+  // que la pantalla transicione igual. Se detiene al completar o fallar.
   useEffect(() => {
-    if (job.estado === "completado") router.refresh();
+    if (job.estado === "completado" || job.estado === "error") return;
+    const supabase = createClient();
+    const intervalo = setInterval(async () => {
+      const { data } = await supabase
+        .from("jobs_conciliacion")
+        .select(
+          "id, estado, fase_actual, resultado, error_detalle, periodo_desde, periodo_hasta",
+        )
+        .eq("id", jobInicial.id)
+        .maybeSingle();
+      if (data) setJob(data as JobRow);
+    }, 3000);
+    return () => clearInterval(intervalo);
+  }, [job.estado, jobInicial.id]);
+
+  // Al completarse (o fallar), recarga el server component para pasar a la
+  // vista de revisión completa (ResultadoReview).
+  useEffect(() => {
+    if (job.estado === "completado" || job.estado === "error") router.refresh();
   }, [job.estado, router]);
 
   const resumen = job.resultado?.resumen;

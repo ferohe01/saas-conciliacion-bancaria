@@ -37,7 +37,9 @@
       "Bash(node n8n/build_workflow_ia.mjs)",
       "Bash(node -e \"const w=require\\('./n8n/workflow_conciliacion_ia.json'\\); console.log\\('nodos:', w.nodes.map\\(n=>n.name\\).join\\(' -> '\\)\\); console.log\\('bytes:', JSON.stringify\\(w\\).length\\)\")",
       "WebFetch(domain:docs.n8n.io)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(curl -s -m 15 -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODQ5MjQ5MjYsImV4cCI6MTg5MzQ1NjAwMCwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlzcyI6InN1cGFiYXNlIn0.rc8b0gJ2XuIMY5DicCFuxs1m2_jjlXWZ9mtFnnzgF78' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODQ5MjQ5MjYsImV4cCI6MTg5MzQ1NjAwMCwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlzcyI6InN1cGFiYXNlIn0.rc8b0gJ2XuIMY5DicCFuxs1m2_jjlXWZ9mtFnnzgF78' 'http://supabase-supabase-e53a81-95-111-245-187.sslip.io/rest/v1/jobs_conciliacion?id=eq.rec-2026-07-1e51d1&select=id,estado,fase_actual,error_detalle,completed_at,resultado')",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\).on\\('end',\\(\\)=>{const a=JSON.parse\\(d\\);const j=a[0];if\\(!j\\){console.log\\('job no encontrado'\\);return;}console.log\\('estado:',j.estado\\);console.log\\('fase_actual:',j.fase_actual\\);console.log\\('completed_at:',j.completed_at\\);console.log\\('error_detalle:',j.error_detalle\\);console.log\\('tiene resultado:',!!j.resultado\\);if\\(j.resultado&&j.resultado.resumen\\)console.log\\('resumen:',JSON.stringify\\(j.resultado.resumen\\)\\);}\\)\")"
     ]
   }
 }
