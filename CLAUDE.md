@@ -204,9 +204,14 @@ el flujo real con datos de Supabase y SheetJS.
   (`/api/webhooks/resultado-conciliacion`). Pantalla `/conciliacion/[jobId]` con
   progreso en vivo por **Supabase Realtime** (migración `0003_realtime.sql`).
   **Requiere** aplicar `0003` en la BD para que el Realtime funcione.
-- [ ] **Fase 6 — Resultados + revisión humana:** dos paneles, etiquetas de
-  método, cola de IA, conciliación manual, persistencia de decisiones,
-  exportación Excel, historial.
+- [x] **Fase 6 — Resultados + revisión humana:** vista de dos paneles con
+  resaltado de pares, etiqueta de método siempre visible (Exacta/Difusa/IA%/
+  Manual), cola de sugerencias de IA (Aceptar/Rechazar), conciliación manual por
+  selección, **persistencia de cada decisión** en `resultado` (usuario +
+  timestamp, en `matches[].decisiones`), exportación a Excel (3 hojas),
+  historial en `/conciliacion`. Ajuste de saldo: autodetección del saldo final
+  del extracto (columna saldo/balance) + fallback inicial+suma + aviso.
+  `MetodoMatch` extendido con `manual`.
 - [ ] **Fase 7 — Endurecimiento:** seguridad, errores, tests, pulido UX.
 
 ## Notas de arranque (Supabase)

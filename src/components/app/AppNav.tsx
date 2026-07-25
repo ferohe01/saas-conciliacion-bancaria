@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 const ENLACES = [
   { href: "/dashboard", label: "Inicio" },
   { href: "/wizard", label: "Nueva conciliación" },
+  { href: "/conciliacion", label: "Historial" },
   { href: "/cuentas", label: "Cuentas" },
 ];
 

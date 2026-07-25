@@ -24,8 +24,9 @@ export type TipoRegistroInterno = z.infer<typeof TipoRegistroInterno>;
 export const TipoMovimientoBancario = z.enum(["abono", "cargo"]);
 export type TipoMovimientoBancario = z.infer<typeof TipoMovimientoBancario>;
 
-// Método por el que se logró un match.
-export const MetodoMatch = z.enum(["exacta", "difusa", "ia"]);
+// Método por el que se logró un match. "manual" = creado por una persona en la
+// revisión (los otros los propone el motor de n8n).
+export const MetodoMatch = z.enum(["exacta", "difusa", "ia", "manual"]);
 export type MetodoMatch = z.infer<typeof MetodoMatch>;
 
 // Estado de revisión humana de un match.

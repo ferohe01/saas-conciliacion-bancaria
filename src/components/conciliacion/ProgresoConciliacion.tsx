@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { formatearPEN } from "@/lib/parsing/resumen";
 import type { EstadoJob } from "@/lib/contract/enums";
@@ -30,6 +31,7 @@ function ordenFase(f: string | null): number {
 
 export function ProgresoConciliacion({ jobInicial }: { jobInicial: JobRow }) {
   const [job, setJob] = useState<JobRow>(jobInicial);
+  const router = useRouter();
 
   useEffect(() => {
     const supabase = createClient();
@@ -50,6 +52,12 @@ export function ProgresoConciliacion({ jobInicial }: { jobInicial: JobRow }) {
       void supabase.removeChannel(canal);
     };
   }, [jobInicial.id]);
+
+  // Al completarse, recarga el server component para pasar a la vista de
+  // revisión completa (ResultadoReview).
+  useEffect(() => {
+    if (job.estado === "completado") router.refresh();
+  }, [job.estado, router]);
 
   const resumen = job.resultado?.resumen;
   const cuadre = job.resultado?.cuadre;

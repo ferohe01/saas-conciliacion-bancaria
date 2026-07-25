@@ -11,6 +11,7 @@ import { CandadoIcon, ChevronIcon } from "./icons";
 import { createClient } from "@/lib/supabase/client";
 import { mesesRecientes } from "@/lib/periodo";
 import { procesarArchivo, type ArchivoProcesado } from "@/lib/parsing/procesar";
+import { detectarSaldoFinal } from "@/lib/parsing/saldo";
 import { validarCoherencia } from "@/lib/parsing/coherencia";
 import { formatearPEN, formatearFecha } from "@/lib/parsing/resumen";
 import { normalizarMonto } from "@/lib/normalizacion/monto";
@@ -205,6 +206,11 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
     setMapeoExtracto(
       elegirMapeo(proc.mapeo, cuenta?.mapeo_columnas?.extracto, proc.headers),
     );
+    // Autodetectar el saldo final del extracto (columna de saldo/balance).
+    if (proc.formato === "excel" && saldoExtFin.trim() === "") {
+      const detectado = detectarSaldoFinal(proc.headers, proc.filas);
+      if (detectado != null) setSaldoExtFin(String(detectado));
+    }
   }
 
   const usaArchivoInternos = fuente === "archivo";
@@ -274,6 +280,8 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
 
   const puedeIniciar =
     internosCanon.length > 0 && bancariosCanon.length > 0 && Boolean(cuentaId);
+  const saldoExtractoFaltante =
+    normalizarMonto(saldoExtFin) == null && normalizarMonto(saldoExtIni) == null;
 
   function iniciarConciliacion() {
     setError(null);
@@ -282,6 +290,15 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
       setError("Ingresa un saldo según libros válido en el Paso 1.");
       return;
     }
+    // Saldo extracto final: el ingresado, o (si falta) inicial + suma de
+    // movimientos bancarios del período.
+    const extIni = normalizarMonto(saldoExtIni);
+    let extFin = normalizarMonto(saldoExtFin);
+    if (extFin == null && extIni != null) {
+      const sumaMov = bancariosCanon.reduce((a, m) => a + m.monto, 0);
+      extFin = Number((extIni + sumaMov).toFixed(2));
+    }
+
     startTransition(async () => {
       const res = await fetch("/api/conciliacion/iniciar", {
         method: "POST",
@@ -291,8 +308,8 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
           periodo: { desde: periodo.desde, hasta: periodo.hasta },
           saldos: {
             saldo_libros_final: saldoLibrosNum,
-            saldo_extracto_inicial: normalizarMonto(saldoExtIni),
-            saldo_extracto_final: normalizarMonto(saldoExtFin),
+            saldo_extracto_inicial: extIni,
+            saldo_extracto_final: extFin,
           },
           registros_internos: internosCanon,
           movimientos_bancarios: bancariosCanon,
@@ -485,13 +502,16 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
             </label>
             <label className="block">
               <span className="mb-1.5 block text-sm font-medium text-neutral-700">
-                Saldo extracto final
+                Saldo extracto final{" "}
+                <span className="font-normal text-neutral-400">
+                  (para el cuadre)
+                </span>
               </span>
               <input
                 inputMode="decimal"
                 value={saldoExtFin}
                 onChange={(e) => setSaldoExtFin(e.target.value)}
-                placeholder="opcional"
+                placeholder="se autodetecta si el extracto lo trae"
                 className="h-11 w-full rounded-xl border border-neutral-300 bg-white px-3 text-neutral-800 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none"
               />
             </label>
@@ -640,6 +660,13 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
               <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700">
                 No hay movimientos bancarios para conciliar (¿el extracto es un
                 PDF? En el MVP usa Excel/CSV).
+              </p>
+            )}
+            {saldoExtractoFaltante && (
+              <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                ⚠️ Sin el <strong>saldo final del extracto</strong> el cuadre no
+                balanceará. Vuelve al Paso 1 e ingrésalo (o el saldo inicial,
+                para calcularlo).
               </p>
             )}
             {error && (

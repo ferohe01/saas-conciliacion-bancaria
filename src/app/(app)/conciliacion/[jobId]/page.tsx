@@ -4,11 +4,15 @@ import {
   ProgresoConciliacion,
   type JobRow,
 } from "@/components/conciliacion/ProgresoConciliacion";
+import { ResultadoReview } from "@/components/conciliacion/ResultadoReview";
 import { formatearFecha } from "@/lib/parsing/resumen";
+import { ResultadoConciliacion } from "@/lib/contract/resultado";
+import { PayloadConciliacion } from "@/lib/contract/payload";
 
 /**
- * Pantalla de una conciliación: estado inicial del job desde el servidor (RLS)
- * + suscripción Realtime en el cliente para el progreso en vivo.
+ * Pantalla de una conciliación:
+ *  - en progreso → ProgresoConciliacion (Realtime).
+ *  - completada  → ResultadoReview (dos paneles, cola IA, manual, exportación).
  */
 export default async function ConciliacionPage({
   params,
@@ -20,28 +24,46 @@ export default async function ConciliacionPage({
   const { data } = await supabase
     .from("jobs_conciliacion")
     .select(
-      "id, estado, fase_actual, resultado, error_detalle, periodo_desde, periodo_hasta",
+      "id, estado, fase_actual, resultado, error_detalle, periodo_desde, periodo_hasta, payload_entrada",
     )
     .eq("id", jobId)
     .maybeSingle();
 
   if (!data) notFound();
-  const job = data as JobRow;
+
+  const resultadoParsed =
+    data.estado === "completado"
+      ? ResultadoConciliacion.safeParse(data.resultado)
+      : null;
+  const payloadParsed = PayloadConciliacion.safeParse(data.payload_entrada);
+
+  const mostrarReview =
+    resultadoParsed?.success && payloadParsed.success;
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto max-w-4xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-neutral-900">
           Conciliación
         </h1>
         <p className="mt-1 text-sm text-neutral-500">
-          Período {formatearFecha(job.periodo_desde)} –{" "}
-          {formatearFecha(job.periodo_hasta)} · Job{" "}
-          <span className="font-mono text-xs">{job.id}</span>
+          Período {formatearFecha(data.periodo_desde)} –{" "}
+          {formatearFecha(data.periodo_hasta)} · Job{" "}
+          <span className="font-mono text-xs">{data.id}</span>
         </p>
       </div>
 
-      <ProgresoConciliacion jobInicial={job} />
+      {mostrarReview ? (
+        <ResultadoReview
+          jobId={data.id}
+          resultado={resultadoParsed!.data}
+          internos={payloadParsed.data.registros_internos}
+          bancarios={payloadParsed.data.movimientos_bancarios}
+          moneda={payloadParsed.data.metadata.cuenta.moneda}
+        />
+      ) : (
+        <ProgresoConciliacion jobInicial={data as unknown as JobRow} />
+      )}
     </div>
   );
 }

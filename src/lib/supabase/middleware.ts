@@ -4,7 +4,12 @@ import { NextResponse, type NextRequest } from "next/server";
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
 /** Prefijos de ruta que requieren sesión iniciada. */
-const RUTAS_PROTEGIDAS = ["/dashboard", "/cuentas", "/wizard"];
+const RUTAS_PROTEGIDAS = [
+  "/dashboard",
+  "/cuentas",
+  "/wizard",
+  "/conciliacion",
+];
 
 /** Rutas públicas de autenticación (no redirigir si ya no hay sesión). */
 const RUTAS_AUTH = ["/login", "/registro"];
