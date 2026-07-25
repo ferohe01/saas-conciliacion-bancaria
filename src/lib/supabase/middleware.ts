@@ -9,6 +9,7 @@ const RUTAS_PROTEGIDAS = [
   "/cuentas",
   "/wizard",
   "/conciliacion",
+  "/reportes",
 ];
 
 /** Rutas públicas de autenticación (no redirigir si ya no hay sesión). */

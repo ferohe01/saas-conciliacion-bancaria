@@ -221,6 +221,15 @@ el flujo real con datos de Supabase y SheetJS.
   (`next`/`postcss`/`sharp`); resolver en una actualización planificada de
   Next.js para no arriesgar el MVP.
 
+### Módulos adicionales (post-MVP)
+
+- **Reportes** (`/reportes`): panel para clientes con KPIs (conciliaciones,
+  registros, % automatización, % cuadre), tendencia mensual, distribución por
+  método (paleta categórica validada para daltonismo — Okabe-Ito) y desglose
+  por banco. Filtros por año/mes/banco/cuenta (vía searchParams). Exportable a
+  Excel. Agregación pura en `src/lib/reportes.ts` (con tests). Lee los JSONB
+  `resultado` de los jobs completados.
+
 ## Notas de arranque (Supabase)
 
 El entorno se conecta después (scaffold-only). Para levantarlo:

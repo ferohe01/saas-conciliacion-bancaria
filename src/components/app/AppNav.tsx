@@ -8,6 +8,7 @@ const ENLACES = [
   { href: "/dashboard", label: "Inicio" },
   { href: "/wizard", label: "Nueva conciliación" },
   { href: "/conciliacion", label: "Historial" },
+  { href: "/reportes", label: "Reportes" },
   { href: "/cuentas", label: "Cuentas" },
 ];
 
