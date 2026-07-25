@@ -128,6 +128,13 @@ export default async function ReportesPage({
     banco !== "todos" ? " · " + banco : ""
   }`.trim();
 
+  const filtroQuery = new URLSearchParams({
+    anio: String(anio),
+    mes: sp.mes ?? "todos",
+    banco,
+    cuenta,
+  }).toString();
+
   const hayDatos = jobsDef.length > 0;
 
   return (
@@ -180,6 +187,7 @@ export default async function ReportesPage({
               mensual={mensual}
               bancos={bancosAgg}
               recientes={recientes}
+              filtroQuery={filtroQuery}
             />
           )}
         </>

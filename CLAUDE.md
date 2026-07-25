@@ -228,7 +228,11 @@ el flujo real con datos de Supabase y SheetJS.
   método (paleta categórica validada para daltonismo — Okabe-Ito) y desglose
   por banco. Filtros por año/mes/banco/cuenta (vía searchParams). Exportable a
   Excel. Agregación pura en `src/lib/reportes.ts` (con tests). Lee los JSONB
-  `resultado` de los jobs completados.
+  `resultado` de los jobs completados, **deduplicando** por período+cuenta (la
+  corrida más reciente; el historial conserva todas). Cada método de la
+  distribución **enlaza a un detalle** por registro (`/reportes/[metodo]`:
+  exacta/difusa/ia/sin-conciliar) con columnas, estado y observación, también
+  exportable — resuelve los ids de `resultado.matches` contra `payload_entrada`.
 
 ## Notas de arranque (Supabase)
 

@@ -16,6 +16,7 @@ export function ReporteVista({
   mensual,
   bancos,
   recientes,
+  filtroQuery,
 }: {
   kpis: Kpis;
   mensual: PuntoMensual[];
@@ -27,6 +28,7 @@ export function ReporteVista({
     numero: string | null;
     estado: string;
   }[];
+  filtroQuery: string;
 }) {
   return (
     <div className="space-y-6">
@@ -34,7 +36,7 @@ export function ReporteVista({
 
       <div className="grid gap-6 lg:grid-cols-2">
         <GraficoMensual datos={mensual} />
-        <DistribucionMetodos kpis={kpis} />
+        <DistribucionMetodos kpis={kpis} filtroQuery={filtroQuery} />
       </div>
 
       <TablaBancos bancos={bancos} />
@@ -120,20 +122,33 @@ function GraficoMensual({ datos }: { datos: PuntoMensual[] }) {
   );
 }
 
-// ── Distribución de métodos (barra apilada categórica + leyenda) ────────────
-function DistribucionMetodos({ kpis }: { kpis: Kpis }) {
+// ── Distribución de métodos (barra apilada categórica + leyenda con enlaces) ─
+function DistribucionMetodos({
+  kpis,
+  filtroQuery,
+}: {
+  kpis: Kpis;
+  filtroQuery: string;
+}) {
   const m = kpis.metodos;
   const total = m.exacta + m.difusa + m.ia + m.sin_conciliar || 1;
   const segs = [
-    { k: "Exacta", v: m.exacta, c: COLOR_METODO.exacta },
-    { k: "Difusa", v: m.difusa, c: COLOR_METODO.difusa },
-    { k: "Sugerido IA", v: m.ia, c: COLOR_METODO.ia },
-    { k: "Sin conciliar", v: m.sin_conciliar, c: COLOR_METODO.sin_conciliar },
+    { k: "Exacta", slug: "exacta", v: m.exacta, c: COLOR_METODO.exacta },
+    { k: "Difusa", slug: "difusa", v: m.difusa, c: COLOR_METODO.difusa },
+    { k: "Sugerido IA", slug: "ia", v: m.ia, c: COLOR_METODO.ia },
+    {
+      k: "Sin conciliar",
+      slug: "sin-conciliar",
+      v: m.sin_conciliar,
+      c: COLOR_METODO.sin_conciliar,
+    },
   ];
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white p-5">
       <p className="font-semibold text-neutral-900">Cómo se concilió</p>
-      <p className="text-xs text-neutral-500">Distribución por método</p>
+      <p className="text-xs text-neutral-500">
+        Distribución por método · haz clic para ver el detalle
+      </p>
 
       <div className="mt-4 flex h-4 w-full gap-0.5 overflow-hidden rounded-full">
         {segs.map(
@@ -148,23 +163,33 @@ function DistribucionMetodos({ kpis }: { kpis: Kpis }) {
         )}
       </div>
 
-      <ul className="mt-4 space-y-2">
+      <ul className="mt-4 space-y-1">
         {segs.map((s) => (
-          <li key={s.k} className="flex items-center justify-between text-sm">
-            <span className="flex items-center gap-2">
-              <span
-                className="h-3 w-3 rounded-sm"
-                style={{ background: s.c }}
-                aria-hidden
-              />
-              <span className="text-neutral-700">{s.k}</span>
-            </span>
-            <span className="tabular-nums text-neutral-900">
-              {NUM(s.v)}{" "}
-              <span className="text-neutral-400">
-                ({Math.round((s.v / total) * 100)}%)
+          <li key={s.k}>
+            <Link
+              href={`/reportes/${s.slug}?${filtroQuery}`}
+              className="group flex items-center justify-between rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-neutral-50"
+            >
+              <span className="flex items-center gap-2">
+                <span
+                  className="h-3 w-3 rounded-sm"
+                  style={{ background: s.c }}
+                  aria-hidden
+                />
+                <span className="text-neutral-700 group-hover:text-blue-600">
+                  {s.k}
+                </span>
               </span>
-            </span>
+              <span className="flex items-center gap-2 tabular-nums text-neutral-900">
+                {NUM(s.v)}{" "}
+                <span className="text-neutral-400">
+                  ({Math.round((s.v / total) * 100)}%)
+                </span>
+                <span className="text-neutral-300 group-hover:text-blue-600">
+                  →
+                </span>
+              </span>
+            </Link>
           </li>
         ))}
       </ul>
