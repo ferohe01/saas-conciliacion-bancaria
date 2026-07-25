@@ -169,7 +169,9 @@ export function ResultadoReview({
           <p className="font-semibold text-neutral-900">Cuadre de saldos</p>
           <button
             type="button"
-            onClick={() => exportarResultadoExcel(resultado, jobId)}
+            onClick={() => {
+              void exportarResultadoExcel(resultado, jobId);
+            }}
             className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
           >
             Exportar a Excel
@@ -415,6 +417,7 @@ function Panel({
                   type="checkbox"
                   checked={seleccionado}
                   readOnly
+                  aria-label={`Seleccionar ${it.id} para conciliar manualmente`}
                   className="h-4 w-4 shrink-0 rounded border-neutral-300"
                 />
               )}

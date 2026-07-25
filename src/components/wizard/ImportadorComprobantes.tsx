@@ -116,7 +116,9 @@ export function ImportadorComprobantes({
       <div className="mt-3 flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={descargarPlantilla}
+          onClick={() => {
+            void descargarPlantilla();
+          }}
           className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
         >
           Descargar plantilla

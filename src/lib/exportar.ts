@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import type { WorkBook } from "xlsx";
 import type { ResultadoConciliacion } from "@/lib/contract/resultado";
 
 /**
@@ -6,11 +6,15 @@ import type { ResultadoConciliacion } from "@/lib/contract/resultado";
  *   1. Cuadre   — cuadre de saldos en formato contable.
  *   2. Matches  — pares conciliados con método y estado.
  *   3. Sin conciliar — partidas pendientes por categoría.
+ *
+ * SheetJS se carga con import() dinámico (fuera del bundle inicial).
  */
-export function exportarResultadoExcel(
+
+/** Construye el workbook (separado de la descarga para poder testearlo). */
+export async function construirWorkbookResultado(
   resultado: ResultadoConciliacion,
-  jobId: string,
-): void {
+): Promise<WorkBook> {
+  const XLSX = await import("xlsx");
   const wb = XLSX.utils.book_new();
 
   // Hoja 1: Cuadre
@@ -24,11 +28,7 @@ export function exportarResultadoExcel(
     { Concepto: "Saldo según libros", Monto: c.saldo_libros_final },
     { Concepto: "Diferencia", Monto: c.diferencia },
   ];
-  XLSX.utils.book_append_sheet(
-    wb,
-    XLSX.utils.json_to_sheet(cuadre),
-    "Cuadre",
-  );
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cuadre), "Cuadre");
 
   // Hoja 2: Matches
   const matches = resultado.matches.map((m) => ({
@@ -64,5 +64,15 @@ export function exportarResultadoExcel(
     "Sin conciliar",
   );
 
+  return wb;
+}
+
+/** Descarga el resultado como archivo Excel en el navegador. */
+export async function exportarResultadoExcel(
+  resultado: ResultadoConciliacion,
+  jobId: string,
+): Promise<void> {
+  const XLSX = await import("xlsx");
+  const wb = await construirWorkbookResultado(resultado);
   XLSX.writeFile(wb, `conciliacion_${jobId}.xlsx`);
 }

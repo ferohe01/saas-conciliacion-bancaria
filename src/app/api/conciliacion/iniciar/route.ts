@@ -29,13 +29,15 @@ import {
  * El frontend nunca contacta a n8n ni conoce el token.
  */
 
+const MAX_FILAS = 20000;
+
 const IniciarReq = z.object({
   cuenta_id: z.string().uuid(),
   periodo: Periodo,
   saldos: Saldos,
   config: ConfigConciliacion.partial().optional(),
-  registros_internos: z.array(RegistroInterno).min(1),
-  movimientos_bancarios: z.array(MovimientoBancario).min(1),
+  registros_internos: z.array(RegistroInterno).min(1).max(MAX_FILAS),
+  movimientos_bancarios: z.array(MovimientoBancario).min(1).max(MAX_FILAS),
 });
 
 export async function POST(request: Request) {

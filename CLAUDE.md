@@ -212,7 +212,14 @@ el flujo real con datos de Supabase y SheetJS.
   historial en `/conciliacion`. Ajuste de saldo: autodetección del saldo final
   del extracto (columna saldo/balance) + fallback inicial+suma + aviso.
   `MetodoMatch` extendido con `manual`.
-- [ ] **Fase 7 — Endurecimiento:** seguridad, errores, tests, pulido UX.
+- [x] **Fase 7 — Endurecimiento:** `xlsx` a 0.20.3 (parcheado, vía CDN de
+  SheetJS) y cargado con **import() dinámico** (bundle wizard 320→182 kB,
+  resultados 316→177 kB). `vitest` a v4 (elimina la vuln crítica + cadena
+  vite/esbuild). Límite de tamaño de arrays en el endpoint. Manejo de errores de
+  red en el wizard. Accesibilidad (aria-labels). Tests de saldo y export
+  (35 total). **Pendiente aceptado:** 3 vulns high build-time de Next
+  (`next`/`postcss`/`sharp`); resolver en una actualización planificada de
+  Next.js para no arriesgar el MVP.
 
 ## Notas de arranque (Supabase)
 

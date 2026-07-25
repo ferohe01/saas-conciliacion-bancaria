@@ -1,9 +1,9 @@
-import * as XLSX from "xlsx";
-
 /**
  * Lectura de archivos Excel/CSV en el navegador con SheetJS. Devuelve los
  * encabezados y las filas como objetos { encabezado: valor }. El parsing de PDF
  * NO se hace aquí (se delega a n8n en una fase futura).
+ *
+ * SheetJS se carga con import() dinámico para que no pese en el bundle inicial.
  */
 
 export type ArchivoLeido = {
@@ -23,6 +23,7 @@ export function esPDF(nombre: string): boolean {
 }
 
 export async function leerArchivo(file: File): Promise<ArchivoLeido> {
+  const XLSX = await import("xlsx");
   const buffer = await file.arrayBuffer();
   const wb = XLSX.read(buffer, { type: "array", cellDates: true });
   const nombreHoja = wb.SheetNames[0];

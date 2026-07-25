@@ -22,7 +22,12 @@
       "Bash(rmdir \"src/app/wizard\")",
       "Bash(rm -f \"src/components/wizard/Paso1CargarDatos.tsx\")",
       "Bash(node n8n/build_workflow.mjs)",
-      "Bash(node -e \"const w=require\\('./n8n/workflow_conciliacion.json'\\); console.log\\('nodos:', w.nodes.map\\(n=>n.name\\).join\\(' -> '\\)\\); console.log\\('JSON válido, bytes:', JSON.stringify\\(w\\).length\\)\")"
+      "Bash(node -e \"const w=require\\('./n8n/workflow_conciliacion.json'\\); console.log\\('nodos:', w.nodes.map\\(n=>n.name\\).join\\(' -> '\\)\\); console.log\\('JSON válido, bytes:', JSON.stringify\\(w\\).length\\)\")",
+      "Bash(node -e \"console.log\\('xlsx version:', require\\('xlsx/package.json'\\).version\\)\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\).on\\('end',\\(\\)=>{const a=JSON.parse\\(d\\);for\\(const [k,v] of Object.entries\\(a.vulnerabilities\\)\\){console.log\\(v.severity.padEnd\\(9\\), k, '\\(dev:'+ \\(v.nodes?.[0]?.includes\\('dev'\\)||'?'\\) +'\\)'\\);}}\\)\")",
+      "Bash(node -e \"console.log\\(require\\('vitest/package.json'\\).version\\)\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\).on\\('end',\\(\\)=>{const a=JSON.parse\\(d\\);const v=a.vulnerabilities||{};console.log\\(Object.keys\\(v\\).length? Object.entries\\(v\\).map\\(\\([k,x]\\)=>x.severity+' '+k\\).join\\('\\\\n'\\) : 'ninguna'\\);}\\)\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\).on\\('end',\\(\\)=>{const a=JSON.parse\\(d\\);const v=a.vulnerabilities||{};console.log\\('total:', Object.keys\\(v\\).length\\);console.log\\(Object.entries\\(v\\).map\\(\\([k,x]\\)=>x.severity+' '+k\\).join\\('\\\\n'\\)\\);}\\)\")"
     ]
   }
 }

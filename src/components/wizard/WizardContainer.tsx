@@ -300,28 +300,36 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
     }
 
     startTransition(async () => {
-      const res = await fetch("/api/conciliacion/iniciar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cuenta_id: cuentaId,
-          periodo: { desde: periodo.desde, hasta: periodo.hasta },
-          saldos: {
-            saldo_libros_final: saldoLibrosNum,
-            saldo_extracto_inicial: extIni,
-            saldo_extracto_final: extFin,
-          },
-          registros_internos: internosCanon,
-          movimientos_bancarios: bancariosCanon,
-        }),
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(data.error ?? "No se pudo iniciar la conciliación.");
-        return;
+      try {
+        const res = await fetch("/api/conciliacion/iniciar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            cuenta_id: cuentaId,
+            periodo: { desde: periodo.desde, hasta: periodo.hasta },
+            saldos: {
+              saldo_libros_final: saldoLibrosNum,
+              saldo_extracto_inicial: extIni,
+              saldo_extracto_final: extFin,
+            },
+            registros_internos: internosCanon,
+            movimientos_bancarios: bancariosCanon,
+          }),
+        });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          setError(data.error ?? "No se pudo iniciar la conciliación.");
+          return;
+        }
+        const data = (await res.json()) as { job_id: string };
+        router.push(`/conciliacion/${data.job_id}`);
+      } catch {
+        setError(
+          "No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.",
+        );
       }
-      const data = (await res.json()) as { job_id: string };
-      router.push(`/conciliacion/${data.job_id}`);
     });
   }
 
