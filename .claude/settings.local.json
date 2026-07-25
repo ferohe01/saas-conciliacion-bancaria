@@ -20,7 +20,9 @@
       "Bash(curl -s -m 15 http://supabase-supabase-e53a81-95-111-245-187.sslip.io/auth/v1/admin/users?filter=smoke_1784927194@test.local -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODQ5MjQ5MjYsImV4cCI6MTg5MzQ1NjAwMCwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlzcyI6InN1cGFiYXNlIn0.rc8b0gJ2XuIMY5DicCFuxs1m2_jjlXWZ9mtFnnzgF78' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODQ5MjQ5MjYsImV4cCI6MTg5MzQ1NjAwMCwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlzcyI6InN1cGFiYXNlIn0.rc8b0gJ2XuIMY5DicCFuxs1m2_jjlXWZ9mtFnnzgF78')",
       "Bash(rm -f \"src/app/wizard/page.tsx\")",
       "Bash(rmdir \"src/app/wizard\")",
-      "Bash(rm -f \"src/components/wizard/Paso1CargarDatos.tsx\")"
+      "Bash(rm -f \"src/components/wizard/Paso1CargarDatos.tsx\")",
+      "Bash(node n8n/build_workflow.mjs)",
+      "Bash(node -e \"const w=require\\('./n8n/workflow_conciliacion.json'\\); console.log\\('nodos:', w.nodes.map\\(n=>n.name\\).join\\(' -> '\\)\\); console.log\\('JSON válido, bytes:', JSON.stringify\\(w\\).length\\)\")"
     ]
   }
 }
