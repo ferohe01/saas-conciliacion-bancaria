@@ -48,7 +48,7 @@ const nodes = [
   },
   code("Exacta", "01_exacta.js", 80, 300),
   code("Difusa", "02_difusa.js", 280, 300),
-  code("Preparar IA", "ia_llm_01_preparar.js", 480, 300),
+  code("Candidatos IA", "ia_llm_01_candidatos.js", 480, 300),
   {
     // Nodo AI Agent: usa el system + prompt que arma "Preparar IA". El modelo
     // se conecta como sub-nodo (Anthropic Chat Model) por ai_languageModel.
@@ -112,8 +112,8 @@ const connections = {
   ...conn("Webhook", "Responder aceptado"),
   ...conn("Responder aceptado", "Exacta"),
   ...conn("Exacta", "Difusa"),
-  ...conn("Difusa", "Preparar IA"),
-  ...conn("Preparar IA", "AI Agent"),
+  ...conn("Difusa", "Candidatos IA"),
+  ...conn("Candidatos IA", "AI Agent"),
   ...conn("AI Agent", "Parsear IA"),
   ...conn("Parsear IA", "Ensamblar resultado"),
   ...conn("Ensamblar resultado", "Actualizar Supabase"),

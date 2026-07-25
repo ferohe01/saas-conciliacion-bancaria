@@ -1,17 +1,30 @@
-// ── IA real (2/2): Parsear respuesta del LLM y fusionar ───────────────────
-// Lee la respuesta de Claude, valida los pares contra los IDs realmente
-// pendientes (descarta cualquier ID inventado), fuerza 1-a-1 y mismo signo,
-// y los agrega a `matches` como método "ia". Mantiene la MISMA forma de salida
-// que la capa heurística, así el nodo "Ensamblar resultado" no cambia.
+// ── IA (2/2): Adjudicar la respuesta del LLM validando contra candidatos ───
+// El LLM eligió, por registro interno, un candidato de la shortlist (o
+// "ninguno"). Aquí se valida que el id elegido REALMENTE estaba entre los
+// candidatos de ese interno (anti-alucinación fuerte), se fuerza 1-a-1 y se
+// agregan como método "ia". Mantiene la misma forma de salida para "Ensamblar".
 
-// El estado (pendientes, matches, config...) viene del nodo "Preparar IA".
-const prep = $('Preparar IA').first().json;
+// El estado (shortlists, pendientes, matches, config) viene de "Candidatos IA".
+const prep = $('Candidatos IA').first().json;
 const matches = [...(prep.matches ?? [])];
 const internos = prep.pendientes_internos ?? [];
 const bancarios = prep.pendientes_bancarios ?? [];
+const shortlists = prep.shortlists ?? [];
 const umbral = Number(prep.config?.umbral_confianza_auto ?? 0.95);
 
-// Extraer el texto JSON de la respuesta de Anthropic (bloque type=text).
+// Mapa id_interno -> { candidatos válidos, categoria por movimiento }.
+const candPorInterno = new Map();
+for (const s of shortlists) {
+  const set = new Set();
+  const catPorMov = new Map();
+  for (const c of s.candidatos ?? []) {
+    set.add(c.id_movimiento);
+    catPorMov.set(c.id_movimiento, c.categoria_probable);
+  }
+  candPorInterno.set(s.id_interno, { set, catPorMov });
+}
+
+// Extraer el texto JSON de la respuesta (AI Agent -> $json.output; HTTP -> content[]).
 const resp = $json;
 let texto = "";
 if (Array.isArray(resp.content)) {
@@ -19,19 +32,15 @@ if (Array.isArray(resp.content)) {
   texto = tb ? tb.text : "";
 } else {
   texto =
-    resp.text ??
     resp.output ??
+    resp.text ??
     (resp.choices && resp.choices[0] && resp.choices[0].message
       ? resp.choices[0].message.content
       : "") ??
     "";
 }
-texto = String(texto)
-  .trim()
-  .replace(/^```json/i, "")
-  .replace(/^```/, "")
-  .replace(/```$/, "")
-  .trim();
+texto = String(texto).trim()
+  .replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
 
 let pares = [];
 try {
@@ -41,21 +50,21 @@ try {
   pares = [];
 }
 
-const intById = new Map(internos.map((r, i) => [r.id_interno, i]));
-const bancById = new Map(bancarios.map((m, j) => [m.id_movimiento, j]));
+const idxInt = new Map(internos.map((r, i) => [r.id_interno, i]));
+const idxBanc = new Map(bancarios.map((m, j) => [m.id_movimiento, j]));
 const intUsado = new Set();
 const bancUsado = new Set();
 
 for (const p of pares) {
   const idI = p.id_interno;
   const idB = p.id_movimiento;
-  if (!intById.has(idI) || !bancById.has(idB)) continue; // ignora IDs inventados
-  const i = intById.get(idI);
-  const j = bancById.get(idB);
-  if (intUsado.has(i) || bancUsado.has(j)) continue; // 1 a 1
-  const it = internos[i];
-  const bc = bancarios[j];
-  if (Math.sign(it.monto) !== Math.sign(bc.monto)) continue; // seguridad de signo
+  if (!idB || idB === "ninguno") continue;
+  const cand = candPorInterno.get(idI);
+  if (!cand || !cand.set.has(idB)) continue; // debía estar entre los candidatos
+  const i = idxInt.get(idI);
+  const j = idxBanc.get(idB);
+  if (i == null || j == null || intUsado.has(i) || bancUsado.has(j)) continue;
+  const it = internos[i], bc = bancarios[j];
   const confianza = Math.max(0, Math.min(1, Number(p.confianza ?? 0.8)));
   matches.push({
     ids_internos: [idI],
@@ -63,7 +72,7 @@ for (const p of pares) {
     metodo: "ia",
     confianza,
     diferencia_monto: Number((it.monto - bc.monto).toFixed(2)),
-    categoria_diferencia: "requiere_revision",
+    categoria_diferencia: p.categoria ?? cand.catPorMov.get(idB) ?? "requiere_investigacion",
     justificacion: p.justificacion ?? "Sugerido por IA.",
     estado_revision: confianza >= umbral ? "auto" : "pendiente",
   });

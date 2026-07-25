@@ -36,6 +36,17 @@ backend delgado y el esquema Supabase.
 
 La IA nunca concilia sola por debajo del `umbral_confianza_auto`.
 
+**Etapa de generación de candidatos (antes de la IA).** Los pendientes tras
+exacta+difusa no se le pasan crudos a la IA. Primero una etapa determinística
+(record-linkage / blocking) arma, por cada registro interno, una **shortlist
+rankeada** de los movimientos bancarios más relevantes: candidatura = mismo
+signo + diferencia de monto ≤ `tolerancia_ia_monto` + fecha en ventana + ≥1
+palabra en común (nombre); luego un **score** (similitud de nombre + cercanía de
+monto/fecha + referencia) y se conservan los **top-K**. La IA solo **adjudica**
+sobre esa shortlist (elige el mejor o "ninguno") y clasifica el tipo de
+diferencia (reason code). Lógica en `src/lib/matching/candidatos.ts` (mock) y en
+los nodos n8n `03_ia.js` (heurístico) / `ia_llm_01_candidatos.js` (LLM).
+
 ## Stack
 
 - **Frontend:** Next.js (App Router) + TypeScript **estricto** + Tailwind CSS v4.

@@ -1,6 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { palabrasComunes } from "@/lib/matching/similitud";
+import { generarCandidatos } from "@/lib/matching/candidatos";
 import type { PayloadConciliacion } from "@/lib/contract/payload";
 import type {
   ResultadoConciliacion,
@@ -28,12 +29,8 @@ function diasEntre(a: string, b: string): number {
 function conciliar(payload: PayloadConciliacion): ResultadoConciliacion {
   const { registros_internos: internos, movimientos_bancarios: bancarios } =
     payload;
-  const {
-    tolerancia_monto_abs,
-    tolerancia_dias,
-    tolerancia_ia_monto,
-    umbral_confianza_auto,
-  } = payload.config;
+  const { tolerancia_monto_abs, tolerancia_dias, umbral_confianza_auto } =
+    payload.config;
 
   const intUsados = new Set<number>();
   const bancUsados = new Set<number>();
@@ -101,56 +98,41 @@ function conciliar(payload: PayloadConciliacion): ResultadoConciliacion {
     }
   });
 
-  // 3) IA: sugiere solo con señales fuertes — monto dentro de la banda IA
-  //    (|dif| <= tolerancia_ia_monto) Y al menos 1 palabra en común entre la
-  //    contraparte y la glosa. La fecha debe estar razonablemente cerca.
-  internos.forEach((it, i) => {
-    if (intUsados.has(i)) return;
-    let mejorJ = -1;
-    let mejorComunes: string[] = [];
-    let mejorDif = Infinity;
-    for (let j = 0; j < bancarios.length; j++) {
-      if (bancUsados.has(j)) continue;
-      const bc = bancarios[j]!;
-      if (Math.sign(it.monto) !== Math.sign(bc.monto)) continue;
-      const dif = Math.abs(it.monto - bc.monto);
-      if (dif > tolerancia_ia_monto) continue;
-      if (diasEntre(it.fecha, bc.fecha) > tolerancia_dias + 4) continue;
-      const comunes = palabrasComunes(it.contraparte, bc.glosa);
-      if (comunes.length === 0) continue;
-      // Preferir más palabras en común y menor diferencia de monto.
-      if (
-        comunes.length > mejorComunes.length ||
-        (comunes.length === mejorComunes.length && dif < mejorDif)
-      ) {
-        mejorJ = j;
-        mejorComunes = comunes;
-        mejorDif = dif;
-      }
-    }
-    if (mejorJ === -1) return;
-    const bc = bancarios[mejorJ]!;
-    const dif = Number((it.monto - bc.monto).toFixed(2));
-    const cercania = 1 - Math.abs(dif) / tolerancia_ia_monto; // 0..1
-    const confianza = Math.min(
-      0.94,
-      Number(
-        (0.7 + cercania * 0.15 + Math.min(mejorComunes.length, 2) * 0.05).toFixed(2),
-      ),
-    );
+  // 3) IA (árbitro sobre candidatos): se preparan shortlists rankeadas de los
+  //    pendientes y se adjudica el mejor candidato disponible por score. En el
+  //    mock no hay LLM, así que la "adjudicación" toma el top-1 por score de
+  //    forma greedy (el flujo real de n8n usa el AI Agent con estos candidatos).
+  const idxIntById = new Map(internos.map((r, i) => [r.id_interno, i]));
+  const idxBancById = new Map(bancarios.map((m, j) => [m.id_movimiento, j]));
+  const pendInt = internos.filter((_, i) => !intUsados.has(i));
+  const pendBanc = bancarios.filter((_, j) => !bancUsados.has(j));
+
+  const shortlists = generarCandidatos(pendInt, pendBanc, payload.config);
+  const propuestas = shortlists
+    .map((s) => ({ id_interno: s.id_interno, best: s.candidatos[0]! }))
+    .filter((p) => p.best && p.best.score >= 0.4)
+    .sort((a, b) => b.best.score - a.best.score);
+
+  for (const p of propuestas) {
+    const i = idxIntById.get(p.id_interno);
+    const j = idxBancById.get(p.best.id_movimiento);
+    if (i == null || j == null || intUsados.has(i) || bancUsados.has(j)) continue;
+    const it = internos[i]!;
+    const bc = bancarios[j]!;
+    const confianza = Math.min(0.94, Math.max(0.6, p.best.score));
     matches.push({
       ids_internos: [it.id_interno],
       ids_movimientos: [bc.id_movimiento],
       metodo: "ia",
       confianza,
-      diferencia_monto: dif,
-      categoria_diferencia: "requiere_revision",
-      justificacion: `Coincidencia por nombre (${mejorComunes.join(", ")}) y monto cercano (dif. ${dif.toFixed(2)}).`,
+      diferencia_monto: Number((it.monto - bc.monto).toFixed(2)),
+      categoria_diferencia: p.best.categoria_probable,
+      justificacion: `Candidato IA: nombre (${p.best.features.palabras_comunes.join(", ")}), dif. S/ ${p.best.features.dif_abs}, ${p.best.features.dias} día(s) (score ${p.best.score}).`,
       estado_revision: confianza >= umbral_confianza_auto ? "auto" : "pendiente",
     });
     intUsados.add(i);
-    bancUsados.add(mejorJ);
-  });
+    bancUsados.add(j);
+  }
 
   // 4) No conciliados.
   const noConciliados: PartidaNoConciliada[] = [];
