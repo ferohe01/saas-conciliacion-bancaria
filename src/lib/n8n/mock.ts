@@ -65,17 +65,20 @@ function conciliar(payload: PayloadConciliacion): ResultadoConciliacion {
     }
   });
 
-  // 2) Difusos: diferencia de monto dentro de tolerancia y fecha cercana.
+  // 2) Difusos: diferencia de monto dentro de tolerancia, fecha cercana Y al
+  //    menos una palabra en común entre la contraparte y la glosa.
   internos.forEach((it, i) => {
     if (intUsados.has(i)) return;
     for (let j = 0; j < bancarios.length; j++) {
       if (bancUsados.has(j)) continue;
       const bc = bancarios[j]!;
       const dif = it.monto - bc.monto;
+      const comunes = palabrasComunes(it.contraparte, bc.glosa);
       if (
         Math.sign(it.monto) === Math.sign(bc.monto) &&
         Math.abs(dif) <= tolerancia_monto_abs &&
-        diasEntre(it.fecha, bc.fecha) <= tolerancia_dias
+        diasEntre(it.fecha, bc.fecha) <= tolerancia_dias &&
+        comunes.length >= 1
       ) {
         matches.push({
           ids_internos: [it.id_interno],
@@ -87,8 +90,8 @@ function conciliar(payload: PayloadConciliacion): ResultadoConciliacion {
             Math.abs(dif) > 0 ? "comision_bancaria" : null,
           justificacion:
             Math.abs(dif) > 0
-              ? `Diferencia de ${dif.toFixed(2)} compatible con comisión bancaria.`
-              : null,
+              ? `Coincidencia por nombre (${comunes.join(", ")}); diferencia de ${dif.toFixed(2)} compatible con comisión bancaria.`
+              : `Coincidencia por nombre (${comunes.join(", ")}).`,
           estado_revision: "auto",
         });
         intUsados.add(i);
