@@ -1,5 +1,5 @@
 -- ============================================================
--- apply_all.sql — Esquema + RLS + Realtime (pegar en SQL Editor)
+-- apply_all.sql — Esquema + RLS + Realtime + config empresa
 -- ============================================================
 
 -- ============================================================================
@@ -97,7 +97,6 @@ create table if not exists public.comprobantes (
 
 create index if not exists idx_comprobantes_empresa_fecha
   on public.comprobantes (empresa_id, fecha);
-
 
 -- ============================================================================
 -- 0002_rls.sql — Row Level Security (obligatorio desde el día uno)
@@ -226,7 +225,6 @@ create policy comprobantes_delete on public.comprobantes
   for delete to authenticated
   using (public.es_miembro(empresa_id));
 
-
 -- ============================================================================
 -- 0003_realtime.sql — Habilita Supabase Realtime en jobs_conciliacion
 --
@@ -240,3 +238,14 @@ alter publication supabase_realtime add table public.jobs_conciliacion;
 -- REPLICA IDENTITY FULL para que los payloads de UPDATE incluyan todas las
 -- columnas (necesario para leer `resultado`/`fase_actual` en el cliente).
 alter table public.jobs_conciliacion replica identity full;
+
+-- ============================================================================
+-- 0004_config_empresa.sql — Configuración de tolerancias por empresa
+--
+-- Guarda la config de conciliación (tolerancias, umbral, banda IA) editable
+-- desde la pantalla de configuración. Si es null, se usan los defaults del
+-- contrato. RLS: la política empresas_update ya permite a los miembros editar.
+-- ============================================================================
+
+alter table public.empresas
+  add column if not exists config_conciliacion jsonb;

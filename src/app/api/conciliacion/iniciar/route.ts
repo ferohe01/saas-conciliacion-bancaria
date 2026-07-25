@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getUsuarioActual, getEmpresaActual } from "@/lib/auth";
+import { getConfigEmpresa } from "@/lib/config";
 import { generarJobId } from "@/lib/jobs";
 import { enviarAN8n } from "@/lib/n8n/cliente";
 import { simularConciliacion } from "@/lib/n8n/mock";
@@ -13,10 +14,7 @@ import {
   RegistroInterno,
   MovimientoBancario,
 } from "@/lib/contract/payload";
-import {
-  ConfigConciliacion,
-  CONFIG_CONCILIACION_DEFAULT,
-} from "@/lib/contract/config";
+import { ConfigConciliacion } from "@/lib/contract/config";
 
 /**
  * POST /api/conciliacion/iniciar
@@ -96,6 +94,9 @@ export async function POST(request: Request) {
   const jobId = generarJobId(req.periodo.desde);
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
+  // Config de la empresa (editable en /configuracion) + override por request.
+  const configEmpresa = await getConfigEmpresa();
+
   const payload = {
     job_id: jobId,
     metadata: {
@@ -110,7 +111,7 @@ export async function POST(request: Request) {
       saldos: req.saldos,
       callback_url: `${appUrl}/api/webhooks/resultado-conciliacion`,
     },
-    config: { ...CONFIG_CONCILIACION_DEFAULT, ...(req.config ?? {}) },
+    config: { ...configEmpresa, ...(req.config ?? {}) },
     registros_internos: req.registros_internos,
     movimientos_bancarios: req.movimientos_bancarios,
   };

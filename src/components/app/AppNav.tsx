@@ -10,6 +10,7 @@ const ENLACES = [
   { href: "/conciliacion", label: "Historial" },
   { href: "/reportes", label: "Reportes" },
   { href: "/cuentas", label: "Cuentas" },
+  { href: "/configuracion", label: "Configuración" },
 ];
 
 export function AppNav({ empresaNombre }: { empresaNombre: string }) {
