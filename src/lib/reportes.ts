@@ -25,7 +25,23 @@ export type JobReporte = {
   numero: string | null;
   resumen: ResumenJob;
   diferenciaCuadre: number;
+  createdAt: string; // ISO, para elegir la conciliación más reciente
 };
+
+/**
+ * Deduplica: una conciliación es "por período + cuenta". Si se re-corrió el
+ * mismo período+cuenta, se conserva SOLO la más reciente (la definitiva), para
+ * que el reporte no sume corridas repetidas. El historial sí conserva todas.
+ */
+export function deduplicarUltimoPorPeriodo(jobs: JobReporte[]): JobReporte[] {
+  const porClave = new Map<string, JobReporte>();
+  for (const j of jobs) {
+    const clave = `${j.cuentaId}|${j.anio}|${j.mes}`;
+    const previo = porClave.get(clave);
+    if (!previo || j.createdAt > previo.createdAt) porClave.set(clave, j);
+  }
+  return [...porClave.values()];
+}
 
 export type FiltroReporte = {
   anio: number;

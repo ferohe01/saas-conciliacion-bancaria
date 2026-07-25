@@ -9,6 +9,7 @@ import {
   calcularKpis,
   porMes,
   porBanco,
+  deduplicarUltimoPorPeriodo,
   type JobReporte,
   type ResumenJob,
 } from "@/lib/reportes";
@@ -23,6 +24,7 @@ type JobRaw = {
   periodo_desde: string;
   estado: string;
   cuenta_id: string;
+  created_at: string;
   resultado: {
     resumen?: ResumenJob;
     cuadre?: { diferencia?: number };
@@ -50,7 +52,7 @@ export default async function ReportesPage({
     supabase
       .from("jobs_conciliacion")
       .select(
-        "id, periodo_desde, estado, cuenta_id, resultado, cuentas_bancarias(banco, numero_enmascarado)",
+        "id, periodo_desde, estado, cuenta_id, created_at, resultado, cuentas_bancarias(banco, numero_enmascarado)",
       )
       .eq("estado", "completado")
       .order("periodo_desde", { ascending: false }),
@@ -83,12 +85,17 @@ export default async function ReportesPage({
       numero,
       resumen,
       diferenciaCuadre: Number(j.resultado?.cuadre?.diferencia ?? 0),
+      createdAt: j.created_at,
     });
     jobsMeta.set(j.id, { periodo_desde: j.periodo_desde, banco, numero });
   }
 
+  // Una conciliación por período+cuenta (la más reciente). Las re-corridas de
+  // pruebas no inflan los totales; el historial sí las conserva todas.
+  const jobsDef = deduplicarUltimoPorPeriodo(jobs);
+
   // Opciones de filtro.
-  const aniosSet = new Set(jobs.map((j) => j.anio));
+  const aniosSet = new Set(jobsDef.map((j) => j.anio));
   aniosSet.add(new Date().getUTCFullYear());
   const anios = [...aniosSet].sort((a, b) => b - a);
   const bancos = [...new Set(cuentas.map((c) => c.banco))].sort();
@@ -100,7 +107,7 @@ export default async function ReportesPage({
   const cuenta = sp.cuenta ?? "todos";
 
   // Agregaciones.
-  const jobsAnio = filtrarAnual(jobs, { anio, banco, cuentaId: cuenta });
+  const jobsAnio = filtrarAnual(jobsDef, { anio, banco, cuentaId: cuenta });
   const jobsFiltrados = filtrarMes(jobsAnio, mes);
   const kpis = calcularKpis(jobsFiltrados);
   const mensual = porMes(jobsAnio);
@@ -121,7 +128,7 @@ export default async function ReportesPage({
     banco !== "todos" ? " · " + banco : ""
   }`.trim();
 
-  const hayDatos = jobs.length > 0;
+  const hayDatos = jobsDef.length > 0;
 
   return (
     <div className="space-y-6">

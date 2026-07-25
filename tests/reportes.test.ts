@@ -5,6 +5,7 @@ import {
   calcularKpis,
   porMes,
   porBanco,
+  deduplicarUltimoPorPeriodo,
   type JobReporte,
   type ResumenJob,
 } from "@/lib/reportes";
@@ -32,6 +33,7 @@ const jobs: JobReporte[] = [
     numero: "****1",
     resumen: resumen({ total_internos: 100, conciliados_exactos: 80, conciliados_difusos: 10, sin_conciliar_internos: 10 }),
     diferenciaCuadre: 0,
+    createdAt: "2026-06-30T10:00:00.000Z",
   },
   {
     id: "j2",
@@ -42,6 +44,7 @@ const jobs: JobReporte[] = [
     numero: "****2",
     resumen: resumen({ total_internos: 50, conciliados_exactos: 40, sugeridos_ia: 5, sin_conciliar_internos: 5 }),
     diferenciaCuadre: 12.5,
+    createdAt: "2026-07-31T10:00:00.000Z",
   },
   {
     id: "j3",
@@ -52,8 +55,28 @@ const jobs: JobReporte[] = [
     numero: "****1",
     resumen: resumen({ total_internos: 200, conciliados_exactos: 200 }),
     diferenciaCuadre: 0,
+    createdAt: "2025-06-30T10:00:00.000Z",
   },
 ];
+
+describe("deduplicarUltimoPorPeriodo", () => {
+  it("conserva solo la conciliación más reciente por período+cuenta", () => {
+    const corridas: JobReporte[] = [
+      { ...jobs[0]!, id: "run1", createdAt: "2026-06-30T10:00:00.000Z" },
+      { ...jobs[0]!, id: "run2", createdAt: "2026-07-01T09:00:00.000Z" }, // más nueva
+      { ...jobs[0]!, id: "run3", createdAt: "2026-06-15T08:00:00.000Z" },
+    ];
+    const dedup = deduplicarUltimoPorPeriodo(corridas);
+    expect(dedup).toHaveLength(1);
+    expect(dedup[0]!.id).toBe("run2");
+    // KPIs no se inflan: 100 registros, no 300.
+    expect(calcularKpis(dedup).registros).toBe(100);
+  });
+
+  it("no colapsa períodos o cuentas distintas", () => {
+    expect(deduplicarUltimoPorPeriodo(jobs)).toHaveLength(3);
+  });
+});
 
 describe("filtros", () => {
   it("filtrarAnual respeta año, banco y cuenta", () => {
