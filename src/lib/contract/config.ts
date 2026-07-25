@@ -15,6 +15,9 @@ export const ConfigConciliacion = z.object({
   tolerancia_dias: z.number().int().min(0),
   // Umbral de confianza a partir del cual un match de IA llega como "auto".
   umbral_confianza_auto: Confianza,
+  // Banda de diferencia de monto para SUGERIR con IA (más amplia que la difusa,
+  // pero acotada). Solo se sugiere si |diferencia| <= este valor.
+  tolerancia_ia_monto: MontoNoNegativo.default(10),
 });
 export type ConfigConciliacion = z.infer<typeof ConfigConciliacion>;
 
@@ -23,4 +26,5 @@ export const CONFIG_CONCILIACION_DEFAULT: ConfigConciliacion = {
   tolerancia_monto_pct: 0.5,
   tolerancia_dias: 3,
   umbral_confianza_auto: 0.95,
+  tolerancia_ia_monto: 10.0,
 };

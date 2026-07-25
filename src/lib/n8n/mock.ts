@@ -1,5 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { palabrasComunes } from "@/lib/matching/similitud";
 import type { PayloadConciliacion } from "@/lib/contract/payload";
 import type {
   ResultadoConciliacion,
@@ -27,7 +28,12 @@ function diasEntre(a: string, b: string): number {
 function conciliar(payload: PayloadConciliacion): ResultadoConciliacion {
   const { registros_internos: internos, movimientos_bancarios: bancarios } =
     payload;
-  const { tolerancia_monto_abs, tolerancia_dias } = payload.config;
+  const {
+    tolerancia_monto_abs,
+    tolerancia_dias,
+    tolerancia_ia_monto,
+    umbral_confianza_auto,
+  } = payload.config;
 
   const intUsados = new Set<number>();
   const bancUsados = new Set<number>();
@@ -92,37 +98,55 @@ function conciliar(payload: PayloadConciliacion): ResultadoConciliacion {
     }
   });
 
-  // 3) IA: sugiere hasta 3 pares restantes con glosa/contraparte parecida.
-  let sugeridas = 0;
+  // 3) IA: sugiere solo con señales fuertes — monto dentro de la banda IA
+  //    (|dif| <= tolerancia_ia_monto) Y al menos 1 palabra en común entre la
+  //    contraparte y la glosa. La fecha debe estar razonablemente cerca.
   internos.forEach((it, i) => {
-    if (intUsados.has(i) || sugeridas >= 3) return;
+    if (intUsados.has(i)) return;
+    let mejorJ = -1;
+    let mejorComunes: string[] = [];
+    let mejorDif = Infinity;
     for (let j = 0; j < bancarios.length; j++) {
       if (bancUsados.has(j)) continue;
       const bc = bancarios[j]!;
+      if (Math.sign(it.monto) !== Math.sign(bc.monto)) continue;
+      const dif = Math.abs(it.monto - bc.monto);
+      if (dif > tolerancia_ia_monto) continue;
+      if (diasEntre(it.fecha, bc.fecha) > tolerancia_dias + 4) continue;
+      const comunes = palabrasComunes(it.contraparte, bc.glosa);
+      if (comunes.length === 0) continue;
+      // Preferir más palabras en común y menor diferencia de monto.
       if (
-        Math.sign(it.monto) === Math.sign(bc.monto) &&
-        diasEntre(it.fecha, bc.fecha) <= tolerancia_dias + 4
+        comunes.length > mejorComunes.length ||
+        (comunes.length === mejorComunes.length && dif < mejorDif)
       ) {
-        const confianza = 0.9;
-        matches.push({
-          ids_internos: [it.id_interno],
-          ids_movimientos: [bc.id_movimiento],
-          metodo: "ia",
-          confianza,
-          diferencia_monto: Number((it.monto - bc.monto).toFixed(2)),
-          categoria_diferencia: "requiere_revision",
-          justificacion: `Posible correspondencia por fecha y monto similares (${it.contraparte ?? "contraparte"} ↔ ${bc.glosa ?? "glosa"}).`,
-          estado_revision:
-            confianza >= payload.config.umbral_confianza_auto
-              ? "auto"
-              : "pendiente",
-        });
-        intUsados.add(i);
-        bancUsados.add(j);
-        sugeridas++;
-        break;
+        mejorJ = j;
+        mejorComunes = comunes;
+        mejorDif = dif;
       }
     }
+    if (mejorJ === -1) return;
+    const bc = bancarios[mejorJ]!;
+    const dif = Number((it.monto - bc.monto).toFixed(2));
+    const cercania = 1 - Math.abs(dif) / tolerancia_ia_monto; // 0..1
+    const confianza = Math.min(
+      0.94,
+      Number(
+        (0.7 + cercania * 0.15 + Math.min(mejorComunes.length, 2) * 0.05).toFixed(2),
+      ),
+    );
+    matches.push({
+      ids_internos: [it.id_interno],
+      ids_movimientos: [bc.id_movimiento],
+      metodo: "ia",
+      confianza,
+      diferencia_monto: dif,
+      categoria_diferencia: "requiere_revision",
+      justificacion: `Coincidencia por nombre (${mejorComunes.join(", ")}) y monto cercano (dif. ${dif.toFixed(2)}).`,
+      estado_revision: confianza >= umbral_confianza_auto ? "auto" : "pendiente",
+    });
+    intUsados.add(i);
+    bancUsados.add(mejorJ);
   });
 
   // 4) No conciliados.
