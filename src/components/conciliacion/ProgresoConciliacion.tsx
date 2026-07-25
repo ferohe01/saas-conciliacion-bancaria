@@ -214,6 +214,19 @@ export function ProgresoConciliacion({ jobInicial }: { jobInicial: JobRow }) {
           );
         })}
       </ol>
+
+      <div className="mt-5 border-t border-neutral-100 pt-4">
+        <p className="text-sm text-neutral-500">
+          ¿Ya terminó en n8n y la pantalla no cambia?
+        </p>
+        <button
+          type="button"
+          onClick={() => router.refresh()}
+          className="mt-2 rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+        >
+          Ver resultados ahora
+        </button>
+      </div>
     </div>
   );
 }
