@@ -1,7 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cargarReporteDetalle } from "@/lib/reportesQuery";
-import { filtrarAnual, filtrarMes, COLOR_METODO } from "@/lib/reportes";
+import {
+  filtrarAnual,
+  filtrarMes,
+  COLOR_METODO,
+  categoriaDeMatch,
+  etiquetaTipo,
+  etiquetaEstadoRevision,
+} from "@/lib/reportes";
+import { EstadoVacio } from "@/components/ui";
 import { ExportarTabla } from "@/components/reportes/ExportarTabla";
 import { formatearFecha, formatearPEN } from "@/lib/parsing/resumen";
 import { nombreMes } from "@/lib/periodo";
@@ -60,7 +68,7 @@ export default async function DetalleMetodoPage({
   const esSinConciliar = meta.key === "sin_conciliar";
   const columnas = esSinConciliar
     ? ["Período", "Lado", "Partida", "Categoría", "Sugerencia / Observación"]
-    : ["Período", "Registro interno", "Movimiento bancario", "Diferencia", "Estado", "Observación"];
+    : ["Período", "Registro interno", "Movimiento bancario", "Categoría", "Diferencia", "Estado", "Observación"];
 
   const filas: Record<string, string>[] = [];
 
@@ -85,7 +93,7 @@ export default async function DetalleMetodoPage({
           "Período": periodoLabel,
           Lado: p.lado === "interno" ? "Interno" : "Banco",
           Partida: partida,
-          "Categoría": p.categoria,
+          "Categoría": etiquetaTipo(p.categoria),
           "Sugerencia / Observación": p.sugerencia ?? "",
         });
       }
@@ -100,11 +108,12 @@ export default async function DetalleMetodoPage({
           "Movimiento bancario": m.ids_movimientos
             .map((id) => detBanco(movsMap.get(id), d.moneda))
             .join("  |  "),
+          "Categoría": etiquetaTipo(categoriaDeMatch(m)),
           Diferencia:
             m.diferencia_monto != null
               ? formatearPEN(m.diferencia_monto, d.moneda)
               : "—",
-          Estado: m.estado_revision,
+          Estado: etiquetaEstadoRevision(m.estado_revision),
           "Observación": m.justificacion ?? "",
         });
       }
@@ -121,20 +130,23 @@ export default async function DetalleMetodoPage({
         <div>
           <Link
             href={`/reportes?${qs}`}
-            className="text-sm text-blue-600 hover:underline"
+            className="rounded text-sm font-medium text-blue-700 transition-colors hover:text-blue-800"
           >
             ← Volver al reporte
           </Link>
           <h1 className="mt-1 flex items-center gap-2 text-2xl font-bold tracking-tight text-neutral-900">
             <span
-              className="inline-block h-3.5 w-3.5 rounded-sm"
+              className="inline-block h-3.5 w-3.5 shrink-0 rounded-sm"
               style={{ background: meta.color }}
               aria-hidden
             />
             {meta.titulo}
           </h1>
-          <p className="mt-1 text-neutral-500">
-            {filas.length.toLocaleString("es-PE")} registro(s) ·{" "}
+          <p className="mt-1 text-neutral-600">
+            <span className="tabular-nums">
+              {filas.length.toLocaleString("es-PE")}
+            </span>{" "}
+            {filas.length === 1 ? "registro" : "registros"} ·{" "}
             {mes === "todos" ? `Año ${anio}` : `${nombreMes(mes)} ${anio}`}
             {banco !== "todos" ? ` · ${banco}` : ""}
           </p>
@@ -149,16 +161,24 @@ export default async function DetalleMetodoPage({
       </div>
 
       {filas.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-neutral-300 bg-white p-8 text-center text-neutral-500">
-          No hay registros en esta categoría para el filtro seleccionado.
-        </p>
+        <EstadoVacio
+          titulo="Nada en esta categoría"
+          texto="No hay registros de este tipo para el período, banco o cuenta que elegiste. Prueba a ampliar el filtro desde el reporte."
+        />
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-neutral-200 bg-white">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-neutral-50 text-xs text-neutral-500">
+            <caption className="sr-only">
+              {meta.titulo}: detalle registro por registro
+            </caption>
+            <thead className="bg-neutral-50 text-xs text-neutral-600">
               <tr>
                 {columnas.map((c) => (
-                  <th key={c} className="px-4 py-2.5 font-medium whitespace-nowrap">
+                  <th
+                    key={c}
+                    scope="col"
+                    className="px-4 py-2.5 font-medium whitespace-nowrap"
+                  >
                     {c}
                   </th>
                 ))}

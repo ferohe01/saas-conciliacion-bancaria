@@ -213,6 +213,7 @@ const ETIQUETA_TIPO: Record<string, string> = {
   requiere_investigacion: "Requiere investigación",
   ajuste_manual: "Ajuste manual",
   ajuste_requerido: "Ajuste requerido",
+  agrupacion_1aN: "Agrupación 1:N",
   otros: "Otros",
 };
 
@@ -220,6 +221,25 @@ export function etiquetaTipo(tipo: string): string {
   return (
     ETIQUETA_TIPO[tipo] ??
     tipo.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase())
+  );
+}
+
+/**
+ * Estado de revisión de un match, en el idioma del usuario. Los reportes
+ * mostraban (y exportaban a Excel) el literal crudo del contrato.
+ */
+const ETIQUETA_ESTADO_REVISION: Record<string, string> = {
+  pendiente: "Por revisar",
+  aceptado: "Aceptado por ti",
+  rechazado: "Rechazado por ti",
+  modificado: "Ajustado a mano",
+  auto: "Conciliado automáticamente",
+};
+
+export function etiquetaEstadoRevision(estado: string): string {
+  return (
+    ETIQUETA_ESTADO_REVISION[estado] ??
+    estado.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase())
   );
 }
 

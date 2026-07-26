@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { CampoTexto } from "./AuthShell";
+import { Boton } from "@/components/ui";
 
 export function RegistroForm() {
   const router = useRouter();
@@ -68,11 +69,13 @@ export function RegistroForm() {
       />
       <CampoTexto
         label="RUC (opcional)"
+        name="ruc"
         type="text"
         inputMode="numeric"
         value={ruc}
         onChange={(e) => setRuc(e.target.value)}
         placeholder="20123456789"
+        ayuda="Puedes agregarlo después desde Configuración."
       />
       <CampoTexto
         label="Correo electrónico"
@@ -85,28 +88,33 @@ export function RegistroForm() {
       />
       <CampoTexto
         label="Contraseña"
+        name="password"
         type="password"
         autoComplete="new-password"
         required
         minLength={8}
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        placeholder="Mínimo 8 caracteres"
+        placeholder="••••••••"
+        ayuda="Mínimo 8 caracteres."
       />
 
       {error && (
-        <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+        >
           {error}
         </p>
       )}
 
-      <button
-        type="submit"
-        disabled={cargando}
-        className="h-12 w-full rounded-xl bg-neutral-900 font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
-      >
+      <Boton type="submit" tamano="lg" disabled={cargando} className="w-full">
         {cargando ? "Creando cuenta…" : "Crear cuenta"}
-      </button>
+      </Boton>
+
+      <p className="text-center text-xs text-neutral-600">
+        Tu primer período es gratis.
+      </p>
     </form>
   );
 }

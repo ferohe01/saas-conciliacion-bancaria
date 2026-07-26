@@ -28,7 +28,7 @@ export function Stepper({ actual }: { actual: PasoWizard }) {
                     ? "bg-blue-600 text-white"
                     : completado
                       ? "bg-blue-600 text-white"
-                      : "border-2 border-neutral-300 text-neutral-400",
+                      : "border-2 border-neutral-300 text-neutral-600",
                 ].join(" ")}
                 aria-current={activo ? "step" : undefined}
               >
@@ -45,7 +45,7 @@ export function Stepper({ actual }: { actual: PasoWizard }) {
                     ? "font-semibold text-blue-600"
                     : completado
                       ? "font-medium text-neutral-700"
-                      : "text-neutral-400",
+                      : "text-neutral-600",
                 ].join(" ")}
               >
                 {paso.titulo}

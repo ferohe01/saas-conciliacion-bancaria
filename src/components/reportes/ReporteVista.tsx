@@ -6,11 +6,99 @@ import {
   type FilaBanco,
   type FilaTipo,
 } from "@/lib/reportes";
+import type { ResumenAprendizaje } from "@/lib/aprendizaje";
 import { formatearFecha } from "@/lib/parsing/resumen";
 
 /** Vista del reporte (server component, sin interacción salvo hover nativo). */
 
 const NUM = (n: number) => n.toLocaleString("es-PE");
+
+// ── Panel de aprendizaje de la IA (few-shot dinámico) ───────────────────────
+// Muestra el pool de decisiones humanas y cuántas alimentan cada corrida. Es
+// GLOBAL (todo el historial), no depende del filtro de período.
+export function PanelAprendizaje({ ap }: { ap: ResumenAprendizaje }) {
+  const totalBalance = ap.positivos + ap.negativos || 1;
+  const pctPos = Math.round((ap.positivos / totalBalance) * 100);
+  return (
+    <div className="rounded-2xl border border-violet-200 bg-violet-50/40 p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-semibold text-neutral-900">Aprendizaje de la IA</h2>
+          <p className="text-xs text-neutral-600">
+            La IA se calibra con tus decisiones de conciliaciones anteriores.
+          </p>
+        </div>
+        <span className="shrink-0 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-800">
+          Few-shot dinámico
+        </span>
+      </div>
+
+      {ap.total === 0 ? (
+        <p className="mt-4 rounded-xl border border-dashed border-violet-200 bg-white/60 px-4 py-3 text-sm text-neutral-700">
+          Aún no hay decisiones registradas. A medida que aceptes o rechaces
+          sugerencias, la IA aprenderá el criterio de tu empresa y afinará las
+          próximas conciliaciones.
+        </p>
+      ) : (
+        <div className="mt-4 grid gap-5 sm:grid-cols-[auto_1fr] sm:items-center">
+          <div className="flex items-baseline gap-2">
+            <span className="text-4xl font-bold tabular-nums text-violet-800">
+              {NUM(ap.activos)}
+            </span>
+            <span className="text-sm text-neutral-600">
+              ejemplos activos
+              <br />
+              por conciliación
+            </span>
+          </div>
+
+          <div>
+            <div
+              className="flex h-3 w-full overflow-hidden rounded-full bg-neutral-100"
+              role="img"
+              aria-label={`${ap.positivos} aceptados y ${ap.negativos} rechazados`}
+            >
+              {ap.positivos > 0 && (
+                <div
+                  className="h-3 bg-emerald-500"
+                  style={{ width: `${pctPos}%` }}
+                />
+              )}
+              {ap.negativos > 0 && <div className="h-3 flex-1 bg-rose-400" />}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs">
+              <span className="flex items-center gap-1.5 text-neutral-700">
+                <span
+                  className="h-2.5 w-2.5 rounded-sm bg-emerald-500"
+                  aria-hidden
+                />
+                Aceptados (la IA acertó):{" "}
+                <span className="font-medium tabular-nums text-neutral-900">
+                  {NUM(ap.positivos)}
+                </span>
+              </span>
+              <span className="flex items-center gap-1.5 text-neutral-700">
+                <span
+                  className="h-2.5 w-2.5 rounded-sm bg-rose-400"
+                  aria-hidden
+                />
+                Rechazados (corregidos):{" "}
+                <span className="font-medium tabular-nums text-neutral-900">
+                  {NUM(ap.negativos)}
+                </span>
+              </span>
+            </div>
+            <p className="mt-2 text-xs text-neutral-600">
+              {ap.total > ap.activos
+                ? `De ${NUM(ap.total)} decisiones acumuladas, las más recientes y balanceadas alimentan cada corrida.`
+                : "Estas decisiones se envían como ejemplos en cada nueva conciliación."}
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function ReporteVista({
   kpis,
@@ -51,6 +139,47 @@ export function ReporteVista({
   );
 }
 
+// ── Versión compacta para el dashboard (enlace a /reportes) ─────────────────
+export function PanelAprendizajeCompacto({ ap }: { ap: ResumenAprendizaje }) {
+  if (ap.total === 0) return null;
+  return (
+    <Link
+      href="/reportes"
+      className="block rounded-2xl border border-violet-200 bg-violet-50/40 p-6 shadow-asiento transition-colors hover:border-violet-400"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold text-neutral-900">
+          Aprendizaje de la IA
+        </h2>
+        <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-800">
+          Few-shot dinámico
+        </span>
+      </div>
+      <div className="mt-3 flex items-baseline gap-2">
+        <span className="text-3xl font-bold tabular-nums text-violet-800">
+          {NUM(ap.activos)}
+        </span>
+        <span className="text-sm text-neutral-600">
+          ejemplos activos por conciliación
+        </span>
+      </div>
+      <p className="mt-2 text-sm text-neutral-700">
+        <span className="font-medium tabular-nums text-emerald-800">
+          {NUM(ap.positivos)}
+        </span>{" "}
+        aceptados ·{" "}
+        <span className="font-medium tabular-nums text-rose-700">
+          {NUM(ap.negativos)}
+        </span>{" "}
+        rechazados de {NUM(ap.total)} decisiones acumuladas.
+      </p>
+      <span className="mt-4 inline-block text-sm font-medium text-blue-700">
+        Ver reportes →
+      </span>
+    </Link>
+  );
+}
+
 // ── KPIs (stat tiles) ───────────────────────────────────────────────────────
 function KpiFila({ kpis }: { kpis: Kpis }) {
   const tiles = [
@@ -80,16 +209,26 @@ function KpiFila({ kpis }: { kpis: Kpis }) {
               : "border-neutral-200 bg-white",
           ].join(" ")}
         >
-          <p className="text-xs font-medium text-neutral-500">{t.label}</p>
+          <p
+            className={`text-xs font-medium ${t.hero ? "text-emerald-800" : "text-neutral-600"}`}
+          >
+            {t.label}
+          </p>
           <p
             className={[
               "mt-1 text-3xl font-bold tabular-nums",
-              t.hero ? "text-emerald-700" : "text-neutral-900",
+              t.hero ? "text-emerald-800" : "text-neutral-900",
             ].join(" ")}
           >
             {t.valor}
           </p>
-          {t.sub && <p className="mt-1 text-xs text-neutral-500">{t.sub}</p>}
+          {t.sub && (
+            <p
+              className={`mt-1 text-xs ${t.hero ? "text-emerald-800" : "text-neutral-600"}`}
+            >
+              {t.sub}
+            </p>
+          )}
         </div>
       ))}
     </div>
@@ -101,28 +240,34 @@ function GraficoMensual({ datos }: { datos: PuntoMensual[] }) {
   const max = Math.max(1, ...datos.map((d) => d.registros));
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white p-5">
-      <p className="font-semibold text-neutral-900">Volumen por mes</p>
-      <p className="text-xs text-neutral-500">Registros procesados</p>
-      <div className="mt-4 flex h-40 items-end gap-1.5">
+      <h2 className="font-semibold text-neutral-900">Volumen por mes</h2>
+      <p className="text-xs text-neutral-600">Registros procesados</p>
+      {/* Las barras eran `div`s con `title`: un lector de pantalla no leía
+          nada. Ahora es una lista con el valor en texto por cada mes. */}
+      <ul className="mt-4 flex h-40 items-end gap-1.5">
         {datos.map((d) => (
-          <div
-            key={d.mes}
-            className="flex flex-1 flex-col items-center gap-1"
-            title={`${d.etiqueta}: ${NUM(d.registros)} registros · ${d.pctAutomatizacion}% automatizado`}
-          >
-            <div className="flex w-full flex-1 items-end">
-              <div
+          <li key={d.mes} className="flex flex-1 flex-col items-center gap-1">
+            <span className="flex w-full flex-1 items-end">
+              <span
+                aria-hidden
+                title={`${d.etiqueta}: ${NUM(d.registros)} registros · ${d.pctAutomatizacion}% automatizado`}
                 className="w-full rounded-t bg-neutral-800"
                 style={{
                   height: `${(d.registros / max) * 100}%`,
                   minHeight: d.registros > 0 ? "3px" : "0",
                 }}
               />
-            </div>
-            <span className="text-[10px] text-neutral-400">{d.etiqueta}</span>
-          </div>
+            </span>
+            <span aria-hidden className="text-[11px] text-neutral-600">
+              {d.etiqueta}
+            </span>
+            <span className="sr-only">
+              {d.etiqueta}: {NUM(d.registros)} registros,{" "}
+              {d.pctAutomatizacion}% automatizado
+            </span>
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   );
 }
@@ -150,12 +295,21 @@ function DistribucionMetodos({
   ];
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white p-5">
-      <p className="font-semibold text-neutral-900">Cómo se concilió</p>
-      <p className="text-xs text-neutral-500">
+      <h2 className="font-semibold text-neutral-900">Cómo se concilió</h2>
+      <p className="text-xs text-neutral-600">
         Distribución por método · haz clic para ver el detalle
       </p>
 
-      <div className="mt-4 flex h-4 w-full gap-0.5 overflow-hidden rounded-full">
+      <div
+        role="img"
+        aria-label={segs
+          .filter((s) => s.v > 0)
+          .map(
+            (s) => `${s.k}: ${NUM(s.v)}, ${Math.round((s.v / total) * 100)}%`,
+          )
+          .join(". ")}
+        className="mt-4 flex h-4 w-full gap-0.5 overflow-hidden rounded-full"
+      >
         {segs.map(
           (s) =>
             s.v > 0 && (
@@ -173,7 +327,7 @@ function DistribucionMetodos({
           <li key={s.k}>
             <Link
               href={`/reportes/${s.slug}?${filtroQuery}`}
-              className="group flex items-center justify-between rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-neutral-50"
+              className="group flex min-h-9 items-center justify-between rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-neutral-50"
             >
               <span className="flex items-center gap-2">
                 <span
@@ -181,16 +335,19 @@ function DistribucionMetodos({
                   style={{ background: s.c }}
                   aria-hidden
                 />
-                <span className="text-neutral-700 group-hover:text-blue-600">
+                <span className="text-neutral-700 group-hover:text-blue-700">
                   {s.k}
                 </span>
               </span>
               <span className="flex items-center gap-2 tabular-nums text-neutral-900">
                 {NUM(s.v)}{" "}
-                <span className="text-neutral-400">
+                <span className="text-neutral-600">
                   ({Math.round((s.v / total) * 100)}%)
                 </span>
-                <span className="text-neutral-300 group-hover:text-blue-600">
+                <span
+                  aria-hidden
+                  className="text-neutral-500 group-hover:text-blue-700"
+                >
                   →
                 </span>
               </span>
@@ -215,8 +372,8 @@ function TiposDiferencia({
   const max = Math.max(...tipos.map((t) => t.valor), 1);
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white p-5">
-      <p className="font-semibold text-neutral-900">Tipo de diferencia</p>
-      <p className="text-xs text-neutral-500">
+      <h2 className="font-semibold text-neutral-900">Tipo de diferencia</h2>
+      <p className="text-xs text-neutral-600">
         Distribución de pares conciliados por tipo · haz clic para ver el detalle
       </p>
       <ul className="mt-4 space-y-1">
@@ -227,22 +384,25 @@ function TiposDiferencia({
               className="group block rounded-lg px-2 py-1.5 transition-colors hover:bg-neutral-50"
             >
               <div className="flex items-center justify-between text-sm">
-                <span className="text-neutral-700 group-hover:text-blue-600">
+                <span className="text-neutral-700 group-hover:text-blue-700">
                   {t.label}
                 </span>
                 <span className="tabular-nums text-neutral-900">
                   {NUM(t.valor)}{" "}
-                  <span className="text-neutral-400">
+                  <span className="text-neutral-600">
                     ({Math.round((t.valor / total) * 100)}%)
                   </span>
-                  <span className="ml-2 text-neutral-300 group-hover:text-blue-600">
+                  <span
+                    aria-hidden
+                    className="ml-2 text-neutral-500 group-hover:text-blue-700"
+                  >
                     →
                   </span>
                 </span>
               </div>
               <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-neutral-100">
                 <div
-                  className="h-2 rounded-full bg-neutral-800 group-hover:bg-blue-600"
+                  className="h-2 rounded-full bg-neutral-800 group-hover:bg-blue-700"
                   style={{ width: `${(t.valor / max) * 100}%` }}
                 />
               </div>
@@ -259,15 +419,23 @@ function TablaBancos({ bancos }: { bancos: FilaBanco[] }) {
   if (bancos.length === 0) return null;
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white p-5">
-      <p className="font-semibold text-neutral-900">Por banco</p>
+      <h2 className="font-semibold text-neutral-900">Por banco</h2>
       <div className="mt-3 overflow-x-auto">
         <table className="min-w-full text-left text-sm">
-          <thead className="text-xs text-neutral-500">
+          <thead className="text-xs text-neutral-600">
             <tr>
-              <th className="py-2 pr-4 font-medium">Banco</th>
-              <th className="py-2 pr-4 font-medium">Conciliaciones</th>
-              <th className="py-2 pr-4 font-medium">Registros</th>
-              <th className="py-2 font-medium">Automatización</th>
+              <th scope="col" className="py-2 pr-4 font-medium">
+                Banco
+              </th>
+              <th scope="col" className="py-2 pr-4 font-medium">
+                Conciliaciones
+              </th>
+              <th scope="col" className="py-2 pr-4 font-medium">
+                Registros
+              </th>
+              <th scope="col" className="py-2 font-medium">
+                Automatización
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -276,7 +444,9 @@ function TablaBancos({ bancos }: { bancos: FilaBanco[] }) {
                 <td className="py-2 pr-4 font-medium text-neutral-800">
                   {b.banco}
                 </td>
-                <td className="py-2 pr-4 tabular-nums">{NUM(b.conciliaciones)}</td>
+                <td className="py-2 pr-4 tabular-nums">
+                  {NUM(b.conciliaciones)}
+                </td>
                 <td className="py-2 pr-4 tabular-nums">{NUM(b.registros)}</td>
                 <td className="py-2 tabular-nums">{b.pctAutomatizacion}%</td>
               </tr>
@@ -302,21 +472,23 @@ function TablaRecientes({
 }) {
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white p-5">
-      <p className="font-semibold text-neutral-900">Conciliaciones del filtro</p>
+      <h2 className="font-semibold text-neutral-900">
+        Conciliaciones del filtro
+      </h2>
       <ul className="mt-3 divide-y divide-neutral-100">
         {recientes.map((j) => (
           <li key={j.id}>
             <Link
               href={`/conciliacion/${j.id}`}
-              className="flex items-center justify-between gap-3 py-2.5 text-sm hover:text-blue-600"
+              className="flex min-h-11 items-center justify-between gap-3 py-2.5 text-sm transition-colors hover:text-blue-700"
             >
-              <span className="text-neutral-700">
-                {formatearFecha(j.periodo_desde)} · {j.banco}{" "}
-                {j.numero ?? ""}
+              <span className="text-neutral-800">
+                <span className="tabular-nums">
+                  {formatearFecha(j.periodo_desde)}
+                </span>{" "}
+                · {j.banco} {j.numero ?? ""}
               </span>
-              <span className="font-mono text-xs text-neutral-400">
-                {j.id}
-              </span>
+              <span className="font-mono text-xs text-neutral-600">{j.id}</span>
             </Link>
           </li>
         ))}

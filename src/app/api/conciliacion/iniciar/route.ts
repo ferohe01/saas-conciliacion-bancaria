@@ -6,7 +6,7 @@ import { getUsuarioActual, getEmpresaActual } from "@/lib/auth";
 import { getConfigEmpresa } from "@/lib/config";
 import { generarJobId } from "@/lib/jobs";
 import { enviarAN8n } from "@/lib/n8n/cliente";
-import { simularConciliacion } from "@/lib/n8n/mock";
+import { construirEjemplos, type JobHistorico } from "@/lib/aprendizaje";
 import {
   PayloadConciliacion,
   Periodo,
@@ -22,7 +22,7 @@ import { ConfigConciliacion } from "@/lib/contract/config";
  * Backend delgado que orquesta el arranque de una conciliación (§7.1):
  *  1) autentica al usuario y valida el payload,
  *  2) genera job_id e inserta el job (estado 'pendiente'),
- *  3) recién entonces dispara n8n (real o mock) con el token,
+ *  3) recién entonces dispara n8n (webhook) con el token,
  *  4) compara los conteos recibidos vs. enviados.
  * El frontend nunca contacta a n8n ni conoce el token.
  */
@@ -97,6 +97,18 @@ export async function POST(request: Request) {
   // Config de la empresa (editable en /configuracion) + override por request.
   const configEmpresa = await getConfigEmpresa();
 
+  // Few-shot dinámico: decisiones humanas de conciliaciones previas de la
+  // empresa, para que la IA calibre su criterio con el historial real.
+  const { data: historicos } = await admin
+    .from("jobs_conciliacion")
+    .select("payload_entrada, resultado")
+    .eq("empresa_id", empresa.empresa_id)
+    .eq("estado", "completado")
+    .not("resultado", "is", null)
+    .order("completed_at", { ascending: false })
+    .limit(30);
+  const ejemplos = construirEjemplos((historicos ?? []) as JobHistorico[]);
+
   const payload = {
     job_id: jobId,
     metadata: {
@@ -114,6 +126,7 @@ export async function POST(request: Request) {
     config: { ...configEmpresa, ...(req.config ?? {}) },
     registros_internos: req.registros_internos,
     movimientos_bancarios: req.movimientos_bancarios,
+    ...(ejemplos.length ? { ejemplos_aprendizaje: ejemplos } : {}),
   };
 
   const validado = PayloadConciliacion.safeParse(payload);
@@ -142,13 +155,7 @@ export async function POST(request: Request) {
     );
   }
 
-  // Disparar el procesamiento: mock (dev) o webhook real.
-  const usarMock = process.env.N8N_MOCK === "true";
-  if (usarMock) {
-    simularConciliacion(jobId, validado.data);
-    return NextResponse.json({ job_id: jobId, modo: "mock" });
-  }
-
+  // Disparar el procesamiento en n8n (webhook con token).
   const envio = await enviarAN8n(validado.data);
   if (!envio.ok) {
     await admin

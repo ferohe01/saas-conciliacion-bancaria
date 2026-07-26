@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { CampoTexto } from "./AuthShell";
+import { Boton } from "@/components/ui";
 
 export function LoginForm() {
   const router = useRouter();
@@ -58,18 +59,17 @@ export function LoginForm() {
       />
 
       {error && (
-        <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+        >
           {error}
         </p>
       )}
 
-      <button
-        type="submit"
-        disabled={cargando}
-        className="h-12 w-full rounded-xl bg-neutral-900 font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
-      >
+      <Boton type="submit" tamano="lg" disabled={cargando} className="w-full">
         {cargando ? "Ingresando…" : "Ingresar"}
-      </button>
+      </Boton>
     </form>
   );
 }

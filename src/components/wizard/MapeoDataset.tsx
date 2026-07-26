@@ -133,7 +133,7 @@ export function MapeoDataset({
                 <tr>
                   <td
                     colSpan={5}
-                    className="px-3 py-4 text-center text-neutral-400"
+                    className="px-3 py-4 text-center text-neutral-600"
                   >
                     Selecciona al menos Fecha y Monto para ver la vista previa.
                   </td>

@@ -1,17 +1,116 @@
 @import "tailwindcss";
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Tokens del sistema — ver DESIGN.md ("El Libro Mayor Iluminado").
+   Aquí solo vive lo que Tailwind no da por defecto: las tres sombras del
+   sistema, el easing único y el color de foco. La paleta y la escala de radios
+   son las de Tailwind v4 y están documentadas en el frontmatter de DESIGN.md.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 :root {
   --background: #ffffff;
   --foreground: #0a0a0a;
+
+  /* Foco: un solo tratamiento en todo el producto. */
+  --foco: #3b82f6;
+  --foco-halo: #bfdbfe;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
+  /* La Regla de la Sombra Honesta: tres sombras, cada una con su trabajo. */
+  --shadow-asiento: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-flotante: 0 10px 15px -3px rgb(0 0 0 / 0.1),
+    0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-heroe: 0 25px 50px -12px rgb(23 37 84 / 0.25);
+
+  /* Salida exponencial: el único easing del sistema. */
+  --ease-exponencial: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ── Foco visible en TODO control interactivo ──────────────────────────────
+   Los campos ya traen borde azul + anillo; esto cubre enlaces, botones y
+   controles compuestos, que antes no mostraban foco de teclado en absoluto.
+   `:focus-visible` no molesta al usuario de ratón. */
+:where(a, button, summary, [role="button"], [role="checkbox"], [tabindex]):focus-visible {
+  outline: 2px solid var(--foco);
+  outline-offset: 2px;
+}
+
+/* Los campos declaran su propio tratamiento (borde + anillo) vía utilidades. */
+:where(input, select, textarea):focus-visible {
+  outline: none;
+}
+
+/* ── Saltar al contenido (primer tabulador de cada página) ─────────────────── */
+.ci-skip {
+  position: absolute;
+  left: 0.75rem;
+  top: 0.75rem;
+  z-index: 50;
+  transform: translateY(-150%);
+  transition: transform 150ms var(--ease-exponencial);
+}
+.ci-skip:focus-visible {
+  transform: translateY(0);
+}
+
+/* ── Home "Conciliación en vivo": un solo momento de movimiento orquestado.
+   Estado por defecto VISIBLE; la animación solo corre si el usuario no pidió
+   reducir movimiento (parte de un default ya visible, ease-out exponencial). */
+@keyframes ci-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@keyframes ci-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+@keyframes ci-draw {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ci-rise {
+    animation: ci-rise 0.7s var(--ease-exponencial) both;
+  }
+  .ci-pop {
+    animation: ci-pop 0.55s var(--ease-exponencial) both;
+  }
+  .ci-draw {
+    animation: ci-draw 0.9s var(--ease-exponencial) both;
+  }
+}
+
+/* Barra de progreso indeterminada del job (pantalla de progreso). */
+@keyframes ci-avance {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(400%);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ci-avance::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    width: 25%;
+    background: currentColor;
+    animation: ci-avance 1.6s var(--ease-exponencial) infinite;
+  }
 }

@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { CuentaForm } from "@/components/app/CuentaForm";
 import { CuentaItem, type Cuenta } from "@/components/app/CuentaItem";
+import { BancoIcon } from "@/components/wizard/icons";
+import { EncabezadoPagina, EstadoVacio } from "@/components/ui";
 
 export default async function CuentasPage() {
   const supabase = await createClient();
@@ -13,21 +15,19 @@ export default async function CuentasPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-neutral-900">
-          Cuentas bancarias
-        </h1>
-        <p className="mt-1 text-neutral-500">
-          Registra las cuentas que vas a conciliar.
-        </p>
-      </div>
+      <EncabezadoPagina
+        titulo="Cuentas bancarias"
+        descripcion="Cada cuenta recuerda el formato de columnas de su banco, para que no vuelvas a mapearlo."
+      />
 
       <CuentaForm />
 
       {lista.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-neutral-300 bg-white p-8 text-center text-neutral-500">
-          Aún no tienes cuentas registradas.
-        </p>
+        <EstadoVacio
+          icono={<BancoIcon className="h-6 w-6" />}
+          titulo="Sin cuentas registradas"
+          texto="Agrega arriba la cuenta cuyo extracto vas a conciliar. Puedes tener varias: una por banco o por moneda."
+        />
       ) : (
         <ul className="space-y-3">
           {lista.map((c) => (

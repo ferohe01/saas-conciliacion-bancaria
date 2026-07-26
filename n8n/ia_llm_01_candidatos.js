@@ -9,6 +9,10 @@ const prev = $json;
 const internos = prev.pendientes_internos ?? [];
 const bancarios = prev.pendientes_bancarios ?? [];
 const cfg = prev.config ?? {};
+// Few-shot dinámico: ejemplos de decisiones humanas previas (los arma el backend
+// y viajan en el payload original del Webhook).
+const wh = $('Webhook').first().json;
+const ejemplos = ((wh.body ?? wh).ejemplos_aprendizaje) ?? [];
 const tolIa = Number(cfg.tolerancia_ia_monto ?? 10);
 const K = Number(cfg.top_k_candidatos ?? 3);
 const ventana = Number(cfg.ventana_ia_dias ?? 30); // ventana de fecha amplia para IA
@@ -127,12 +131,32 @@ const system = [
   "Sin texto fuera del JSON, sin ```.",
 ].join("\n");
 
+// Bloque few-shot: patrones aprendidos de decisiones humanas reales. Los nombres
+// cambian entre períodos; lo que se aprende es CUÁNTO tolera la empresa en
+// monto/fecha/nombre y cuándo rechaza. Formato: monto · nombre · fecha.
+const fewShot = ejemplos.length
+  ? [
+      "",
+      "DECISIONES HUMANAS PREVIAS (aprende el criterio de esta empresa; fíjate en el",
+      "patrón, no en los nombres puntuales):",
+      ...ejemplos.map(
+        (e) =>
+          `- [${String(e.decision).toUpperCase()}] interno {${e.interno}} ↔ banco {${e.banco}}` +
+          (e.categoria ? ` (${e.categoria})` : ""),
+      ),
+      "Calibra tu criterio con estos ejemplos (p. ej. si suelen ACEPTAR pese a una",
+      "comisión, o RECHAZAR cuando el nombre no calza pese a montos iguales). No los",
+      "copies a ciegas: aplícalos solo cuando el caso sea análogo.",
+    ].join("\n")
+  : "";
+const systemFinal = system + fewShot;
+
 const user = `Tolerancias: ${JSON.stringify(cfg)}\n\nCandidatos por registro interno:\n${JSON.stringify(shortlists)}`;
 
 const ia_body = {
   model: "claude-opus-4-8",
   max_tokens: 8000,
-  system,
+  system: systemFinal,
   messages: [{ role: "user", content: user }],
   output_config: {
     format: {
@@ -174,8 +198,9 @@ return [{
     pendientes_internos: internos,
     pendientes_bancarios: bancarios,
     shortlists, // para validar la respuesta del LLM
+    ejemplos_aprendizaje: ejemplos, // trazabilidad del few-shot usado
     ia_body, // nodo HTTP Request (alternativa)
-    ia_system: system, // nodo AI Agent (systemMessage)
+    ia_system: systemFinal, // nodo AI Agent (systemMessage)
     ia_user: user, // nodo AI Agent (prompt)
   },
 }];

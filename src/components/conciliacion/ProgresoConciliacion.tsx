@@ -4,9 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { formatearPEN } from "@/lib/parsing/resumen";
 import type { EstadoJob } from "@/lib/contract/enums";
 import type { ResultadoConciliacion } from "@/lib/contract/resultado";
+import { Boton, Tarjeta, clasesBoton } from "@/components/ui";
 
 export type JobRow = {
   id: string;
@@ -18,15 +18,35 @@ export type JobRow = {
   periodo_hasta: string;
 };
 
+/**
+ * Las cuatro etapas del motor, en el orden real del workflow de n8n:
+ * Exacta → Difusa → Agrupación → IA (ver CLAUDE.md § Las capas de conciliación).
+ */
 const FASES = [
-  { clave: "exacta", label: "Conciliación exacta" },
-  { clave: "difusa", label: "Conciliación difusa" },
-  { clave: "ia", label: "Análisis con IA" },
+  {
+    clave: "exacta",
+    label: "Coincidencias exactas",
+    detalle: "Mismo monto y mismo identificador de pago.",
+  },
+  {
+    clave: "difusa",
+    label: "Coincidencias aproximadas",
+    detalle: "Montos y fechas dentro de tus tolerancias.",
+  },
+  {
+    clave: "agrupacion",
+    label: "Depósitos agrupados",
+    detalle: "Un abono que junta varios de tus registros, o al revés.",
+  },
+  {
+    clave: "ia",
+    label: "Análisis con IA",
+    detalle: "Propone los casos dudosos y explica cada diferencia.",
+  },
 ];
 
 function ordenFase(f: string | null): number {
-  const i = FASES.findIndex((x) => x.clave === f);
-  return i === -1 ? -1 : i;
+  return FASES.findIndex((x) => x.clave === f);
 }
 
 export function ProgresoConciliacion({ jobInicial }: { jobInicial: JobRow }) {
@@ -80,206 +100,172 @@ export function ProgresoConciliacion({ jobInicial }: { jobInicial: JobRow }) {
   }, [job.estado, router]);
 
   const resumen = job.resultado?.resumen;
-  const cuadre = job.resultado?.cuadre;
 
-  // ── Error ───────────────────────────────────────────────────────────
+  // ── Error ─────────────────────────────────────────────────────────────
   if (job.estado === "error") {
     return (
-      <div className="rounded-2xl border border-red-200 bg-red-50 p-6">
-        <p className="font-semibold text-red-800">Ocurrió un error</p>
-        <p className="mt-1 text-sm text-red-700">
-          {job.error_detalle ?? "No se pudo completar la conciliación."}
+      <Tarjeta tono="falla">
+        <h2 className="font-semibold text-red-900">
+          No se pudo completar la conciliación
+        </h2>
+        <p className="mt-1 text-sm text-red-800">
+          {job.error_detalle ??
+            "El motor no devolvió un resultado. Tus archivos no se han perdido: puedes volver a lanzarla."}
         </p>
-        <Link
-          href="/wizard"
-          className="mt-4 inline-block rounded-xl bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-neutral-800"
-        >
-          Reintentar
-        </Link>
-      </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Link href="/wizard" className={clasesBoton("primario", "sm")}>
+            Intentar de nuevo
+          </Link>
+          <Link href="/conciliacion" className={clasesBoton("secundario", "sm")}>
+            Volver al historial
+          </Link>
+        </div>
+      </Tarjeta>
     );
   }
 
-  // ── Completado ──────────────────────────────────────────────────────
-  if (job.estado === "completado" && resumen) {
+  // ── Completado pero sin resultado legible ─────────────────────────────
+  // La página muestra la revisión cuando el resultado valida contra el
+  // contrato. Si llegamos aquí es que terminó pero el JSON no encaja: hay que
+  // decirlo, no fingir éxito.
+  if (job.estado === "completado") {
     return (
-      <div className="space-y-5">
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
-          <p className="font-semibold text-emerald-900">
-            ✓ Conciliación completada
-          </p>
-          <p className="mt-1 text-sm text-emerald-700">
-            {resumen.conciliados_exactos + resumen.conciliados_difusos} de{" "}
-            {resumen.total_internos} registros conciliados automáticamente.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Tarjeta label="Exactos" valor={resumen.conciliados_exactos} />
-          <Tarjeta label="Difusos" valor={resumen.conciliados_difusos} />
-          <Tarjeta
-            label="Sugeridos IA"
-            valor={resumen.sugeridos_ia}
-            tono="ia"
-          />
-          <Tarjeta
-            label="Sin conciliar"
-            valor={
-              resumen.sin_conciliar_internos + resumen.sin_conciliar_bancarios
-            }
-            tono="alerta"
-          />
-        </div>
-
-        {cuadre && (
-          <div className="rounded-2xl border border-neutral-200 bg-white p-5">
-            <p className="font-semibold text-neutral-900">Cuadre de saldos</p>
-            <dl className="mt-3 space-y-1.5 text-sm">
-              <Linea label="Saldo extracto final" valor={cuadre.saldo_extracto_final} />
-              <Linea label="+ Depósitos en tránsito" valor={cuadre.depositos_en_transito} />
-              <Linea label="− Cheques no cobrados" valor={cuadre.cheques_no_cobrados} />
-              <Linea label="± Cargos no registrados" valor={cuadre.cargos_no_registrados} />
-              <div className="my-2 border-t border-neutral-200" />
-              <Linea label="Saldo banco ajustado" valor={cuadre.saldo_banco_ajustado} fuerte />
-              <Linea label="Saldo según libros" valor={cuadre.saldo_libros_final} fuerte />
-              <Linea
-                label="Diferencia"
-                valor={cuadre.diferencia}
-                fuerte
-                resaltar
-              />
-            </dl>
-          </div>
-        )}
-
-        <p className="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-700">
-          La revisión detallada (dos paneles, cola de IA, conciliación manual y
-          exportación) llega en la Fase 6.
+      <Tarjeta tono="atencion">
+        <h2 className="font-semibold text-amber-900">
+          La conciliación terminó, pero el resultado no se puede mostrar
+        </h2>
+        <p className="mt-1 text-sm text-amber-900">
+          El motor devolvió un resultado con un formato que esta pantalla no
+          reconoce. Los datos siguen guardados; vuelve a lanzar la conciliación
+          del período o revisa la ejecución en n8n.
         </p>
-      </div>
+        {resumen && (
+          <p className="mt-2 text-sm tabular-nums text-amber-900">
+            Conteos recibidos: {resumen.conciliados_exactos ?? 0} exactos ·{" "}
+            {resumen.conciliados_difusos ?? 0} aproximados ·{" "}
+            {resumen.sugeridos_ia ?? 0} sugeridos.
+          </p>
+        )}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Link href="/wizard" className={clasesBoton("primario", "sm")}>
+            Lanzar de nuevo
+          </Link>
+          <Link href="/conciliacion" className={clasesBoton("secundario", "sm")}>
+            Volver al historial
+          </Link>
+        </div>
+      </Tarjeta>
     );
   }
 
-  // ── En progreso ─────────────────────────────────────────────────────
-  const faseActualIdx = ordenFase(job.fase_actual);
+  // ── En progreso ───────────────────────────────────────────────────────
+  const idx = ordenFase(job.fase_actual);
+  const enCola = job.estado === "pendiente" || idx === -1;
+  const faseTexto = enCola
+    ? "Preparando los datos"
+    : (FASES[idx]?.label ?? "Procesando");
+
   return (
-    <div className="rounded-2xl border border-neutral-200 bg-white p-6">
-      <div className="flex items-center gap-3">
-        <span className="h-3 w-3 animate-pulse rounded-full bg-blue-600" />
-        <p className="font-semibold text-neutral-900">
-          Procesando conciliación…
-        </p>
+    <Tarjeta>
+      <div className="flex items-start gap-3">
+        <span
+          aria-hidden
+          className="mt-1.5 h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-blue-600"
+        />
+        <div>
+          <h2 className="font-semibold text-neutral-900">
+            Conciliando tu período…
+          </h2>
+          <p className="mt-1 text-sm text-neutral-600">
+            Puede tardar unos minutos según el volumen. Esta pantalla se
+            actualiza sola; puedes cerrarla y volver desde el historial.
+          </p>
+        </div>
       </div>
-      <p className="mt-1 text-sm text-neutral-500">
-        Esto puede tardar unos segundos. La pantalla se actualiza sola.
+
+      {/* Barra indeterminada: no sabemos cuánto falta, y fingir un porcentaje
+          sería mentir sobre el estado. */}
+      <div className="relative mt-5 h-1.5 overflow-hidden rounded-full bg-neutral-100 text-blue-600">
+        <div className="ci-avance absolute inset-0" />
+      </div>
+
+      {/* Un solo anuncio para lectores de pantalla cuando cambia la fase. */}
+      <p aria-live="polite" className="sr-only">
+        {faseTexto}
       </p>
 
       <ol className="mt-5 space-y-3">
         {FASES.map((fase, i) => {
-          const hecha = faseActualIdx > i;
-          const activa = faseActualIdx === i;
+          const hecha = idx > i;
+          const activa = idx === i;
           const conteo =
             fase.clave === "exacta"
               ? resumen?.conciliados_exactos
               : fase.clave === "difusa"
                 ? resumen?.conciliados_difusos
-                : resumen?.sugeridos_ia;
+                : fase.clave === "ia"
+                  ? resumen?.sugeridos_ia
+                  : undefined;
           return (
-            <li key={fase.clave} className="flex items-center gap-3">
+            <li key={fase.clave} className="flex items-start gap-3">
               <span
+                aria-hidden
                 className={[
-                  "flex h-6 w-6 items-center justify-center rounded-full text-xs",
+                  "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
                   hecha
                     ? "bg-emerald-600 text-white"
                     : activa
                       ? "bg-blue-600 text-white"
-                      : "border border-neutral-300 text-neutral-400",
+                      : "border border-neutral-300 text-neutral-500",
                 ].join(" ")}
               >
                 {hecha ? "✓" : i + 1}
               </span>
-              <span
-                className={
-                  activa || hecha ? "text-neutral-900" : "text-neutral-400"
-                }
-              >
-                {fase.label}
-              </span>
-              {(hecha || activa) && conteo != null && (
-                <span className="text-sm text-neutral-500">
-                  · {conteo} {activa ? "procesando…" : "conciliados"}
-                </span>
-              )}
+              <div className="min-w-0">
+                <p
+                  className={[
+                    "text-sm",
+                    activa
+                      ? "font-semibold text-neutral-900"
+                      : hecha
+                        ? "font-medium text-neutral-800"
+                        : "text-neutral-600",
+                  ].join(" ")}
+                >
+                  {fase.label}
+                  {hecha && conteo != null && (
+                    <span className="ml-1.5 font-normal tabular-nums text-neutral-600">
+                      · {conteo}
+                    </span>
+                  )}
+                  {activa && (
+                    <span className="ml-1.5 font-normal text-blue-700">
+                      · en curso
+                    </span>
+                  )}
+                </p>
+                {(activa || !hecha) && (
+                  <p className="text-xs text-neutral-600">{fase.detalle}</p>
+                )}
+              </div>
             </li>
           );
         })}
       </ol>
 
-      <div className="mt-5 border-t border-neutral-100 pt-4">
-        <p className="text-sm text-neutral-500">
+      <div className="mt-5 border-t border-neutral-200 pt-4">
+        <p className="text-sm text-neutral-600">
           ¿Ya terminó en n8n y la pantalla no cambia?
         </p>
-        <button
-          type="button"
+        <Boton
+          variante="secundario"
+          tamano="sm"
           onClick={() => router.refresh()}
-          className="mt-2 rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+          className="mt-2"
         >
-          Ver resultados ahora
-        </button>
+          Buscar el resultado ahora
+        </Boton>
       </div>
-    </div>
-  );
-}
-
-function Tarjeta({
-  label,
-  valor,
-  tono,
-}: {
-  label: string;
-  valor: number;
-  tono?: "ia" | "alerta";
-}) {
-  const color =
-    tono === "ia"
-      ? "text-blue-700"
-      : tono === "alerta"
-        ? "text-amber-700"
-        : "text-neutral-900";
-  return (
-    <div className="rounded-xl border border-neutral-200 bg-white p-4">
-      <p className="text-xs text-neutral-500">{label}</p>
-      <p className={`mt-1 text-2xl font-bold ${color}`}>{valor}</p>
-    </div>
-  );
-}
-
-function Linea({
-  label,
-  valor,
-  fuerte,
-  resaltar,
-}: {
-  label: string;
-  valor: number;
-  fuerte?: boolean;
-  resaltar?: boolean;
-}) {
-  const cero = Math.abs(valor) < 0.005;
-  return (
-    <div className="flex items-center justify-between">
-      <dt className={fuerte ? "font-medium text-neutral-800" : "text-neutral-600"}>
-        {label}
-      </dt>
-      <dd
-        className={[
-          "tabular-nums",
-          fuerte ? "font-semibold" : "",
-          resaltar ? (cero ? "text-emerald-700" : "text-red-600") : "text-neutral-900",
-        ].join(" ")}
-      >
-        {formatearPEN(valor)}
-      </dd>
-    </div>
+    </Tarjeta>
   );
 }

@@ -71,6 +71,22 @@ export const MovimientoBancario = z.object({
 });
 export type MovimientoBancario = z.infer<typeof MovimientoBancario>;
 
+/**
+ * Ejemplo de aprendizaje (few-shot dinámico): una decisión humana confirmada de
+ * conciliaciones anteriores, resumida en texto. El backend los extrae de los
+ * `resultado.matches[].decisiones` ya persistidos y los adjunta al payload para
+ * que el LLM calibre su criterio con el historial real de la empresa. Los
+ * nombres cambian entre períodos; lo transferible es el PATRÓN (cuánto difieren
+ * monto/fecha/nombre y qué decidió la persona).
+ */
+export const EjemploAprendizaje = z.object({
+  decision: z.enum(["aceptado", "rechazado"]),
+  interno: z.string().min(1),
+  banco: z.string().min(1),
+  categoria: z.string().nullable().optional(),
+});
+export type EjemploAprendizaje = z.infer<typeof EjemploAprendizaje>;
+
 /** Valida que los IDs de una colección sean únicos. */
 function idsUnicos<T>(items: T[], getId: (item: T) => string): boolean {
   const seen = new Set<string>();
@@ -89,6 +105,7 @@ export const PayloadConciliacion = z
     config: ConfigConciliacion,
     registros_internos: z.array(RegistroInterno).min(1),
     movimientos_bancarios: z.array(MovimientoBancario).min(1),
+    ejemplos_aprendizaje: z.array(EjemploAprendizaje).max(20).optional(),
   })
   .superRefine((p, ctx) => {
     if (!idsUnicos(p.registros_internos, (r) => r.id_interno)) {

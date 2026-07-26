@@ -1,0 +1,246 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-26T00:00:00Z",
+  "title": "Design System: Conciliaciones Inteligentes",
+  "extensions": {
+    "colorMeta": {
+      "azul-marcado": {
+        "role": "primary",
+        "displayName": "Azul de Marcado",
+        "canonical": "#2563eb",
+        "note": "Escala blue de Tailwind v4 (fuente canónica OKLCH; hex es la forma portable). Significa 'aquí estás mirando', nunca 'esto está bien'.",
+        "tonalRamp": ["#1e3a8a", "#1e40af", "#1d4ed8", "#2563eb", "#3b82f6", "#60a5fa", "#bfdbfe", "#eff6ff"]
+      },
+      "verde-cuadre": {
+        "role": "secondary",
+        "displayName": "Verde de Cuadre",
+        "canonical": "#059669",
+        "note": "Escala emerald de Tailwind v4. Significa 'conciliado'. Nunca significa 'activo' ni 'primario'.",
+        "tonalRamp": ["#064e3b", "#065f46", "#047857", "#059669", "#10b981", "#34d399", "#a7f3d0", "#ecfdf5"]
+      },
+      "violeta-maquina": {
+        "role": "tertiary",
+        "displayName": "Violeta de Máquina",
+        "canonical": "#6d28d9",
+        "note": "Escala violet de Tailwind v4. Todo lo que propuso la IA y aún no aprobó una persona: badge IA, cola de sugerencias, panel de Aprendizaje.",
+        "tonalRamp": ["#4c1d95", "#5b21b6", "#6d28d9", "#7c3aed", "#8b5cf6", "#a78bfa", "#ddd6fe", "#f5f3ff"]
+      },
+      "ambar-agrupacion": {
+        "role": "tertiary",
+        "displayName": "Ámbar de Agrupación",
+        "canonical": "#b45309",
+        "note": "Escala amber de Tailwind v4. Agrupaciones 1:N / N:1 y partidas sin conciliar. 'Requiere tu atención', distinto de 'está mal'.",
+        "tonalRamp": ["#78350f", "#92400e", "#b45309", "#d97706", "#f59e0b", "#fbbf24", "#fde68a", "#fffbeb"]
+      },
+      "rojo-descuadre": {
+        "role": "tertiary",
+        "displayName": "Rojo de Descuadre",
+        "canonical": "#dc2626",
+        "note": "Escala red de Tailwind v4. Único color de falla: montos negativos, diferencia distinta de cero, errores de acción. No se usa para énfasis.",
+        "tonalRamp": ["#7f1d1d", "#991b1b", "#b91c1c", "#dc2626", "#ef4444", "#f87171", "#fecaca", "#fef2f2"]
+      },
+      "tinta": {
+        "role": "neutral",
+        "displayName": "Tinta",
+        "canonical": "#171717",
+        "note": "Escala neutral de Tailwind v4. Texto principal Y botón de acción primario — el azul ya está ocupado marcando el paso vivo.",
+        "tonalRamp": ["#171717", "#262626", "#404040", "#525252", "#737373", "#a3a3a3", "#d4d4d4", "#f5f5f5"]
+      },
+      "papel": {
+        "role": "neutral",
+        "displayName": "Papel",
+        "canonical": "#f5f5f5",
+        "note": "El lienzo de trabajo de toda el área autenticada. Las tarjetas blancas flotan sobre él.",
+        "tonalRamp": ["#171717", "#262626", "#404040", "#525252", "#737373", "#a3a3a3", "#e5e5e5", "#fafafa"]
+      },
+      "dato-exacta": {
+        "role": "primary",
+        "displayName": "Dato · Exacta",
+        "canonical": "#009E73",
+        "note": "Okabe-Ito, validada para daltonismo. Solo en gráficos de /reportes. Nunca en un badge.",
+        "tonalRamp": ["#00301f", "#004a33", "#006b4c", "#008460", "#009E73", "#3fbc95", "#8bd8bd", "#d6f2e6"]
+      },
+      "dato-difusa": {
+        "role": "secondary",
+        "displayName": "Dato · Difusa",
+        "canonical": "#0072B2",
+        "note": "Okabe-Ito. Solo en gráficos.",
+        "tonalRamp": ["#001f31", "#00354f", "#004e74", "#005f8f", "#0072B2", "#3f9bcd", "#8bc4e3", "#d6e9f6"]
+      },
+      "dato-ia": {
+        "role": "tertiary",
+        "displayName": "Dato · Sugerido IA",
+        "canonical": "#CC79A7",
+        "note": "Okabe-Ito. Solo en gráficos. Su contraparte de UI es Violeta de Máquina; no se intercambian.",
+        "tonalRamp": ["#3d1f2f", "#5c2f47", "#7d4160", "#a05a7c", "#CC79A7", "#dc9dc0", "#ebc2d8", "#f7e5ee"]
+      },
+      "dato-sin-conciliar": {
+        "role": "tertiary",
+        "displayName": "Dato · Sin conciliar",
+        "canonical": "#D55E00",
+        "note": "Okabe-Ito. Solo en gráficos.",
+        "tonalRamp": ["#3d1b00", "#5c2900", "#803a00", "#a84c00", "#D55E00", "#f0873a", "#f7b184", "#fce4d1"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Exclusivo del H1 de la portada. El único momento de escala expresiva del sistema." },
+      "headline": { "displayName": "Headline", "purpose": "Títulos de sección y encabezados de página." },
+      "title": { "displayName": "Title", "purpose": "Encabezado de toda tarjeta y panel. El caballo de batalla de la jerarquía en la app." },
+      "metric": { "displayName": "Metric", "purpose": "La cifra de un KPI o contador, siempre con tabular-nums. Su etiqueta va encima en Label." },
+      "body": { "displayName": "Body", "purpose": "Texto de tabla, listas y descripciones. Sube a 0.9375–1.125rem con ~65ch en superficies de lectura." },
+      "label": { "displayName": "Label", "purpose": "Rótulos de columna del par enfrentado, en mayúsculas. Las etiquetas de formulario usan 0.875rem/500 sin mayúsculas." },
+      "mono": { "displayName": "Mono", "purpose": "Únicamente identificadores de job (rec-2026-07-a8f3). Nunca para cifras." }
+    },
+    "shadows": [
+      { "name": "asiento", "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)", "purpose": "Campos, contenedores de shell y botones secundarios. Da borde óptico, no altura." },
+      { "name": "flotante", "value": "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)", "purpose": "Solo la barra pegajosa de conciliación manual, que se superpone al contenido durante el scroll." },
+      { "name": "heroe", "value": "0 25px 50px -12px rgb(23 37 84 / 0.25)", "purpose": "Un solo uso en el producto: el panel de conciliación de la portada sobre el campo azul. Recurso de persuasión, no de aplicación." }
+    ],
+    "motion": [
+      { "name": "ease-exponencial", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "El único easing del sistema. Salida exponencial: arranca rápido y se posa." },
+      { "name": "ci-rise", "value": "opacity 0 → 1, translateY(10px) → 0, 0.7s", "purpose": "Entrada de bloques de texto y filas del par enfrentado en la portada, escalonada 0.12s." },
+      { "name": "ci-pop", "value": "opacity 0 → 1, scale(0.94) → 1, 0.55s", "purpose": "Entrada del panel de conciliación y del veredicto de cuadre." },
+      { "name": "ci-draw", "value": "clip-path inset(0 100% 0 0) → inset(0), 0.9s", "purpose": "Trazado de izquierda a derecha para elementos lineales." },
+      { "name": "transition-colors", "value": "color / background-color / border-color 150ms cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "El único movimiento dentro de la aplicación: hover y foco de todo interactivo." },
+      { "name": "guarda-de-movimiento", "value": "@media (prefers-reduced-motion: no-preference)", "purpose": "Toda animación vive dentro de esta guarda. El estado por defecto es visible: quien pidió menos movimiento ve la página completa y quieta." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "lg", "value": "1024px" }
+    ],
+    "containers": [
+      { "name": "auth", "value": "448px", "purpose": "Formulario corto centrado a pantalla completa." },
+      { "name": "configuracion", "value": "672px", "purpose": "Lista de campos numéricos en una columna." },
+      { "name": "wizard", "value": "768px", "purpose": "Un paso a la vez, sin distracción lateral." },
+      { "name": "resultado", "value": "896px", "purpose": "Dos paneles enfrentados necesitan aire." },
+      { "name": "app", "value": "1024px", "purpose": "Shell de la aplicación: tablas y reportes." },
+      { "name": "portada", "value": "1152px", "purpose": "Hero dividido a media página." }
+    ]
+  },
+  "components": [
+    {
+      "name": "Botón primario",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "La acción principal de una pantalla. Negro Tinta, no azul: el azul ya significa 'paso vivo'.",
+      "html": "<button class=\"ds-btn-primary\">Iniciar conciliación</button>",
+      "css": ".ds-btn-primary { background: #171717; color: #ffffff; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 1rem; font-weight: 500; padding: 12px 24px; border: none; border-radius: 12px; cursor: pointer; transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1); } .ds-btn-primary:hover { background: #262626; } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 2px #bfdbfe; } .ds-btn-primary:disabled { background: #d4d4d4; cursor: not-allowed; }"
+    },
+    {
+      "name": "Botón secundario",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Rechazar, Limpiar, Cambiar archivo. Superficie blanca con borde.",
+      "html": "<button class=\"ds-btn-secondary\">Rechazar</button>",
+      "css": ".ds-btn-secondary { background: #ffffff; color: #404040; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 0.875rem; font-weight: 500; padding: 6px 12px; border: 1px solid #d4d4d4; border-radius: 8px; cursor: pointer; transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1); } .ds-btn-secondary:hover { background: #fafafa; } .ds-btn-secondary:focus-visible { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 2px #bfdbfe; }"
+    },
+    {
+      "name": "Botón de confirmación",
+      "kind": "button",
+      "refersTo": "button-confirmar",
+      "description": "Aceptar una sugerencia de IA. La única acción del sistema con botón verde, porque es la única que produce una conciliación.",
+      "html": "<button class=\"ds-btn-confirmar\">Aceptar</button>",
+      "css": ".ds-btn-confirmar { background: #059669; color: #ffffff; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 0.875rem; font-weight: 500; padding: 6px 12px; border: none; border-radius: 8px; cursor: pointer; transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1); } .ds-btn-confirmar:hover { background: #047857; } .ds-btn-confirmar:focus-visible { outline: none; box-shadow: 0 0 0 2px #a7f3d0; } .ds-btn-confirmar:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Campo de texto",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Etiqueta siempre visible encima. Foco único en todo el producto: borde azul con anillo de 2px.",
+      "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">Nombre de la empresa</span><input class=\"ds-field-input\" type=\"text\" placeholder=\"Distribuidora San Miguel S.A.C.\" /></label>",
+      "css": ".ds-field { display: block; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; } .ds-field-label { display: block; margin-bottom: 6px; font-size: 0.875rem; font-weight: 500; color: #404040; } .ds-field-input { height: 44px; width: 100%; padding: 0 16px; background: #ffffff; color: #404040; font-size: 1rem; border: 1px solid #d4d4d4; border-radius: 12px; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); transition: border-color 150ms cubic-bezier(0.4, 0, 0.2, 1); } .ds-field-input::placeholder { color: #a3a3a3; } .ds-field-input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 2px #bfdbfe; }"
+    },
+    {
+      "name": "Badges de método",
+      "kind": "chip",
+      "refersTo": "badge-ia",
+      "description": "El componente más citado del sistema. Siempre lleva texto: el color nunca es el único portador de significado.",
+      "html": "<div class=\"ds-badge-row\"><span class=\"ds-badge ds-badge--exacta\">Exacta</span><span class=\"ds-badge ds-badge--difusa\">Difusa</span><span class=\"ds-badge ds-badge--ia\">IA 96%</span><span class=\"ds-badge ds-badge--manual\">Manual</span><span class=\"ds-badge ds-badge--agrupacion\">Agrupación 3:1</span></div>",
+      "css": ".ds-badge-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; } .ds-badge { display: inline-block; padding: 2px 6px; font-size: 0.75rem; font-weight: 500; border-radius: 4px; } .ds-badge--exacta { background: #d1fae5; color: #047857; } .ds-badge--difusa { background: #dbeafe; color: #1d4ed8; } .ds-badge--ia { background: #ede9fe; color: #6d28d9; } .ds-badge--manual { background: #e5e5e5; color: #404040; } .ds-badge--agrupacion { background: #fef3c7; color: #b45309; border-radius: 9999px; padding: 2px 8px; }"
+    },
+    {
+      "name": "Tarjeta de contenido",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Superficie blanca definida por borde, no por sombra. Título en Title, cuerpo debajo.",
+      "html": "<div class=\"ds-card\"><p class=\"ds-card-title\">Cuadre de saldos</p><dl class=\"ds-card-rows\"><div class=\"ds-row\"><dt>Saldo banco ajustado</dt><dd>S/ 48,320.00</dd></div><div class=\"ds-row\"><dt>Saldo según libros</dt><dd>S/ 48,320.00</dd></div><div class=\"ds-row ds-row--total\"><dt>Diferencia</dt><dd class=\"ds-ok\">S/ 0.00</dd></div></dl></div>",
+      "css": ".ds-card { background: #ffffff; border: 1px solid #e5e5e5; border-radius: 16px; padding: 20px; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; } .ds-card-title { margin: 0 0 12px; font-size: 1rem; font-weight: 600; color: #171717; } .ds-card-rows { margin: 0; font-size: 0.875rem; } .ds-row { display: flex; justify-content: space-between; padding: 3px 0; } .ds-row dt { color: #525252; } .ds-row dd { margin: 0; font-variant-numeric: tabular-nums; color: #171717; } .ds-row--total { margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e5e5; font-weight: 600; } .ds-row--total dt { color: #262626; } .ds-ok { color: #047857; }"
+    },
+    {
+      "name": "Stepper del wizard",
+      "kind": "nav",
+      "refersTo": "step-active",
+      "description": "Tres pasos en pastillas de 28px unidas por línea. Los completados cambian el número por un check.",
+      "html": "<ol class=\"ds-stepper\"><li class=\"ds-step\"><span class=\"ds-step-dot ds-step-dot--done\"><svg viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M20 6L9 17l-5-5\"/></svg></span><span class=\"ds-step-label ds-step-label--done\">Cargar datos</span></li><span class=\"ds-step-line\"></span><li class=\"ds-step\"><span class=\"ds-step-dot ds-step-dot--active\" aria-current=\"step\">2</span><span class=\"ds-step-label ds-step-label--active\">Verificar columnas</span></li><span class=\"ds-step-line\"></span><li class=\"ds-step\"><span class=\"ds-step-dot ds-step-dot--todo\">3</span><span class=\"ds-step-label ds-step-label--todo\">Conciliar</span></li></ol>",
+      "css": ".ds-stepper { display: flex; align-items: center; gap: 8px; margin: 0; padding: 0; list-style: none; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; } .ds-step { display: flex; align-items: center; gap: 8px; white-space: nowrap; } .ds-step-dot { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex-shrink: 0; border-radius: 9999px; font-size: 0.875rem; font-weight: 600; } .ds-step-dot--done, .ds-step-dot--active { background: #2563eb; color: #ffffff; } .ds-step-dot--todo { background: #ffffff; border: 2px solid #d4d4d4; color: #a3a3a3; } .ds-step-label { font-size: 0.875rem; } .ds-step-label--done { font-weight: 500; color: #404040; } .ds-step-label--active { font-weight: 600; color: #2563eb; } .ds-step-label--todo { color: #a3a3a3; } .ds-step-line { flex: 1; height: 1px; min-width: 24px; background: #e5e5e5; }"
+    },
+    {
+      "name": "Zona de carga",
+      "kind": "custom",
+      "refersTo": "upload-zone",
+      "description": "El único borde punteado del sistema (2px). Al cargarse se convierte en una tarjeta sólida de Verde de Cuadre.",
+      "html": "<div class=\"ds-upload\"><svg class=\"ds-upload-icon\" viewBox=\"0 0 24 24\" width=\"32\" height=\"32\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 21h18M5 21V10l7-5 7 5v11M9 21v-6h6v6\"/></svg><p class=\"ds-upload-title\">Extracto del banco</p><p class=\"ds-upload-hint\">Arrastra el archivo o haz clic para buscar</p><span class=\"ds-upload-btn\">Seleccionar archivo</span><p class=\"ds-upload-formats\">Excel, CSV o PDF · BCP, BBVA, Interbank, Scotiabank</p></div>",
+      "css": ".ds-upload { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 32px 24px; background: #ffffff; border: 2px dashed #d4d4d4; border-radius: 16px; cursor: pointer; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; transition: border-color 150ms cubic-bezier(0.4, 0, 0.2, 1), background-color 150ms cubic-bezier(0.4, 0, 0.2, 1); } .ds-upload:hover { border-color: #a3a3a3; } .ds-upload:focus-visible { outline: none; border-color: #3b82f6; background: #eff6ff; } .ds-upload-icon { color: #a3a3a3; } .ds-upload-title { margin: 12px 0 0; font-weight: 600; color: #262626; } .ds-upload-hint { margin: 4px 0 0; font-size: 0.875rem; color: #737373; } .ds-upload-btn { display: inline-flex; align-items: center; margin-top: 16px; padding: 8px 16px; background: #ffffff; border: 1px solid #d4d4d4; border-radius: 8px; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); font-size: 0.875rem; font-weight: 500; color: #262626; } .ds-upload-formats { margin: 12px 0 0; font-size: 0.75rem; color: #a3a3a3; }"
+    },
+    {
+      "name": "Zona de carga · cargada",
+      "kind": "custom",
+      "refersTo": "upload-zone-loaded",
+      "description": "El estado de éxito del wizard: tarjeta sólida verde con check y resumen del archivo.",
+      "html": "<div class=\"ds-loaded\"><div class=\"ds-loaded-main\"><svg class=\"ds-loaded-icon\" viewBox=\"0 0 24 24\" width=\"24\" height=\"24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z\"/><path d=\"M14 3v5h5\"/></svg><div><p class=\"ds-loaded-title\">Extracto del banco</p><p class=\"ds-loaded-file\">extracto_bcp_julio.xlsx</p><p class=\"ds-loaded-meta\">1,284 registros · S/ 312,450.00</p><p class=\"ds-loaded-dates\">01/07/2026 – 31/07/2026</p></div></div><span class=\"ds-loaded-check\"><svg viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M20 6L9 17l-5-5\"/></svg></span></div>",
+      "css": ".ds-loaded { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 16px; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; } .ds-loaded-main { display: flex; align-items: flex-start; gap: 12px; } .ds-loaded-icon { margin-top: 2px; color: #059669; flex-shrink: 0; } .ds-loaded-title { margin: 0; font-weight: 600; color: #064e3b; } .ds-loaded-file { margin: 4px 0 0; font-size: 0.875rem; color: #065f46; } .ds-loaded-meta { margin: 2px 0 0; font-size: 0.875rem; font-variant-numeric: tabular-nums; color: #047857; } .ds-loaded-dates { margin: 2px 0 0; font-size: 0.75rem; font-variant-numeric: tabular-nums; color: #059669; } .ds-loaded-check { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; flex-shrink: 0; background: #059669; color: #ffffff; border-radius: 9999px; }"
+    },
+    {
+      "name": "El Par Enfrentado",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "Componente insignia y forma primitiva del producto: dos columnas rotuladas con un vínculo entre ellas. La fila resaltada muestra el estado de selección de un par.",
+      "html": "<div class=\"ds-par\"><div class=\"ds-par-heads\"><span>Tus registros</span><span aria-hidden=\"true\">↔</span><span class=\"ds-par-right\">Tu banco</span></div><ul class=\"ds-par-list\"><li class=\"ds-par-row ds-par-row--sel\"><div class=\"ds-par-cell\"><p class=\"ds-par-name\">Venta 012</p><p class=\"ds-par-amt ds-par-amt--pos\">S/ 450.00</p></div><span class=\"ds-par-link\"><svg viewBox=\"0 0 24 24\" width=\"14\" height=\"14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M20 6L9 17l-5-5\"/></svg></span><div class=\"ds-par-cell ds-par-right\"><p class=\"ds-par-name\">ABONO YAPE</p><p><span class=\"ds-par-amt ds-par-amt--pos\">S/ 450.00</span> <span class=\"ds-badge ds-badge--exacta\">Exacta</span></p></div></li><li class=\"ds-par-row\"><div class=\"ds-par-cell\"><p class=\"ds-par-name\">Servicio 007</p><p class=\"ds-par-amt ds-par-amt--neg\">−S/ 89.00</p></div><span class=\"ds-par-link ds-par-link--ia\"><svg viewBox=\"0 0 24 24\" width=\"14\" height=\"14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M20 6L9 17l-5-5\"/></svg></span><div class=\"ds-par-cell ds-par-right\"><p class=\"ds-par-name\">COM. MANTENIMIENTO</p><p><span class=\"ds-par-amt ds-par-amt--neg\">−S/ 89.00</span> <span class=\"ds-badge ds-badge--ia\">IA 96%</span></p></div></li></ul></div>",
+      "css": ".ds-par { background: #ffffff; border: 1px solid #e5e5e5; border-radius: 16px; padding: 16px; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; } .ds-par-heads { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; padding: 0 4px 8px; font-size: 0.6875rem; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; color: #737373; } .ds-par-right { text-align: right; } .ds-par-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; } .ds-par-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; padding: 10px; border: 1px solid transparent; border-radius: 12px; cursor: pointer; transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1), border-color 150ms cubic-bezier(0.4, 0, 0.2, 1); } .ds-par-row:hover { background: #fafafa; } .ds-par-row--sel { background: #eff6ff; border-color: #60a5fa; } .ds-par-cell { min-width: 0; } .ds-par-name { margin: 0; font-size: 0.8125rem; font-weight: 500; color: #262626; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-par-cell p:last-child { margin: 2px 0 0; font-size: 0.8125rem; } .ds-par-amt { font-variant-numeric: tabular-nums; } .ds-par-amt--pos { color: #047857; } .ds-par-amt--neg { color: #dc2626; } .ds-par-link { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: #059669; color: #ffffff; border-radius: 9999px; } .ds-par-link--ia { background: #6d28d9; } .ds-badge { display: inline-block; padding: 2px 6px; font-size: 0.75rem; font-weight: 500; border-radius: 4px; } .ds-badge--exacta { background: #d1fae5; color: #047857; } .ds-badge--ia { background: #ede9fe; color: #6d28d9; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "El Libro Mayor Iluminado",
+    "overview": "Un libro mayor de toda la vida, pero legible. La forma primitiva del sistema es el par enfrentado — Tus registros ↔ Tu banco — y todo lo demás existe para servirlo: cifras tabulares que se alinean columna contra columna, superficies de papel mate, líneas finas que separan sin gritar. El producto no le pide al usuario que aprenda una interfaz nueva; le devuelve la que ya tenía en la cabeza, ordenada.\n\nLa luz es el único lujo. Sobre ese papel neutro, el color aparece solo cuando algo pasó: un par se emparejó, un saldo cuadró, la máquina propuso algo, una cifra no calza. Nada es azul o verde por decoración. Esa disciplina es lo que hace que el usuario pueda escanear dos mil movimientos y encontrar los doce que importan — con 500 a 2000+ partidas por conciliación, revisar es triaje, y el color es el instrumento del triaje.\n\nEl material es papel administrativo, preciso: superficies planas y mate, definidas por línea antes que por sombra. Cuando algo sí lleva sombra, es porque de verdad flota sobre lo demás (la barra pegajosa de conciliación manual, el panel héroe de la portada). El sistema es sobrio sin ser frío: el radio generoso de los contenedores (24px) y el aire alrededor de cada paso son el gesto de hospitalidad hacia quien no es contador de profesión.",
+    "keyCharacteristics": [
+      "Par enfrentado como forma primitiva: dos columnas que se miran y un vínculo entre ellas.",
+      "Cifras tabulares (tabular-nums) en absolutamente todo número.",
+      "Plano por defecto: borde antes que sombra; la sombra es funcional, nunca decorativa.",
+      "Color ganado: el acento marca un evento, no adorna una superficie.",
+      "Fuente del sistema, sin webfonts: rendimiento y familiaridad por encima de firma tipográfica.",
+      "Español de Perú, cifras en S/, fechas dd/mm/yyyy en pantalla."
+    ],
+    "rules": [
+      { "name": "La Regla del Color Ganado", "body": "El color aparece cuando algo pasó: se emparejó (azul), cuadró (verde), lo propuso la máquina (violeta), requiere atención (ámbar), no calza (rojo). Ninguna superficie, borde o texto es de color por decoración. Prueba: si al quitarle el color a un elemento no se pierde ninguna información de estado, ese color sobraba.", "section": "colors" },
+      { "name": "La Regla del Método Visible", "body": "El método de cada match (Exacta / Difusa / IA n% / Manual) está siempre presente como badge con texto, nunca solo como color. Es el compromiso de accesibilidad del producto y también su postura: la IA muestra su trabajo.", "section": "colors" },
+      { "name": "La Regla de las Dos Encarnaciones", "body": "Un mismo mapeo conceptual vive en dos paletas que no se mezclan: la UI usa la escala semántica (verde/azul/violeta/neutral en los badges), los gráficos usan Okabe-Ito. Nunca uses #CC79A7 en un badge ni #6d28d9 en un gráfico. Si un elemento es ambiguo, decide por su contenedor: dentro de una tarjeta de gráfico, manda Okabe-Ito.", "section": "colors" },
+      { "name": "La Regla de la Cifra Alineada", "body": "Todo número que un usuario pueda comparar verticalmente lleva tabular-nums: montos, porcentajes, conteos, saldos. Sin excepción. Es lo que permite escanear una columna de dos mil montos y ver que uno no cuadra. La regla se rompe solo en prosa corrida donde el número es narrativo.", "section": "typography" },
+      { "name": "La Regla de la Cifra sin Adorno", "body": "Las cifras nunca llevan color por énfasis, solo por estado: negativo en Rojo de Descuadre, positivo en Verde de Cuadre, neutro en Tinta. Un monto grande no se pinta para llamar la atención; se ordena.", "section": "typography" },
+      { "name": "La Regla del Ancho por Tarea", "body": "Antes de crear una pantalla, elige su ancho de la tabla de Layout según su tarea, no por costumbre. Un ancho nuevo necesita justificarse por una tarea que ninguna fila existente describe.", "section": "layout" },
+      { "name": "La Regla de la Sombra Honesta", "body": "Un elemento lleva sombra únicamente si de verdad flota sobre otro: se superpone al hacer scroll, se levanta de un fondo de color, o es un overlay. Una tarjeta que simplemente está sobre el papel se define por su borde. No existen sombras de hover en este sistema; el hover cambia color de fondo o de borde.", "section": "elevation" },
+      { "name": "La Regla del Radio Decreciente", "body": "Un elemento nunca tiene un radio mayor o igual al de su contenedor. Si necesitas una tarjeta dentro de una tarjeta, baja un escalón (16px → 12px). Un radio que empata con su padre delata un componente pegado, no compuesto.", "section": "shapes" }
+    ],
+    "dos": [
+      "Do poner tabular-nums en todo número comparable verticalmente: montos, porcentajes, conteos, saldos.",
+      "Do definir las superficies por borde de 1px (Línea #e5e5e5) y reservar la sombra para lo que de verdad flota.",
+      "Do usar Tinta (#171717) para el botón de acción primario, no el azul: el azul ya significa 'paso vivo'.",
+      "Do acompañar todo estado codificado por color con texto o forma — el badge de método siempre lleva su palabra.",
+      "Do bajar un escalón de radio al anidar (contenedor 24 → tarjeta 16 → campo 12 → control 8 → badge 4).",
+      "Do elegir el ancho de una pantalla nueva de la tabla de Layout, según su tarea.",
+      "Do usar Okabe-Ito (#009E73 / #0072B2 / #CC79A7 / #D55E00) en gráficos, y la escala semántica en la UI.",
+      "Do mantener el estado por defecto visible y envolver toda animación en prefers-reduced-motion: no-preference."
+    ],
+    "donts": [
+      "Don't parecerse a un ERP contable de los 2000: grillas grises densas, bordes biselados, menús anidados, barras de herramientas con iconitos.",
+      "Don't parecerse a un dashboard cripto oscuro: fondo negro, gradientes neón, verde brillante sobre negro, gráficos con glow.",
+      "Don't parecerse a una landing SaaS genérica: gradiente violeta-a-cian, blobs de fondo, tarjetas de features con iconitos, badges 'Powered by AI'.",
+      "Don't parecerse a una hoja de cálculo cruda: tablas sin jerarquía ni estado visible. Si se ve como el Excel del que el usuario viene huyendo, el producto no justifica su existencia.",
+      "Don't introducir webfonts. La fuente del sistema es una decisión de rendimiento y familiaridad.",
+      "Don't usar verde para 'activo' ni azul para 'correcto'. Verde es conciliado; azul es dónde estás mirando.",
+      "Don't pintar una superficie de color sin un estado detrás. Si quitar el color no pierde información, sobraba.",
+      "Don't mezclar las dos paletas: nunca #CC79A7 en un badge ni #6d28d9 en un gráfico.",
+      "Don't sustituir el tratamiento de foco (border #3b82f6 + anillo 2px #bfdbfe) por otro, ni eliminarlo con outline: none a secas.",
+      "Don't añadir sombras de hover. El hover cambia fondo o borde."
+    ]
+  }
+}

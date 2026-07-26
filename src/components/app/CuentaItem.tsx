@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { eliminarCuenta } from "@/app/(app)/cuentas/actions";
 import { BancoIcon } from "@/components/wizard/icons";
+import { Boton } from "@/components/ui";
 
 export type Cuenta = {
   id: string;
@@ -14,43 +15,79 @@ export type Cuenta = {
 export function CuentaItem({ cuenta }: { cuenta: Cuenta }) {
   const [pendiente, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [confirmando, setConfirmando] = useState(false);
 
   function onEliminar() {
-    if (!confirm(`¿Eliminar la cuenta ${cuenta.banco}?`)) return;
     setError(null);
     startTransition(async () => {
       const res = await eliminarCuenta(cuenta.id);
-      if (!res.ok) setError(res.error ?? "No se pudo eliminar.");
+      if (!res.ok) {
+        setError(res.error ?? "No se pudo eliminar la cuenta.");
+        setConfirmando(false);
+      }
     });
   }
 
   return (
-    <li className="flex items-center justify-between gap-4 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center gap-3">
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-100 text-neutral-500">
-          <BancoIcon className="h-5 w-5" />
-        </span>
-        <div>
-          <p className="font-medium text-neutral-900">
-            {cuenta.banco}{" "}
-            <span className="text-neutral-400">
-              {cuenta.numero_enmascarado ?? ""}
-            </span>
-          </p>
-          <p className="text-sm text-neutral-500">
-            {cuenta.moneda === "USD" ? "Dólares (USD)" : "Soles (PEN)"}
-          </p>
-          {error && <p className="mt-1 text-sm text-red-700">{error}</p>}
+    <li className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-asiento">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-neutral-100 text-neutral-600">
+            <BancoIcon className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate font-medium text-neutral-900">
+              {cuenta.banco}{" "}
+              <span className="tabular-nums text-neutral-600">
+                {cuenta.numero_enmascarado ?? ""}
+              </span>
+            </p>
+            <p className="text-sm text-neutral-600">
+              {cuenta.moneda === "USD" ? "Dólares (USD)" : "Soles (PEN)"}
+            </p>
+          </div>
         </div>
+
+        {/* Confirmación en línea en vez de `confirm()` del navegador: se lee en
+            el contexto de la fila y funciona con teclado como el resto. */}
+        {confirmando ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-neutral-700">
+              ¿Eliminar esta cuenta?
+            </span>
+            <Boton
+              variante="peligro"
+              tamano="sm"
+              disabled={pendiente}
+              onClick={onEliminar}
+            >
+              {pendiente ? "Eliminando…" : "Sí, eliminar"}
+            </Boton>
+            <Boton
+              variante="secundario"
+              tamano="sm"
+              disabled={pendiente}
+              onClick={() => setConfirmando(false)}
+            >
+              Cancelar
+            </Boton>
+          </div>
+        ) : (
+          <Boton
+            variante="secundario"
+            tamano="sm"
+            onClick={() => setConfirmando(true)}
+          >
+            Eliminar
+          </Boton>
+        )}
       </div>
-      <button
-        type="button"
-        onClick={onEliminar}
-        disabled={pendiente}
-        className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-50 disabled:opacity-50"
-      >
-        {pendiente ? "Eliminando…" : "Eliminar"}
-      </button>
+
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-red-700">
+          {error}
+        </p>
+      )}
     </li>
   );
 }

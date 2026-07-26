@@ -8,6 +8,7 @@ import { ResultadoReview } from "@/components/conciliacion/ResultadoReview";
 import { formatearFecha } from "@/lib/parsing/resumen";
 import { ResultadoConciliacion } from "@/lib/contract/resultado";
 import { PayloadConciliacion } from "@/lib/contract/payload";
+import { EncabezadoPagina, BadgeEstadoJob } from "@/components/ui";
 
 /**
  * Pantalla de una conciliación:
@@ -42,16 +43,15 @@ export default async function ConciliacionPage({
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-neutral-900">
-          Conciliación
-        </h1>
-        <p className="mt-1 text-sm text-neutral-500">
-          Período {formatearFecha(data.periodo_desde)} –{" "}
-          {formatearFecha(data.periodo_hasta)} · Job{" "}
-          <span className="font-mono text-xs">{data.id}</span>
-        </p>
-      </div>
+      <EncabezadoPagina
+        titulo={`Conciliación · ${formatearFecha(data.periodo_desde)} – ${formatearFecha(data.periodo_hasta)}`}
+        volver={{ href: "/conciliacion", texto: "Historial" }}
+        accion={<BadgeEstadoJob estado={data.estado} />}
+      />
+      <p className="-mt-3 text-sm text-neutral-600">
+        Identificador del proceso:{" "}
+        <span className="font-mono text-xs">{data.id}</span>
+      </p>
 
       {mostrarReview ? (
         <ResultadoReview

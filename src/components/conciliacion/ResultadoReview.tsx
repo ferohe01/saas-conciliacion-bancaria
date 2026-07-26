@@ -3,9 +3,11 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { formatearPEN, formatearFecha } from "@/lib/parsing/resumen";
+import { etiquetaTipo } from "@/lib/reportes";
 import { exportarResultadoExcel } from "@/lib/exportar";
 import {
   registrarDecision,
+  registrarDecisiones,
   conciliarManual,
 } from "@/app/(app)/conciliacion/[jobId]/actions";
 import type { ResultadoConciliacion, Match } from "@/lib/contract/resultado";
@@ -13,7 +15,25 @@ import type {
   RegistroInterno,
   MovimientoBancario,
 } from "@/lib/contract/payload";
-import type { MetodoMatch } from "@/lib/contract/enums";
+import { Boton, Tarjeta, BadgeMetodo, BadgeAgrupacion } from "@/components/ui";
+
+/**
+ * Revisión humana de una conciliación.
+ *
+ * Construida sobre el principio "a dos mil movimientos, revisar es triaje"
+ * (PRODUCT.md § Product Principles). Con 500–2000+ partidas por período nadie
+ * lee cada fila, así que la pantalla ordena el trabajo en tres bloques por
+ * urgencia decreciente:
+ *
+ *   1. Por revisar   — lo que la IA propuso y espera tu criterio. Ordenado por
+ *                      confianza ASCENDENTE: primero lo dudoso. Despachable en
+ *                      lote.
+ *   2. Sin conciliar — lo que nadie logró emparejar. Requiere trabajo manual.
+ *   3. Ya conciliado — colapsado. Está resuelto; se consulta, no se revisa.
+ */
+
+const PAGINA = 50;
+const UMBRAL_LOTE = 0.95;
 
 type Props = {
   jobId: string;
@@ -23,28 +43,13 @@ type Props = {
   moneda: string;
 };
 
-const BADGE: Record<MetodoMatch, { texto: string; clase: string }> = {
-  exacta: { texto: "Exacta", clase: "bg-emerald-100 text-emerald-700" },
-  difusa: { texto: "Difusa", clase: "bg-blue-100 text-blue-700" },
-  ia: { texto: "IA", clase: "bg-violet-100 text-violet-700" },
-  manual: { texto: "Manual", clase: "bg-neutral-200 text-neutral-700" },
+type ItemLado = {
+  id: string;
+  fecha: string;
+  monto: number;
+  texto: string;
+  ref?: string | null;
 };
-
-function Badge({ match }: { match: Match }) {
-  const b = BADGE[match.metodo];
-  const conf =
-    match.metodo === "ia" && match.confianza != null
-      ? ` ${Math.round(match.confianza * 100)}%`
-      : "";
-  return (
-    <span
-      className={`rounded px-1.5 py-0.5 text-xs font-medium ${b.clase}`}
-    >
-      {b.texto}
-      {conf}
-    </span>
-  );
-}
 
 export function ResultadoReview({
   jobId,
@@ -55,11 +60,19 @@ export function ResultadoReview({
 }: Props) {
   const router = useRouter();
   const [pendiente, startTransition] = useTransition();
-  const [seleccion, setSeleccion] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
+
+  // Selección para despacho en lote de la cola de revisión.
+  const [enLote, setEnLote] = useState<Set<number>>(new Set());
   // Selección para conciliación manual.
   const [selInt, setSelInt] = useState<Set<string>>(new Set());
   const [selMov, setSelMov] = useState<Set<string>>(new Set());
+  // Búsquedas y paginación.
+  const [buscaPend, setBuscaPend] = useState("");
+  const [buscaConc, setBuscaConc] = useState("");
+  const [topeSin, setTopeSin] = useState(PAGINA);
+  const [topeConc, setTopeConc] = useState(PAGINA);
 
   const internoById = useMemo(
     () => new Map(internos.map((r) => [r.id_interno, r])),
@@ -70,51 +83,88 @@ export function ResultadoReview({
     [bancarios],
   );
 
-  // Índices de match activo (no rechazado) por id.
-  const { matchDeInterno, matchDeMov } = useMemo(() => {
-    const mi = new Map<string, number>();
-    const mm = new Map<string, number>();
-    resultado.matches.forEach((match, idx) => {
-      if (match.estado_revision === "rechazado") return;
-      match.ids_internos.forEach((id) => mi.set(id, idx));
-      match.ids_movimientos.forEach((id) => mm.set(id, idx));
+  const itemInterno = (id: string): ItemLado => {
+    const it = internoById.get(id);
+    return {
+      id,
+      fecha: it?.fecha ?? "",
+      monto: it?.monto ?? 0,
+      texto: it?.contraparte ?? it?.descripcion ?? "",
+      ref: it?.referencia,
+    };
+  };
+  const itemMov = (id: string): ItemLado => {
+    const bc = movById.get(id);
+    return {
+      id,
+      fecha: bc?.fecha ?? "",
+      monto: bc?.monto ?? 0,
+      texto: bc?.glosa ?? "",
+      ref: bc?.referencia_banco,
+    };
+  };
+
+  // ── Particionado del trabajo ─────────────────────────────────────────────
+  const { cola, conciliados, idsConciliados } = useMemo(() => {
+    const cola: { m: Match; idx: number }[] = [];
+    const conciliados: { m: Match; idx: number }[] = [];
+    const ids = new Set<string>();
+    resultado.matches.forEach((m, idx) => {
+      if (m.estado_revision === "rechazado") return;
+      if (m.estado_revision === "pendiente") cola.push({ m, idx });
+      else conciliados.push({ m, idx });
+      m.ids_internos.forEach((id) => ids.add(id));
+      m.ids_movimientos.forEach((id) => ids.add(id));
     });
-    return { matchDeInterno: mi, matchDeMov: mm };
+    // Triaje: primero lo que la máquina menos sabe. Sin score va al final —
+    // la agrupación 1:N es determinística, no una apuesta.
+    cola.sort((a, b) => (a.m.confianza ?? 2) - (b.m.confianza ?? 2));
+    return { cola, conciliados, idsConciliados: ids };
   }, [resultado]);
 
-  const colaIA = useMemo(
-    () =>
-      resultado.matches
-        .map((m, idx) => ({ m, idx }))
-        .filter(
-          ({ m }) => m.metodo === "ia" && m.estado_revision === "pendiente",
-        ),
-    [resultado],
+  const sinConciliarInt = useMemo(
+    () => internos.filter((r) => !idsConciliados.has(r.id_interno)),
+    [internos, idsConciliados],
+  );
+  const sinConciliarMov = useMemo(
+    () => bancarios.filter((m) => !idsConciliados.has(m.id_movimiento)),
+    [bancarios, idsConciliados],
   );
 
-  const idsSeleccionInt =
-    seleccion != null
-      ? new Set(resultado.matches[seleccion]?.ids_internos ?? [])
-      : new Set<string>();
-  const idsSeleccionMov =
-    seleccion != null
-      ? new Set(resultado.matches[seleccion]?.ids_movimientos ?? [])
-      : new Set<string>();
+  const altaConfianza = useMemo(
+    () => cola.filter(({ m }) => (m.confianza ?? 0) >= UMBRAL_LOTE),
+    [cola],
+  );
 
-  function ejecutar(fn: () => Promise<{ ok: boolean; error?: string }>) {
+  // ── Ejecución ────────────────────────────────────────────────────────────
+  function ejecutar(
+    fn: () => Promise<{ ok: boolean; error?: string }>,
+    exito?: string,
+  ) {
     setError(null);
+    setAviso(null);
     startTransition(async () => {
       const res = await fn();
       if (!res.ok) setError(res.error ?? "No se pudo completar la acción.");
-      else router.refresh();
+      else {
+        if (exito) setAviso(exito);
+        router.refresh();
+      }
     });
   }
 
-  function toggle(set: Set<string>, id: string): Set<string> {
-    const n = new Set(set);
-    if (n.has(id)) n.delete(id);
-    else n.add(id);
-    return n;
+  function decidirLote(indices: number[], accion: "aceptado" | "rechazado") {
+    if (indices.length === 0) return;
+    ejecutar(
+      async () => {
+        const r = await registrarDecisiones(jobId, indices, accion);
+        if (r.ok) setEnLote(new Set());
+        return r;
+      },
+      `${indices.length} ${indices.length === 1 ? "sugerencia" : "sugerencias"} ${
+        accion === "aceptado" ? "aceptadas" : "rechazadas"
+      }.`,
+    );
   }
 
   function conciliarSeleccion() {
@@ -142,196 +192,291 @@ export function ResultadoReview({
         setSelMov(new Set());
       }
       return r;
-    });
+    }, "Conciliado manualmente.");
   }
 
   const c = resultado.cuadre;
-  const r = resultado.resumen;
   const cuadreCero = Math.abs(c.diferencia) < 0.005;
+  const totalPartidas = internos.length + bancarios.length;
 
   return (
     <div className="space-y-6">
-      {/* Resumen ejecutivo */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Tarjeta label="Exactos" valor={r.conciliados_exactos} />
-        <Tarjeta label="Difusos" valor={r.conciliados_difusos} />
-        <Tarjeta label="Sugeridos IA" valor={r.sugeridos_ia} tono="ia" />
-        <Tarjeta
-          label="Sin conciliar"
-          valor={r.sin_conciliar_internos + r.sin_conciliar_bancarios}
-          tono="alerta"
-        />
-      </div>
+      <CuadreBarra
+        cuadre={c}
+        cuadreCero={cuadreCero}
+        moneda={moneda}
+        onExportar={() => void exportarResultadoExcel(resultado, jobId)}
+      />
 
-      {/* Cuadre */}
-      <div className="rounded-2xl border border-neutral-200 bg-white p-5">
-        <div className="flex items-center justify-between">
-          <p className="font-semibold text-neutral-900">Cuadre de saldos</p>
-          <button
-            type="button"
-            onClick={() => {
-              void exportarResultadoExcel(resultado, jobId);
-            }}
-            className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-          >
-            Exportar a Excel
-          </button>
-        </div>
-        <dl className="mt-3 space-y-1.5 text-sm">
-          <Linea label="Saldo extracto final" valor={c.saldo_extracto_final} moneda={moneda} />
-          <Linea label="+ Depósitos en tránsito" valor={c.depositos_en_transito} moneda={moneda} />
-          <Linea label="− Cheques no cobrados" valor={c.cheques_no_cobrados} moneda={moneda} />
-          <Linea label="± Cargos no registrados" valor={c.cargos_no_registrados} moneda={moneda} />
-          <div className="my-2 border-t border-neutral-200" />
-          <Linea label="Saldo banco ajustado" valor={c.saldo_banco_ajustado} moneda={moneda} fuerte />
-          <Linea label="Saldo según libros" valor={c.saldo_libros_final} moneda={moneda} fuerte />
-          <Linea label="Diferencia" valor={c.diferencia} moneda={moneda} fuerte resaltar />
-        </dl>
-        {cuadreCero ? (
-          <p className="mt-2 text-sm font-medium text-emerald-700">
-            ✓ El cuadre está balanceado.
-          </p>
-        ) : (
-          <p className="mt-2 text-sm text-red-600">
-            La diferencia no es cero: revisa las partidas no conciliadas.
-          </p>
-        )}
-      </div>
+      <ResumenTriaje
+        porRevisar={cola.length}
+        sinConciliar={sinConciliarInt.length + sinConciliarMov.length}
+        conciliados={conciliados.length}
+        totalPartidas={totalPartidas}
+      />
 
       {error && (
-        <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+        >
           {error}
         </p>
       )}
-
-      {/* Cola de revisión IA */}
-      {colaIA.length > 0 && (
-        <div className="rounded-2xl border border-violet-200 bg-violet-50/50 p-5">
-          <p className="font-semibold text-neutral-900">
-            Sugerencias de IA por revisar ({colaIA.length})
-          </p>
-          <ul className="mt-3 space-y-3">
-            {colaIA.map(({ m, idx }) => {
-              const it = internoById.get(m.ids_internos[0] ?? "");
-              const bc = movById.get(m.ids_movimientos[0] ?? "");
-              return (
-                <li
-                  key={idx}
-                  className="rounded-xl border border-neutral-200 bg-white p-4"
-                >
-                  <div className="flex items-center gap-2">
-                    <Badge match={m} />
-                    <span className="text-xs text-neutral-500">
-                      {m.ids_internos.join(", ")} ↔ {m.ids_movimientos.join(", ")}
-                    </span>
-                  </div>
-                  <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
-                    <p className="text-neutral-700">
-                      <span className="text-neutral-400">Interno:</span>{" "}
-                      {it ? `${formatearFecha(it.fecha)} · ${formatearPEN(it.monto, moneda)} · ${it.contraparte ?? ""}` : "—"}
-                    </p>
-                    <p className="text-neutral-700">
-                      <span className="text-neutral-400">Banco:</span>{" "}
-                      {bc ? `${formatearFecha(bc.fecha)} · ${formatearPEN(bc.monto, moneda)} · ${bc.glosa ?? ""}` : "—"}
-                    </p>
-                  </div>
-                  {m.justificacion && (
-                    <p className="mt-2 text-sm text-neutral-600">
-                      {m.justificacion}
-                    </p>
-                  )}
-                  <div className="mt-3 flex gap-2">
-                    <button
-                      type="button"
-                      disabled={pendiente}
-                      onClick={() =>
-                        ejecutar(() => registrarDecision(jobId, idx, "aceptado"))
-                      }
-                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-                    >
-                      Aceptar
-                    </button>
-                    <button
-                      type="button"
-                      disabled={pendiente}
-                      onClick={() =>
-                        ejecutar(() => registrarDecision(jobId, idx, "rechazado"))
-                      }
-                      className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
-                    >
-                      Rechazar
-                    </button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
+      {aviso && (
+        <p
+          role="status"
+          className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+        >
+          {aviso}
+        </p>
       )}
 
-      {/* Dos paneles */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Panel
-          titulo="Registros internos"
-          items={internos.map((it) => ({
-            id: it.id_interno,
-            fecha: it.fecha,
-            monto: it.monto,
-            texto: it.contraparte ?? it.descripcion ?? "",
-            ref: it.referencia,
-          }))}
-          matchDe={matchDeInterno}
-          matches={resultado.matches}
-          resaltados={idsSeleccionInt}
-          moneda={moneda}
-          onSeleccionarMatch={setSeleccion}
-          seleccionManual={selInt}
-          onToggleManual={(id) => setSelInt((s) => toggle(s, id))}
-        />
-        <Panel
-          titulo="Movimientos bancarios"
-          items={bancarios.map((bc) => ({
-            id: bc.id_movimiento,
-            fecha: bc.fecha,
-            monto: bc.monto,
-            texto: bc.glosa ?? "",
-            ref: bc.referencia_banco,
-          }))}
-          matchDe={matchDeMov}
-          matches={resultado.matches}
-          resaltados={idsSeleccionMov}
-          moneda={moneda}
-          onSeleccionarMatch={setSeleccion}
-          seleccionManual={selMov}
-          onToggleManual={(id) => setSelMov((s) => toggle(s, id))}
-        />
-      </div>
+      {/* ── 1. Por revisar ──────────────────────────────────────────────── */}
+      <section aria-labelledby="h-revisar">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2
+              id="h-revisar"
+              className="text-lg font-semibold text-neutral-900"
+            >
+              Por revisar{" "}
+              <span className="tabular-nums text-neutral-500">
+                ({cola.length})
+              </span>
+            </h2>
+            <p className="text-sm text-neutral-600">
+              {cola.length > 0
+                ? "Ordenadas de menor a mayor confianza: lo dudoso primero."
+                : "No queda nada esperando tu criterio."}
+            </p>
+          </div>
+        </div>
 
-      {/* Conciliación manual */}
+        {cola.length === 0 ? (
+          <Tarjeta tono="cuadre">
+            <p className="text-sm font-medium text-emerald-800">
+              ✓ Revisión al día. Ninguna sugerencia pendiente.
+            </p>
+          </Tarjeta>
+        ) : (
+          <div className="space-y-3">
+            <BarraLote
+              cola={cola}
+              enLote={enLote}
+              altaConfianza={altaConfianza}
+              pendiente={pendiente}
+              onToggleTodo={(marcar) =>
+                setEnLote(marcar ? new Set(cola.map((x) => x.idx)) : new Set())
+              }
+              onAceptarSeleccion={() => decidirLote([...enLote], "aceptado")}
+              onRechazarSeleccion={() => decidirLote([...enLote], "rechazado")}
+              onAceptarAltas={() =>
+                decidirLote(
+                  altaConfianza.map((x) => x.idx),
+                  "aceptado",
+                )
+              }
+            />
+
+            <ul className="space-y-3">
+              {cola.map(({ m, idx }) => (
+                <li key={idx}>
+                  <FichaSugerencia
+                    match={m}
+                    moneda={moneda}
+                    seleccionada={enLote.has(idx)}
+                    pendiente={pendiente}
+                    internos={m.ids_internos.map(itemInterno)}
+                    movimientos={m.ids_movimientos.map(itemMov)}
+                    onToggle={() =>
+                      setEnLote((s) => {
+                        const n = new Set(s);
+                        if (n.has(idx)) n.delete(idx);
+                        else n.add(idx);
+                        return n;
+                      })
+                    }
+                    onAceptar={() =>
+                      ejecutar(
+                        () => registrarDecision(jobId, idx, "aceptado"),
+                        "Sugerencia aceptada.",
+                      )
+                    }
+                    onRechazar={() =>
+                      ejecutar(
+                        () => registrarDecision(jobId, idx, "rechazado"),
+                        "Sugerencia rechazada.",
+                      )
+                    }
+                  />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
+
+      {/* ── 2. Sin conciliar ────────────────────────────────────────────── */}
+      <section aria-labelledby="h-sin">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 id="h-sin" className="text-lg font-semibold text-neutral-900">
+              Sin conciliar{" "}
+              <span className="tabular-nums text-neutral-500">
+                ({sinConciliarInt.length + sinConciliarMov.length})
+              </span>
+            </h2>
+            <p className="text-sm text-neutral-600">
+              Marca una o más partidas de cada lado y concílialas a mano.
+            </p>
+          </div>
+          {sinConciliarInt.length + sinConciliarMov.length > 0 && (
+            <BuscadorPartidas
+              valor={buscaPend}
+              onCambio={(v) => {
+                setBuscaPend(v);
+                setTopeSin(PAGINA);
+              }}
+              etiqueta="Buscar entre las partidas sin conciliar"
+            />
+          )}
+        </div>
+
+        {sinConciliarInt.length + sinConciliarMov.length === 0 ? (
+          <Tarjeta tono="cuadre">
+            <p className="text-sm font-medium text-emerald-800">
+              ✓ Todas las partidas del período quedaron emparejadas.
+            </p>
+          </Tarjeta>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <PanelSinConciliar
+              titulo="Tus registros"
+              items={sinConciliarInt.map((r) => itemInterno(r.id_interno))}
+              busqueda={buscaPend}
+              tope={topeSin}
+              onMas={() => setTopeSin((t) => t + PAGINA)}
+              moneda={moneda}
+              seleccion={selInt}
+              onToggle={(id) =>
+                setSelInt((s) => {
+                  const n = new Set(s);
+                  if (n.has(id)) n.delete(id);
+                  else n.add(id);
+                  return n;
+                })
+              }
+            />
+            <PanelSinConciliar
+              titulo="Tu banco"
+              items={sinConciliarMov.map((m) => itemMov(m.id_movimiento))}
+              busqueda={buscaPend}
+              tope={topeSin}
+              onMas={() => setTopeSin((t) => t + PAGINA)}
+              moneda={moneda}
+              seleccion={selMov}
+              onToggle={(id) =>
+                setSelMov((s) => {
+                  const n = new Set(s);
+                  if (n.has(id)) n.delete(id);
+                  else n.add(id);
+                  return n;
+                })
+              }
+            />
+          </div>
+        )}
+      </section>
+
+      {/* ── 3. Ya conciliado (colapsado) ────────────────────────────────── */}
+      <section aria-labelledby="h-conc">
+        <h2 id="h-conc" className="sr-only">
+          Partidas ya conciliadas
+        </h2>
+        <details className="group rounded-2xl border border-neutral-200 bg-white">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-2xl px-5 py-4">
+            <span>
+              <span className="font-semibold text-neutral-900">
+                Ya conciliado{" "}
+                <span className="tabular-nums text-neutral-500">
+                  ({conciliados.length})
+                </span>
+              </span>
+              <span className="mt-0.5 block text-sm text-neutral-600">
+                Resuelto. Ábrelo solo si necesitas consultar un par.
+              </span>
+            </span>
+            <span
+              aria-hidden
+              className="shrink-0 text-neutral-500 transition-transform group-open:rotate-180"
+            >
+              ▾
+            </span>
+          </summary>
+
+          <div className="border-t border-neutral-200 p-5">
+            <BuscadorPartidas
+              valor={buscaConc}
+              onCambio={(v) => {
+                setBuscaConc(v);
+                setTopeConc(PAGINA);
+              }}
+              etiqueta="Buscar entre los pares conciliados"
+            />
+            <TablaPares
+              pares={conciliados}
+              itemInterno={itemInterno}
+              itemMov={itemMov}
+              busqueda={buscaConc}
+              tope={topeConc}
+              onMas={() => setTopeConc((t) => t + PAGINA)}
+              moneda={moneda}
+            />
+          </div>
+        </details>
+      </section>
+
+      {/* Barra flotante de conciliación manual */}
       {(selInt.size > 0 || selMov.size > 0) && (
-        <div className="sticky bottom-4 flex items-center justify-between gap-4 rounded-2xl border border-neutral-300 bg-white p-4 shadow-lg">
-          <p className="text-sm text-neutral-600">
-            Seleccionados: {selInt.size} interno(s) y {selMov.size} bancario(s).
+        <div className="sticky bottom-4 z-30 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-neutral-300 bg-white p-4 shadow-flotante">
+          <p className="text-sm text-neutral-700">
+            <span className="font-medium tabular-nums text-neutral-900">
+              {selInt.size}
+            </span>{" "}
+            de tus registros y{" "}
+            <span className="font-medium tabular-nums text-neutral-900">
+              {selMov.size}
+            </span>{" "}
+            del banco.
+            {selInt.size > 0 && selMov.size > 0 && (
+              <DiferenciaSeleccion
+                selInt={selInt}
+                selMov={selMov}
+                internoById={internoById}
+                movById={movById}
+                moneda={moneda}
+              />
+            )}
           </p>
           <div className="flex gap-2">
-            <button
-              type="button"
+            <Boton
+              variante="secundario"
+              tamano="sm"
               onClick={() => {
                 setSelInt(new Set());
                 setSelMov(new Set());
               }}
-              className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
             >
               Limpiar
-            </button>
-            <button
-              type="button"
+            </Boton>
+            <Boton
+              tamano="sm"
               disabled={pendiente || selInt.size === 0 || selMov.size === 0}
               onClick={conciliarSeleccion}
-              className="rounded-lg bg-neutral-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-neutral-800 disabled:bg-neutral-300"
             >
-              Conciliar manualmente
-            </button>
+              {pendiente ? "Conciliando…" : "Conciliar manualmente"}
+            </Boton>
           </div>
         </div>
       )}
@@ -339,120 +484,72 @@ export function ResultadoReview({
   );
 }
 
-type ItemPanel = {
-  id: string;
-  fecha: string;
-  monto: number;
-  texto: string;
-  ref?: string | null;
-};
-
-function Panel({
-  titulo,
-  items,
-  matchDe,
-  matches,
-  resaltados,
+// ── Cuadre: el veredicto del período ────────────────────────────────────────
+function CuadreBarra({
+  cuadre,
+  cuadreCero,
   moneda,
-  onSeleccionarMatch,
-  seleccionManual,
-  onToggleManual,
+  onExportar,
 }: {
-  titulo: string;
-  items: ItemPanel[];
-  matchDe: Map<string, number>;
-  matches: Match[];
-  resaltados: Set<string>;
+  cuadre: ResultadoConciliacion["cuadre"];
+  cuadreCero: boolean;
   moneda: string;
-  onSeleccionarMatch: (idx: number | null) => void;
-  seleccionManual: Set<string>;
-  onToggleManual: (id: string) => void;
+  onExportar: () => void;
 }) {
   return (
-    <div className="rounded-2xl border border-neutral-200 bg-white p-4">
-      <p className="mb-3 font-semibold text-neutral-900">{titulo}</p>
-      <ul className="max-h-[28rem] space-y-1 overflow-y-auto">
-        {items.map((it) => {
-          const matchIdx = matchDe.get(it.id);
-          const conciliado = matchIdx != null;
-          const resaltado = resaltados.has(it.id);
-          const seleccionado = seleccionManual.has(it.id);
-          return (
-            <li
-              key={it.id}
-              onClick={() =>
-                conciliado
-                  ? onSeleccionarMatch(matchIdx!)
-                  : onToggleManual(it.id)
-              }
-              className={[
-                "flex cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
-                resaltado
-                  ? "border-blue-400 bg-blue-50"
-                  : seleccionado
-                    ? "border-neutral-800 bg-neutral-50"
-                    : "border-transparent hover:bg-neutral-50",
-              ].join(" ")}
+    <Tarjeta tono={cuadreCero ? "cuadre" : "atencion"}>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p
+            className={`text-xs font-medium ${cuadreCero ? "text-emerald-700" : "text-amber-800"}`}
+          >
+            Cuadre del período
+          </p>
+          <p className="mt-1 flex items-baseline gap-2">
+            <span
+              className={`text-3xl font-bold tabular-nums ${cuadreCero ? "text-emerald-800" : "text-amber-900"}`}
             >
-              <div className="min-w-0">
-                <p className="truncate text-neutral-800">
-                  {formatearFecha(it.fecha)} ·{" "}
-                  <span
-                    className={
-                      it.monto < 0 ? "text-red-600" : "text-emerald-700"
-                    }
-                  >
-                    {formatearPEN(it.monto, moneda)}
-                  </span>
-                </p>
-                <p className="truncate text-xs text-neutral-500">
-                  {it.id}
-                  {it.texto ? ` · ${it.texto}` : ""}
-                </p>
-              </div>
-              {conciliado ? (
-                <Badge match={matches[matchIdx!]!} />
-              ) : (
-                <input
-                  type="checkbox"
-                  checked={seleccionado}
-                  readOnly
-                  aria-label={`Seleccionar ${it.id} para conciliar manualmente`}
-                  className="h-4 w-4 shrink-0 rounded border-neutral-300"
-                />
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    </div>
+              {formatearPEN(cuadre.diferencia, moneda)}
+            </span>
+            <span
+              className={`text-sm font-medium ${cuadreCero ? "text-emerald-700" : "text-amber-800"}`}
+            >
+              {cuadreCero ? "✓ Cuadra" : "de diferencia"}
+            </span>
+          </p>
+          <p
+            className={`mt-1 text-sm ${cuadreCero ? "text-emerald-700" : "text-amber-800"}`}
+          >
+            {cuadreCero
+              ? "Banco y libros coinciden."
+              : "Revisa las partidas sin conciliar para cerrar la diferencia."}
+          </p>
+        </div>
+        <Boton variante="secundario" tamano="sm" onClick={onExportar}>
+          Exportar a Excel
+        </Boton>
+      </div>
+
+      <details className="mt-4">
+        <summary className="cursor-pointer text-sm font-medium text-neutral-700">
+          Ver el detalle del cuadre
+        </summary>
+        <dl className="mt-3 space-y-1.5 rounded-xl bg-white/70 p-4 text-sm">
+          <LineaCuadre label="Saldo extracto final" valor={cuadre.saldo_extracto_final} moneda={moneda} />
+          <LineaCuadre label="+ Depósitos en tránsito" valor={cuadre.depositos_en_transito} moneda={moneda} />
+          <LineaCuadre label="− Cheques no cobrados" valor={cuadre.cheques_no_cobrados} moneda={moneda} />
+          <LineaCuadre label="± Cargos no registrados" valor={cuadre.cargos_no_registrados} moneda={moneda} />
+          <div className="my-2 border-t border-neutral-300" />
+          <LineaCuadre label="Saldo banco ajustado" valor={cuadre.saldo_banco_ajustado} moneda={moneda} fuerte />
+          <LineaCuadre label="Saldo según libros" valor={cuadre.saldo_libros_final} moneda={moneda} fuerte />
+          <LineaCuadre label="Diferencia" valor={cuadre.diferencia} moneda={moneda} fuerte resaltar />
+        </dl>
+      </details>
+    </Tarjeta>
   );
 }
 
-function Tarjeta({
-  label,
-  valor,
-  tono,
-}: {
-  label: string;
-  valor: number;
-  tono?: "ia" | "alerta";
-}) {
-  const color =
-    tono === "ia"
-      ? "text-violet-700"
-      : tono === "alerta"
-        ? "text-amber-700"
-        : "text-neutral-900";
-  return (
-    <div className="rounded-xl border border-neutral-200 bg-white p-4">
-      <p className="text-xs text-neutral-500">{label}</p>
-      <p className={`mt-1 text-2xl font-bold ${color}`}>{valor}</p>
-    </div>
-  );
-}
-
-function Linea({
+function LineaCuadre({
   label,
   valor,
   moneda,
@@ -467,7 +564,7 @@ function Linea({
 }) {
   const cero = Math.abs(valor) < 0.005;
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between gap-4">
       <dt className={fuerte ? "font-medium text-neutral-800" : "text-neutral-600"}>
         {label}
       </dt>
@@ -475,15 +572,563 @@ function Linea({
         className={[
           "tabular-nums",
           fuerte ? "font-semibold" : "",
-          resaltar
-            ? cero
-              ? "text-emerald-700"
-              : "text-red-600"
-            : "text-neutral-900",
+          resaltar ? (cero ? "text-emerald-800" : "text-red-700") : "text-neutral-900",
         ].join(" ")}
       >
         {formatearPEN(valor, moneda)}
       </dd>
     </div>
+  );
+}
+
+// ── Resumen del triaje: cuánto trabajo queda, no cuánto se hizo ─────────────
+function ResumenTriaje({
+  porRevisar,
+  sinConciliar,
+  conciliados,
+  totalPartidas,
+}: {
+  porRevisar: number;
+  sinConciliar: number;
+  conciliados: number;
+  totalPartidas: number;
+}) {
+  const pendiente = porRevisar + sinConciliar;
+  const pctListo =
+    totalPartidas > 0
+      ? Math.round(((totalPartidas - sinConciliar) / totalPartidas) * 100)
+      : 100;
+  return (
+    <Tarjeta>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-xs font-medium text-neutral-500">
+            Trabajo que te queda
+          </p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-neutral-900">
+            {pendiente === 0 ? "Nada pendiente" : `${pendiente} partidas`}
+          </p>
+          <p className="mt-1 text-sm text-neutral-600">
+            <span className="tabular-nums">{porRevisar}</span> por revisar ·{" "}
+            <span className="tabular-nums">{sinConciliar}</span> sin conciliar ·{" "}
+            <span className="tabular-nums">{conciliados}</span> pares resueltos
+          </p>
+        </div>
+        <div className="min-w-[10rem] flex-1">
+          <div className="flex items-baseline justify-between text-sm">
+            <span className="text-neutral-600">Emparejado</span>
+            <span className="font-semibold tabular-nums text-neutral-900">
+              {pctListo}%
+            </span>
+          </div>
+          <div
+            className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-neutral-100"
+            role="img"
+            aria-label={`${pctListo}% de las partidas emparejadas`}
+          >
+            <div
+              className="h-2 rounded-full bg-emerald-500"
+              style={{ width: `${pctListo}%` }}
+            />
+          </div>
+        </div>
+      </div>
+    </Tarjeta>
+  );
+}
+
+// ── Barra de despacho en lote ───────────────────────────────────────────────
+function BarraLote({
+  cola,
+  enLote,
+  altaConfianza,
+  pendiente,
+  onToggleTodo,
+  onAceptarSeleccion,
+  onRechazarSeleccion,
+  onAceptarAltas,
+}: {
+  cola: { m: Match; idx: number }[];
+  enLote: Set<number>;
+  altaConfianza: { m: Match; idx: number }[];
+  pendiente: boolean;
+  onToggleTodo: (marcar: boolean) => void;
+  onAceptarSeleccion: () => void;
+  onRechazarSeleccion: () => void;
+  onAceptarAltas: () => void;
+}) {
+  const todas = enLote.size === cola.length && cola.length > 0;
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-neutral-200 bg-white px-4 py-3">
+      <label className="flex min-h-9 items-center gap-2 text-sm text-neutral-700">
+        <input
+          type="checkbox"
+          checked={todas}
+          onChange={(e) => onToggleTodo(e.target.checked)}
+          className="h-4 w-4 rounded border-neutral-400 text-neutral-900"
+        />
+        Seleccionar todas
+      </label>
+
+      {enLote.size > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm tabular-nums text-neutral-600">
+            {enLote.size} seleccionadas
+          </span>
+          <Boton
+            variante="confirmar"
+            tamano="sm"
+            disabled={pendiente}
+            onClick={onAceptarSeleccion}
+          >
+            Aceptar
+          </Boton>
+          <Boton
+            variante="secundario"
+            tamano="sm"
+            disabled={pendiente}
+            onClick={onRechazarSeleccion}
+          >
+            Rechazar
+          </Boton>
+        </div>
+      ) : (
+        altaConfianza.length > 0 && (
+          <Boton
+            variante="confirmar"
+            tamano="sm"
+            disabled={pendiente}
+            onClick={onAceptarAltas}
+          >
+            Aceptar las {altaConfianza.length} de confianza ≥ 95%
+          </Boton>
+        )
+      )}
+    </div>
+  );
+}
+
+// ── Ficha de una sugerencia ─────────────────────────────────────────────────
+function FichaSugerencia({
+  match,
+  moneda,
+  seleccionada,
+  pendiente,
+  internos,
+  movimientos,
+  onToggle,
+  onAceptar,
+  onRechazar,
+}: {
+  match: Match;
+  moneda: string;
+  seleccionada: boolean;
+  pendiente: boolean;
+  internos: ItemLado[];
+  movimientos: ItemLado[];
+  onToggle: () => void;
+  onAceptar: () => void;
+  onRechazar: () => void;
+}) {
+  const esGrupo = internos.length > 1 || movimientos.length > 1;
+  const dif = match.diferencia_monto ?? 0;
+  const hayDif = Math.abs(dif) > 0.005;
+
+  return (
+    <div
+      className={[
+        "rounded-2xl border p-4 transition-colors",
+        seleccionada
+          ? "border-blue-400 bg-blue-50"
+          : "border-violet-200 bg-violet-50/50",
+      ].join(" ")}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex min-h-9 items-center gap-2">
+          <input
+            type="checkbox"
+            checked={seleccionada}
+            onChange={onToggle}
+            className="h-4 w-4 rounded border-neutral-400 text-neutral-900"
+          />
+          <span className="sr-only">Seleccionar esta sugerencia</span>
+        </label>
+        <BadgeMetodo metodo={match.metodo} confianza={match.confianza} />
+        {esGrupo && (
+          <BadgeAgrupacion
+            internos={internos.length}
+            movimientos={movimientos.length}
+          />
+        )}
+        {match.categoria_diferencia && (
+          <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-700">
+            {etiquetaTipo(match.categoria_diferencia)}
+          </span>
+        )}
+        {hayDif && (
+          <span className="text-xs tabular-nums text-amber-800">
+            Diferencia {formatearPEN(dif, moneda)}
+          </span>
+        )}
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+        <ColumnaPartidas
+          rotulo="Tus registros"
+          items={internos}
+          moneda={moneda}
+        />
+        <span
+          aria-hidden
+          className="hidden h-6 w-6 shrink-0 place-items-center self-center rounded-full bg-violet-600 text-xs text-white sm:grid"
+        >
+          ↔
+        </span>
+        <ColumnaPartidas
+          rotulo="Tu banco"
+          items={movimientos}
+          moneda={moneda}
+          alineadoDerecha
+        />
+      </div>
+
+      {match.justificacion && (
+        <p className="mt-3 border-l-2 border-violet-300 pl-3 text-sm text-neutral-700">
+          {match.justificacion}
+        </p>
+      )}
+
+      <div className="mt-4 flex gap-2">
+        <Boton
+          variante="confirmar"
+          tamano="sm"
+          disabled={pendiente}
+          onClick={onAceptar}
+        >
+          Aceptar
+        </Boton>
+        <Boton
+          variante="secundario"
+          tamano="sm"
+          disabled={pendiente}
+          onClick={onRechazar}
+        >
+          Rechazar
+        </Boton>
+      </div>
+    </div>
+  );
+}
+
+function ColumnaPartidas({
+  rotulo,
+  items,
+  moneda,
+  alineadoDerecha,
+}: {
+  rotulo: string;
+  items: ItemLado[];
+  moneda: string;
+  alineadoDerecha?: boolean;
+}) {
+  return (
+    <div className={`min-w-0 ${alineadoDerecha ? "sm:text-right" : ""}`}>
+      <p className="text-[11px] font-medium tracking-wide text-neutral-600 uppercase">
+        {rotulo}
+      </p>
+      {items.map((it) => (
+        <div key={it.id} className="mt-1">
+          <p className="truncate text-sm font-medium text-neutral-800">
+            {it.texto || it.id}
+          </p>
+          <p className="text-sm tabular-nums text-neutral-600">
+            {it.fecha ? `${formatearFecha(it.fecha)} · ` : ""}
+            <MontoConSigno monto={it.monto} moneda={moneda} />
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MontoConSigno({ monto, moneda }: { monto: number; moneda: string }) {
+  return (
+    <span className={monto < 0 ? "text-red-700" : "text-emerald-800"}>
+      {formatearPEN(monto, moneda)}
+    </span>
+  );
+}
+
+// ── Buscador compartido ─────────────────────────────────────────────────────
+function BuscadorPartidas({
+  valor,
+  onCambio,
+  etiqueta,
+}: {
+  valor: string;
+  onCambio: (v: string) => void;
+  etiqueta: string;
+}) {
+  return (
+    <input
+      type="search"
+      value={valor}
+      onChange={(e) => onCambio(e.target.value)}
+      placeholder="Buscar por monto, fecha o descripción…"
+      aria-label={etiqueta}
+      className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm text-neutral-800 shadow-asiento transition-colors placeholder:text-neutral-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none sm:w-72"
+    />
+  );
+}
+
+function coincide(it: ItemLado, q: string): boolean {
+  if (!q) return true;
+  const t = q.toLowerCase();
+  return (
+    it.id.toLowerCase().includes(t) ||
+    it.texto.toLowerCase().includes(t) ||
+    String(it.monto).includes(t) ||
+    it.fecha.includes(t) ||
+    (it.ref ?? "").toLowerCase().includes(t)
+  );
+}
+
+// ── Panel de partidas sin conciliar (selección para match manual) ───────────
+function PanelSinConciliar({
+  titulo,
+  items,
+  busqueda,
+  tope,
+  onMas,
+  moneda,
+  seleccion,
+  onToggle,
+}: {
+  titulo: string;
+  items: ItemLado[];
+  busqueda: string;
+  tope: number;
+  onMas: () => void;
+  moneda: string;
+  seleccion: Set<string>;
+  onToggle: (id: string) => void;
+}) {
+  const filtrados = items.filter((it) => coincide(it, busqueda));
+  const visibles = filtrados.slice(0, tope);
+
+  return (
+    <div className="rounded-2xl border border-neutral-200 bg-white p-4">
+      <div className="mb-3 flex items-baseline justify-between gap-2">
+        <h3 className="font-semibold text-neutral-900">{titulo}</h3>
+        <span className="text-sm tabular-nums text-neutral-600">
+          {filtrados.length}
+          {filtrados.length !== items.length && ` de ${items.length}`}
+        </span>
+      </div>
+
+      {filtrados.length === 0 ? (
+        <p className="py-6 text-center text-sm text-neutral-600">
+          {items.length === 0
+            ? "Nada pendiente de este lado."
+            : "Ninguna partida coincide con la búsqueda."}
+        </p>
+      ) : (
+        <>
+          <ul className="space-y-1">
+            {visibles.map((it) => {
+              const marcado = seleccion.has(it.id);
+              return (
+                <li key={it.id}>
+                  <label
+                    className={[
+                      "flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm transition-colors",
+                      marcado
+                        ? "border-neutral-800 bg-neutral-50"
+                        : "border-transparent hover:bg-neutral-50",
+                    ].join(" ")}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={marcado}
+                      onChange={() => onToggle(it.id)}
+                      className="h-4 w-4 shrink-0 rounded border-neutral-400 text-neutral-900"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-neutral-800">
+                        {it.fecha ? `${formatearFecha(it.fecha)} · ` : ""}
+                        <MontoConSigno monto={it.monto} moneda={moneda} />
+                      </span>
+                      <span className="block truncate text-xs text-neutral-600">
+                        {it.id}
+                        {it.texto ? ` · ${it.texto}` : ""}
+                      </span>
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+          {filtrados.length > visibles.length && (
+            <Boton
+              variante="sutil"
+              tamano="sm"
+              onClick={onMas}
+              className="mt-2 w-full"
+            >
+              Ver {Math.min(PAGINA, filtrados.length - visibles.length)} más
+              (quedan {filtrados.length - visibles.length})
+            </Boton>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Tabla de pares ya conciliados ───────────────────────────────────────────
+function TablaPares({
+  pares,
+  itemInterno,
+  itemMov,
+  busqueda,
+  tope,
+  onMas,
+  moneda,
+}: {
+  pares: { m: Match; idx: number }[];
+  itemInterno: (id: string) => ItemLado;
+  itemMov: (id: string) => ItemLado;
+  busqueda: string;
+  tope: number;
+  onMas: () => void;
+  moneda: string;
+}) {
+  const filtrados = pares.filter(({ m }) => {
+    if (!busqueda) return true;
+    const todos = [
+      ...m.ids_internos.map(itemInterno),
+      ...m.ids_movimientos.map(itemMov),
+    ];
+    return todos.some((it) => coincide(it, busqueda));
+  });
+  const visibles = filtrados.slice(0, tope);
+
+  if (pares.length === 0) {
+    return (
+      <p className="py-6 text-center text-sm text-neutral-600">
+        Todavía no hay ningún par conciliado.
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <p className="mt-3 text-sm tabular-nums text-neutral-600">
+        {filtrados.length}
+        {filtrados.length !== pares.length && ` de ${pares.length}`} pares
+      </p>
+      <div className="mt-2 overflow-x-auto">
+        <table className="min-w-full text-left text-sm">
+          <caption className="sr-only">
+            Pares conciliados: tus registros emparejados con los movimientos del
+            banco
+          </caption>
+          <thead className="text-xs text-neutral-600">
+            <tr className="border-b border-neutral-200">
+              <th scope="col" className="py-2 pr-4 font-medium">
+                Tus registros
+              </th>
+              <th scope="col" className="py-2 pr-4 font-medium">
+                Tu banco
+              </th>
+              <th scope="col" className="py-2 pr-4 text-right font-medium">
+                Monto
+              </th>
+              <th scope="col" className="py-2 font-medium">
+                Método
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibles.map(({ m, idx }) => {
+              const ints = m.ids_internos.map(itemInterno);
+              const movs = m.ids_movimientos.map(itemMov);
+              const monto = ints.reduce((a, it) => a + it.monto, 0);
+              return (
+                <tr key={idx} className="border-b border-neutral-100 align-top">
+                  <td className="max-w-[16rem] py-2 pr-4">
+                    {ints.map((it) => (
+                      <p key={it.id} className="truncate text-neutral-800">
+                        {it.texto || it.id}
+                      </p>
+                    ))}
+                  </td>
+                  <td className="max-w-[16rem] py-2 pr-4">
+                    {movs.map((it) => (
+                      <p key={it.id} className="truncate text-neutral-800">
+                        {it.texto || it.id}
+                      </p>
+                    ))}
+                  </td>
+                  <td className="py-2 pr-4 text-right whitespace-nowrap tabular-nums">
+                    <MontoConSigno monto={monto} moneda={moneda} />
+                  </td>
+                  <td className="py-2">
+                    <BadgeMetodo metodo={m.metodo} confianza={m.confianza} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {filtrados.length > visibles.length && (
+        <Boton
+          variante="sutil"
+          tamano="sm"
+          onClick={onMas}
+          className="mt-3 w-full"
+        >
+          Ver {Math.min(PAGINA, filtrados.length - visibles.length)} más (quedan{" "}
+          {filtrados.length - visibles.length})
+        </Boton>
+      )}
+    </>
+  );
+}
+
+// ── Diferencia en vivo de la selección manual ───────────────────────────────
+function DiferenciaSeleccion({
+  selInt,
+  selMov,
+  internoById,
+  movById,
+  moneda,
+}: {
+  selInt: Set<string>;
+  selMov: Set<string>;
+  internoById: Map<string, RegistroInterno>;
+  movById: Map<string, MovimientoBancario>;
+  moneda: string;
+}) {
+  const sumaInt = [...selInt].reduce(
+    (a, id) => a + (internoById.get(id)?.monto ?? 0),
+    0,
+  );
+  const sumaMov = [...selMov].reduce(
+    (a, id) => a + (movById.get(id)?.monto ?? 0),
+    0,
+  );
+  const dif = Number((sumaInt - sumaMov).toFixed(2));
+  const cero = Math.abs(dif) < 0.005;
+  return (
+    <>
+      {" "}
+      <span
+        className={`font-medium tabular-nums ${cero ? "text-emerald-800" : "text-amber-800"}`}
+      >
+        {cero ? "Cuadran exacto." : `Diferencia ${formatearPEN(dif, moneda)}.`}
+      </span>
+    </>
   );
 }

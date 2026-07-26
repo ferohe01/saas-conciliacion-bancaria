@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useRef } from "react";
 import { crearCuenta, type AccionResultado } from "@/app/(app)/cuentas/actions";
+import { Boton, Campo, Tarjeta } from "@/components/ui";
 
 const BANCOS = ["BCP", "BBVA", "Interbank", "Scotiabank", "BanBif", "Otro"];
 
@@ -19,72 +20,68 @@ export function CuentaForm() {
   }, [estado.ok]);
 
   return (
-    <form
-      ref={formRef}
-      action={formAction}
-      className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm"
-    >
-      <p className="font-semibold text-neutral-900">Agregar cuenta</p>
-      <div className="mt-4 grid gap-4 sm:grid-cols-3">
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium text-neutral-700">
-            Banco
-          </span>
-          <select
-            name="banco"
-            required
-            className="h-11 w-full rounded-xl border border-neutral-300 bg-white px-3 text-neutral-800 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none"
-          >
-            {BANCOS.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium text-neutral-700">
-            Número (opcional)
-          </span>
-          <input
-            name="numero"
-            inputMode="numeric"
-            placeholder="Solo dígitos"
-            className="h-11 w-full rounded-xl border border-neutral-300 bg-white px-3 text-neutral-800 shadow-sm placeholder:text-neutral-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none"
-          />
-        </label>
-
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium text-neutral-700">
-            Moneda
-          </span>
-          <select
-            name="moneda"
-            defaultValue="PEN"
-            className="h-11 w-full rounded-xl border border-neutral-300 bg-white px-3 text-neutral-800 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none"
-          >
-            <option value="PEN">Soles (PEN)</option>
-            <option value="USD">Dólares (USD)</option>
-          </select>
-        </label>
-      </div>
-
-      {estado.error && (
-        <p className="mt-3 rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">
-          {estado.error}
+    <Tarjeta>
+      <form ref={formRef} action={formAction}>
+        <h2 className="font-semibold text-neutral-900">Agregar una cuenta</h2>
+        <p className="mt-0.5 text-sm text-neutral-600">
+          Solo el banco y la moneda. El número es opcional y se guarda
+          enmascarado.
         </p>
-      )}
 
-      <div className="mt-4">
-        <button
-          type="submit"
-          disabled={pendiente}
-          className="rounded-xl bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
-        >
-          {pendiente ? "Guardando…" : "Agregar cuenta"}
-        </button>
-      </div>
-    </form>
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <Campo label="Banco" name="banco">
+            {(p) => (
+              <select {...p} required>
+                {BANCOS.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Campo>
+
+          <Campo
+            label="Número"
+            name="numero"
+            nota="opcional"
+            ayuda="Solo los dígitos; guardamos los 4 últimos."
+          >
+            {(p) => (
+              <input
+                {...p}
+                inputMode="numeric"
+                placeholder="Ej. 1234567890"
+                className={`${p.className} tabular-nums`}
+              />
+            )}
+          </Campo>
+
+          <Campo label="Moneda" name="moneda">
+            {(p) => (
+              <select {...p} defaultValue="PEN">
+                <option value="PEN">Soles (PEN)</option>
+                <option value="USD">Dólares (USD)</option>
+              </select>
+            )}
+          </Campo>
+        </div>
+
+        {estado.error && (
+          <p
+            role="alert"
+            className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-800"
+          >
+            {estado.error}
+          </p>
+        )}
+
+        <div className="mt-4">
+          <Boton type="submit" disabled={pendiente}>
+            {pendiente ? "Guardando…" : "Agregar cuenta"}
+          </Boton>
+        </div>
+      </form>
+    </Tarjeta>
   );
 }

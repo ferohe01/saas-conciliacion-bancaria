@@ -140,6 +140,27 @@ alter table public.jobs_conciliacion  enable row level security;
 alter table public.comprobantes       enable row level security;
 
 -- ---------------------------------------------------------------------------
+-- Limpieza previa: `create policy` no admite `if not exists`, así que se
+-- eliminan antes de recrearlas. Esto hace el script RE-EJECUTABLE sobre una
+-- base que ya tiene el esquema aplicado (no borra datos, solo políticas).
+-- ---------------------------------------------------------------------------
+drop policy if exists empresas_select          on public.empresas;
+drop policy if exists empresas_insert          on public.empresas;
+drop policy if exists empresas_update          on public.empresas;
+drop policy if exists usuarios_empresa_select  on public.usuarios_empresa;
+drop policy if exists usuarios_empresa_insert  on public.usuarios_empresa;
+drop policy if exists usuarios_empresa_delete  on public.usuarios_empresa;
+drop policy if exists cuentas_select           on public.cuentas_bancarias;
+drop policy if exists cuentas_insert           on public.cuentas_bancarias;
+drop policy if exists cuentas_update           on public.cuentas_bancarias;
+drop policy if exists cuentas_delete           on public.cuentas_bancarias;
+drop policy if exists jobs_select              on public.jobs_conciliacion;
+drop policy if exists comprobantes_select      on public.comprobantes;
+drop policy if exists comprobantes_insert      on public.comprobantes;
+drop policy if exists comprobantes_update      on public.comprobantes;
+drop policy if exists comprobantes_delete      on public.comprobantes;
+
+-- ---------------------------------------------------------------------------
 -- empresas
 --   SELECT/UPDATE: solo miembros.
 --   INSERT: cualquier autenticado puede crear una empresa (flujo de registro);
@@ -233,7 +254,22 @@ create policy comprobantes_delete on public.comprobantes
 -- cambios de los jobs de su empresa.
 -- ============================================================================
 
-alter publication supabase_realtime add table public.jobs_conciliacion;
+-- `add table` falla si la tabla ya está en la publicación → se comprueba antes.
+do $$
+begin
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    create publication supabase_realtime;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'jobs_conciliacion'
+  ) then
+    alter publication supabase_realtime add table public.jobs_conciliacion;
+  end if;
+end $$;
 
 -- REPLICA IDENTITY FULL para que los payloads de UPDATE incluyan todas las
 -- columnas (necesario para leer `resultado`/`fase_actual` en el cliente).

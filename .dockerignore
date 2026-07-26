@@ -1,0 +1,26 @@
+node_modules
+.next
+.git
+.github
+coverage
+*.tsbuildinfo
+
+# entornos locales — las variables las inyecta Dokploy
+.env
+.env.local
+.env*.local
+
+# documentación / material de trabajo que no entra en la imagen
+.claude
+.impeccable
+CLAUDE.md
+DESIGN.md
+PRODUCT.md
+interfaz.jpg
+data
+tests
+vitest.config.ts
+
+# el motor vive fuera (n8n externo)
+n8n
+supabase

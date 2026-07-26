@@ -87,6 +87,48 @@ export async function registrarDecision(
   return guardar(jobId, ctx.resultado);
 }
 
+/**
+ * Registra la MISMA decisión sobre varios matches en una sola escritura.
+ *
+ * A 500–2000+ partidas la revisión es triaje y se despacha en lote: hacerlo con
+ * `registrarDecision` sería una lectura + escritura + revalidate por match.
+ * Cada decisión se persiste igual, una por una, dentro del mismo `resultado`.
+ */
+export async function registrarDecisiones(
+  jobId: string,
+  matchIndices: number[],
+  accion: z.infer<typeof AccionSchema>,
+): Promise<{ ok: boolean; error?: string; aplicadas?: number }> {
+  if (!AccionSchema.safeParse(accion).success) {
+    return { ok: false, error: "Acción inválida." };
+  }
+  if (matchIndices.length === 0) {
+    return { ok: false, error: "No hay sugerencias seleccionadas." };
+  }
+  const ctx = await cargarContexto(jobId);
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+
+  const timestamp = new Date().toISOString();
+  let aplicadas = 0;
+  for (const idx of matchIndices) {
+    const match = ctx.resultado.matches[idx];
+    if (!match) continue;
+    match.estado_revision = accion;
+    match.decisiones = [
+      ...(match.decisiones ?? []),
+      { usuario_id: ctx.usuarioId, accion, timestamp, nota: null },
+    ];
+    aplicadas++;
+  }
+
+  if (aplicadas === 0) {
+    return { ok: false, error: "No se encontró ninguna de esas sugerencias." };
+  }
+
+  const res = await guardar(jobId, ctx.resultado);
+  return res.ok ? { ok: true, aplicadas } : res;
+}
+
 const ManualSchema = z.object({
   ids_internos: z.array(z.string().min(1)).min(1),
   ids_movimientos: z.array(z.string().min(1)).min(1),

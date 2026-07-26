@@ -1,7 +1,10 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { EncabezadoPagina, EstadoVacio, clasesBoton } from "@/components/ui";
 import { FiltrosReporte } from "@/components/reportes/FiltrosReporte";
 import { ExportarReporte } from "@/components/reportes/ExportarReporte";
-import { ReporteVista } from "@/components/reportes/ReporteVista";
+import { ReporteVista, PanelAprendizaje } from "@/components/reportes/ReporteVista";
+import { resumenAprendizaje } from "@/lib/aprendizaje";
 import { nombreMes } from "@/lib/periodo";
 import {
   filtrarAnual,
@@ -48,19 +51,33 @@ export default async function ReportesPage({
   const sp = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: cuentasData }, { data: jobsData }] = await Promise.all([
-    supabase
-      .from("cuentas_bancarias")
-      .select("id, banco, numero_enmascarado")
-      .order("banco"),
-    supabase
-      .from("jobs_conciliacion")
-      .select(
-        "id, periodo_desde, estado, cuenta_id, created_at, resultado, cuentas_bancarias(banco, numero_enmascarado)",
-      )
-      .eq("estado", "completado")
-      .order("periodo_desde", { ascending: false }),
-  ]);
+  const [{ data: cuentasData }, { data: jobsData }, { data: histAprend }] =
+    await Promise.all([
+      supabase
+        .from("cuentas_bancarias")
+        .select("id, banco, numero_enmascarado")
+        .order("banco"),
+      supabase
+        .from("jobs_conciliacion")
+        .select(
+          "id, periodo_desde, estado, cuenta_id, created_at, resultado, cuentas_bancarias(banco, numero_enmascarado)",
+        )
+        .eq("estado", "completado")
+        .order("periodo_desde", { ascending: false }),
+      // Pool de aprendizaje: últimos 30 jobs (mismo criterio que usa el backend
+      // al armar el few-shot). RLS limita a la empresa del usuario.
+      supabase
+        .from("jobs_conciliacion")
+        .select("resultado")
+        .eq("estado", "completado")
+        .not("resultado", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(30),
+    ]);
+
+  const aprendizaje = resumenAprendizaje(
+    (histAprend ?? []) as Parameters<typeof resumenAprendizaje>[0],
+  );
 
   const cuentas = (cuentasData ?? []) as {
     id: string;
@@ -145,33 +162,35 @@ export default async function ReportesPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-neutral-900">
-            Reportes de conciliación
-          </h1>
-          <p className="mt-1 text-neutral-500">
-            Resultados por período, banco y cuenta.
-          </p>
-        </div>
-        {hayDatos && (
-          <ExportarReporte
-            kpis={kpis}
-            mensual={mensual}
-            bancos={bancosAgg}
-            tipos={tipos}
-            etiqueta={etiqueta || String(anio)}
-          />
-        )}
-      </div>
+      <EncabezadoPagina
+        titulo="Reportes de conciliación"
+        descripcion="Cómo se conciliaron tus períodos, por banco y por tipo de diferencia."
+        accion={
+          hayDatos ? (
+            <ExportarReporte
+              kpis={kpis}
+              mensual={mensual}
+              bancos={bancosAgg}
+              tipos={tipos}
+              etiqueta={etiqueta || String(anio)}
+            />
+          ) : undefined
+        }
+      />
 
       {!hayDatos ? (
-        <p className="rounded-2xl border border-dashed border-neutral-300 bg-white p-8 text-center text-neutral-500">
-          Aún no hay conciliaciones completadas para reportar. Realiza tu primera
-          conciliación y aquí verás las métricas.
-        </p>
+        <EstadoVacio
+          titulo="Todavía no hay nada que reportar"
+          texto="Los reportes se construyen con tus conciliaciones completadas. En cuanto cierres la primera, aquí verás automatización, cuadre y tipos de diferencia."
+          accion={
+            <Link href="/wizard" className={clasesBoton("primario", "md")}>
+              Hacer la primera conciliación
+            </Link>
+          }
+        />
       ) : (
         <>
+          <PanelAprendizaje ap={aprendizaje} />
           <FiltrosReporte
             anios={anios}
             bancos={bancos}
@@ -184,10 +203,10 @@ export default async function ReportesPage({
             }}
           />
           {kpis.conciliaciones === 0 ? (
-            <p className="rounded-2xl border border-dashed border-neutral-300 bg-white p-8 text-center text-neutral-500">
-              No hay conciliaciones para este filtro. Prueba con otro período o
-              banco.
-            </p>
+            <EstadoVacio
+              titulo="Ninguna conciliación con este filtro"
+              texto="No encontramos corridas para el período, banco o cuenta que elegiste. Prueba a ampliar el mes o quitar el filtro de banco."
+            />
           ) : (
             <ReporteVista
               kpis={kpis}

@@ -26,6 +26,9 @@ export const ConfigConciliacion = z.object({
   // de la fecha registrada. La fecha entra al score, pero no bloquea dentro de
   // esta ventana.
   ventana_ia_dias: z.number().int().min(0).max(365).default(30),
+  // Tamaño máximo de agrupación (1:N / N:1). Ej: 3 permite que un depósito
+  // agrupe hasta 3 pagos. Más grande = más combinaciones y más riesgo.
+  max_combinacion: z.number().int().min(2).max(5).default(3),
 });
 export type ConfigConciliacion = z.infer<typeof ConfigConciliacion>;
 
@@ -37,4 +40,5 @@ export const CONFIG_CONCILIACION_DEFAULT: ConfigConciliacion = {
   tolerancia_ia_monto: 10.0,
   top_k_candidatos: 3,
   ventana_ia_dias: 30,
+  max_combinacion: 3,
 };

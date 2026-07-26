@@ -23,8 +23,16 @@ export default async function AppLayout({
 
   return (
     <div className="min-h-screen bg-neutral-100">
+      <a
+        href="#contenido"
+        className="ci-skip rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white"
+      >
+        Saltar al contenido
+      </a>
       <AppNav empresaNombre={empresa.nombre} />
-      <div className="mx-auto max-w-5xl px-4 py-8">{children}</div>
+      <main id="contenido" className="mx-auto max-w-5xl px-4 py-8">
+        {children}
+      </main>
     </div>
   );
 }

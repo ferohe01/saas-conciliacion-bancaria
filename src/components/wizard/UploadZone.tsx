@@ -71,7 +71,7 @@ export function UploadZone({
                 </p>
               )}
               {resumen.rangoFechas && (
-                <p className="mt-0.5 text-xs text-emerald-600">
+                <p className="mt-0.5 text-xs tabular-nums text-emerald-800">
                   {resumen.rangoFechas}
                 </p>
               )}
@@ -129,16 +129,16 @@ export function UploadZone({
           : "border-neutral-300 bg-white hover:border-neutral-400",
       ].join(" ")}
     >
-      <Icono className="h-8 w-8 text-neutral-400" />
+      <Icono className="h-8 w-8 text-neutral-500" />
       <p className="mt-3 font-semibold text-neutral-800">{titulo}</p>
-      <p className="mt-1 text-sm text-neutral-500">
+      <p className="mt-1 text-sm text-neutral-600">
         Arrastra el archivo o haz clic para buscar
       </p>
       <span className="mt-4 inline-flex items-center rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 shadow-sm hover:bg-neutral-50">
         Seleccionar archivo
       </span>
       {(formatos || bancos) && (
-        <p className="mt-3 text-xs text-neutral-400">
+        <p className="mt-3 text-xs text-neutral-600">
           {formatos}
           {formatos && bancos && " · "}
           {bancos}

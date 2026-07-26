@@ -48,8 +48,9 @@ const nodes = [
   },
   code("Exacta", "01_exacta.js", 180, 300),
   code("Difusa", "02_difusa.js", 400, 300),
-  code("IA (sugerencias)", "03_ia.js", 620, 300),
-  code("Ensamblar resultado", "04_ensamblar.js", 840, 300),
+  code("Agrupacion", "03a_agrupacion.js", 620, 300),
+  code("IA (sugerencias)", "03_ia.js", 840, 300),
+  code("Ensamblar resultado", "04_ensamblar.js", 1060, 300),
   {
     parameters: {
       method: "PATCH",
@@ -71,7 +72,7 @@ const nodes = [
     name: "Actualizar Supabase",
     type: "n8n-nodes-base.httpRequest",
     typeVersion: 4.2,
-    position: [1060, 300],
+    position: [1280, 300],
   },
 ];
 
@@ -83,7 +84,8 @@ const connections = {
   ...conn("Webhook", "Responder aceptado"),
   ...conn("Responder aceptado", "Exacta"),
   ...conn("Exacta", "Difusa"),
-  ...conn("Difusa", "IA (sugerencias)"),
+  ...conn("Difusa", "Agrupacion"),
+  ...conn("Agrupacion", "IA (sugerencias)"),
   ...conn("IA (sugerencias)", "Ensamblar resultado"),
   ...conn("Ensamblar resultado", "Actualizar Supabase"),
 };

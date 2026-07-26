@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Conciliación Bancaria",
+  title: {
+    default: "Conciliaciones Inteligentes",
+    template: "%s · Conciliaciones Inteligentes",
+  },
   description:
     "Conciliación bancaria asistida por IA para PyMEs peruanas.",
 };

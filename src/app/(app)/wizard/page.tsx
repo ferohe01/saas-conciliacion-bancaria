@@ -18,8 +18,20 @@ export default async function WizardPage() {
   const cuentas = (data ?? []) as CuentaOpcion[];
 
   return (
-    <div className="flex justify-center">
-      <WizardContainer cuentas={cuentas} />
+    <div className="space-y-6">
+      {/* La ruta no tenía ningún h1: el stepper orientaba visualmente, pero un
+          lector de pantalla entraba a la página sin título. */}
+      <div className="text-center">
+        <h1 className="text-2xl font-bold tracking-tight text-neutral-900">
+          Nueva conciliación
+        </h1>
+        <p className="mt-1 text-neutral-600">
+          Tres pasos: cargas tus datos, verificas las columnas y conciliamos.
+        </p>
+      </div>
+      <div className="flex justify-center">
+        <WizardContainer cuentas={cuentas} />
+      </div>
     </div>
   );
 }

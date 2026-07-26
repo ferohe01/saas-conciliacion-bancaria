@@ -28,6 +28,7 @@ import type {
   RegistroInterno,
   MovimientoBancario,
 } from "@/lib/contract/payload";
+import { Boton, CLASES_ENTRADA } from "@/components/ui";
 
 export type CuentaOpcion = {
   id: string;
@@ -87,7 +88,7 @@ function SelectField({
         >
           {children}
         </select>
-        <ChevronIcon className="pointer-events-none absolute top-1/2 right-3 h-5 w-5 -translate-y-1/2 text-neutral-400" />
+        <ChevronIcon className="pointer-events-none absolute top-1/2 right-3 h-5 w-5 -translate-y-1/2 text-neutral-500" />
       </div>
     </label>
   );
@@ -146,6 +147,7 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
 
   const [aviso, setAviso] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cargando, setCargando] = useState<"internos" | "extracto" | null>(null);
   const [procesando, startTransition] = useTransition();
 
   const periodo = useMemo(
@@ -193,23 +195,52 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
     };
   }, [fuente, periodo, recargaComprobantes]);
 
+  /**
+   * Un archivo ilegible (corrupto, protegido con contraseña, .xls antiguo) hace
+   * que `procesarArchivo` lance. Sin este try/catch la promesa se rechazaba sin
+   * dueño y la pantalla se quedaba idéntica: el usuario no sabía si su archivo
+   * había entrado o no.
+   */
   async function cargarInternos(file: File) {
-    const proc = await procesarArchivo(file, periodo);
-    setInternos(proc);
-    setMapeoInternos(
-      elegirMapeo(proc.mapeo, cuenta?.mapeo_columnas?.internos, proc.headers),
-    );
+    setError(null);
+    setCargando("internos");
+    try {
+      const proc = await procesarArchivo(file, periodo);
+      setInternos(proc);
+      setMapeoInternos(
+        elegirMapeo(proc.mapeo, cuenta?.mapeo_columnas?.internos, proc.headers),
+      );
+    } catch {
+      setInternos(null);
+      setError(
+        `No pudimos leer "${file.name}". Revisa que sea un Excel o CSV sin contraseña y vuelve a intentarlo.`,
+      );
+    } finally {
+      setCargando(null);
+    }
   }
+
   async function cargarExtracto(file: File) {
-    const proc = await procesarArchivo(file, periodo);
-    setExtracto(proc);
-    setMapeoExtracto(
-      elegirMapeo(proc.mapeo, cuenta?.mapeo_columnas?.extracto, proc.headers),
-    );
-    // Autodetectar el saldo final del extracto (columna de saldo/balance).
-    if (proc.formato === "excel" && saldoExtFin.trim() === "") {
-      const detectado = detectarSaldoFinal(proc.headers, proc.filas);
-      if (detectado != null) setSaldoExtFin(String(detectado));
+    setError(null);
+    setCargando("extracto");
+    try {
+      const proc = await procesarArchivo(file, periodo);
+      setExtracto(proc);
+      setMapeoExtracto(
+        elegirMapeo(proc.mapeo, cuenta?.mapeo_columnas?.extracto, proc.headers),
+      );
+      // Autodetectar el saldo final del extracto (columna de saldo/balance).
+      if (proc.formato === "excel" && saldoExtFin.trim() === "") {
+        const detectado = detectarSaldoFinal(proc.headers, proc.filas);
+        if (detectado != null) setSaldoExtFin(String(detectado));
+      }
+    } catch {
+      setExtracto(null);
+      setError(
+        `No pudimos leer "${file.name}". Si es el extracto de tu banco, descárgalo en Excel, CSV o PDF y vuelve a subirlo.`,
+      );
+    } finally {
+      setCargando(null);
     }
   }
 
@@ -221,11 +252,19 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
       : false;
   const extractoListo = extracto != null;
 
-  const puedeContinuarPaso1 =
-    Boolean(cuentaId) &&
-    internosListo &&
-    extractoListo &&
-    saldoLibros.trim() !== "";
+  // Un botón deshabilitado sin explicación es un callejón sin salida: la lista
+  // dice exactamente qué falta.
+  const faltaPaso1 = [
+    !cuentaId && "elegir una cuenta bancaria",
+    !internosListo &&
+      (fuente === "comprobantes"
+        ? "tener comprobantes en el período"
+        : "subir tus registros internos"),
+    !extractoListo && "subir el extracto del banco",
+    saldoLibros.trim() === "" && "ingresar el saldo según libros",
+  ].filter((x): x is string => Boolean(x));
+
+  const puedeContinuarPaso1 = faltaPaso1.length === 0;
 
   // Paso 2: validar que los mapeos aplicables tengan fecha + monto.
   const extractoEsExcel = extracto?.formato === "excel";
@@ -282,6 +321,15 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
     internosCanon.length > 0 && bancariosCanon.length > 0 && Boolean(cuentaId);
   const saldoExtractoFaltante =
     normalizarMonto(saldoExtFin) == null && normalizarMonto(saldoExtIni) == null;
+
+  // El resumen del Paso 3 muestra el monto ya formateado, no la cadena cruda
+  // que tecleó el usuario: es la última pantalla antes de disparar el motor.
+  const montoVista = (v: string) => {
+    const n = normalizarMonto(v);
+    return n == null ? "—" : formatearPEN(n, moneda);
+  };
+  const saldoLibrosVista = montoVista(saldoLibros);
+  const saldoExtFinVista = montoVista(saldoExtFin);
 
   function iniciarConciliacion() {
     setError(null);
@@ -381,10 +429,13 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
             )}
           </div>
 
-          <div className="mt-6">
-            <span className="mb-2 block text-sm font-medium text-neutral-700">
-              Registros internos (cobranzas y pagos)
-            </span>
+          {/* Grupo de radios real: con `<button>` el lector de pantalla no
+              anunciaba cuál estaba elegido, y la opción deshabilitada
+              ("próximamente") no era alcanzable con teclado. */}
+          <fieldset className="mt-6">
+            <legend className="mb-2 text-sm font-medium text-neutral-700">
+              ¿De dónde salen tus registros internos?
+            </legend>
             <div className="flex flex-wrap gap-2">
               {(
                 [
@@ -394,28 +445,39 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
                 ] as { v: Fuente; label: string }[]
               ).map((op) => {
                 const activo = fuente === op.v;
-                const deshabilitado = op.v === "sistema";
+                const proximamente = op.v === "sistema";
                 return (
-                  <button
+                  <label
                     key={op.v}
-                    type="button"
-                    disabled={deshabilitado}
-                    onClick={() => setFuente(op.v)}
                     className={[
-                      "rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
+                      "inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
+                      "has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-blue-500",
                       activo
-                        ? "border-blue-600 bg-blue-50 text-blue-700"
+                        ? "border-blue-600 bg-blue-50 text-blue-800"
                         : "border-neutral-300 text-neutral-700 hover:bg-neutral-50",
-                      deshabilitado ? "cursor-not-allowed opacity-50" : "",
+                      proximamente ? "cursor-not-allowed text-neutral-500" : "",
                     ].join(" ")}
                   >
+                    <input
+                      type="radio"
+                      name="fuente-internos"
+                      value={op.v}
+                      checked={activo}
+                      disabled={proximamente}
+                      onChange={() => setFuente(op.v)}
+                      className="sr-only"
+                    />
                     {op.label}
-                    {deshabilitado && " · próximamente"}
-                  </button>
+                    {proximamente && (
+                      <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-xs font-normal text-neutral-600">
+                        próximamente
+                      </span>
+                    )}
+                  </label>
                 );
               })}
             </div>
-          </div>
+          </fieldset>
 
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div>
@@ -493,51 +555,68 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
                 value={saldoLibros}
                 onChange={(e) => setSaldoLibros(e.target.value)}
                 placeholder="0.00"
-                className="h-11 w-full rounded-xl border border-neutral-300 bg-white px-3 text-neutral-800 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none"
+                className={`${CLASES_ENTRADA} tabular-nums`}
               />
             </label>
             <label className="block">
-              <span className="mb-1.5 block text-sm font-medium text-neutral-700">
+              <span className="mb-1.5 flex items-baseline justify-between gap-2 text-sm font-medium text-neutral-700">
                 Saldo extracto inicial
+                <span className="text-xs font-normal text-neutral-500">
+                  opcional
+                </span>
               </span>
               <input
                 inputMode="decimal"
                 value={saldoExtIni}
                 onChange={(e) => setSaldoExtIni(e.target.value)}
-                placeholder="opcional"
-                className="h-11 w-full rounded-xl border border-neutral-300 bg-white px-3 text-neutral-800 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none"
+                placeholder="0.00"
+                className={`${CLASES_ENTRADA} tabular-nums`}
               />
             </label>
             <label className="block">
-              <span className="mb-1.5 block text-sm font-medium text-neutral-700">
-                Saldo extracto final{" "}
-                <span className="font-normal text-neutral-400">
-                  (para el cuadre)
+              <span className="mb-1.5 flex items-baseline justify-between gap-2 text-sm font-medium text-neutral-700">
+                Saldo extracto final
+                <span className="text-xs font-normal text-neutral-500">
+                  para el cuadre
                 </span>
               </span>
               <input
                 inputMode="decimal"
                 value={saldoExtFin}
                 onChange={(e) => setSaldoExtFin(e.target.value)}
-                placeholder="se autodetecta si el extracto lo trae"
-                className="h-11 w-full rounded-xl border border-neutral-300 bg-white px-3 text-neutral-800 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none"
+                placeholder="se autodetecta"
+                className={`${CLASES_ENTRADA} tabular-nums`}
               />
             </label>
           </div>
 
-          <div className="mt-8 flex items-center justify-between gap-4">
-            <span className="flex items-center gap-2 text-sm text-neutral-500">
+          {error && (
+            <p
+              role="alert"
+              className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+            >
+              {error}
+            </p>
+          )}
+
+          {!puedeContinuarPaso1 && !error && (
+            <p className="mt-6 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
+              Para continuar falta {faltaPaso1.join(", ")}.
+            </p>
+          )}
+
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-4">
+            <span className="flex items-center gap-2 text-sm text-neutral-600">
               <CandadoIcon className="h-4 w-4" />
               Tus archivos se procesan de forma segura
             </span>
-            <button
-              type="button"
-              disabled={!puedeContinuarPaso1}
+            <Boton
+              tamano="lg"
+              disabled={!puedeContinuarPaso1 || cargando !== null}
               onClick={irAPaso2}
-              className="rounded-xl bg-neutral-900 px-6 py-3 font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
             >
-              Continuar
-            </button>
+              {cargando ? "Leyendo el archivo…" : "Continuar"}
+            </Boton>
           </div>
         </>
       )}
@@ -584,27 +663,32 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
           </div>
 
           {error && (
-            <p className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+            <p
+              role="alert"
+              className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+            >
               {error}
             </p>
           )}
 
-          <div className="mt-8 flex items-center justify-between gap-4">
-            <button
-              type="button"
-              onClick={() => setPaso(1)}
-              className="rounded-xl border border-neutral-300 px-5 py-3 font-medium text-neutral-700 hover:bg-neutral-50"
-            >
+          {!puedeContinuarPaso2 && !error && (
+            <p className="mt-4 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
+              Marca al menos la columna de <strong>fecha</strong> y la de{" "}
+              <strong>monto</strong> en cada archivo para poder continuar.
+            </p>
+          )}
+
+          <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+            <Boton variante="secundario" tamano="lg" onClick={() => setPaso(1)}>
               Atrás
-            </button>
-            <button
-              type="button"
+            </Boton>
+            <Boton
+              tamano="lg"
               disabled={!puedeContinuarPaso2 || procesando}
               onClick={confirmarPaso2}
-              className="rounded-xl bg-neutral-900 px-6 py-3 font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
             >
               {procesando ? "Preparando…" : "Está correcto, continuar"}
-            </button>
+            </Boton>
           </div>
         </>
       )}
@@ -615,34 +699,34 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
           <div className="mt-8 space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="rounded-2xl border border-neutral-200 bg-white p-5">
-                <p className="text-sm text-neutral-500">Registros internos</p>
-                <p className="mt-1 text-2xl font-bold text-neutral-900">
+                <p className="text-sm text-neutral-600">Tus registros</p>
+                <p className="mt-1 text-2xl font-bold tabular-nums text-neutral-900">
                   {internosCanon.length.toLocaleString("es-PE")}
                 </p>
               </div>
               <div className="rounded-2xl border border-neutral-200 bg-white p-5">
-                <p className="text-sm text-neutral-500">Movimientos bancarios</p>
-                <p className="mt-1 text-2xl font-bold text-neutral-900">
+                <p className="text-sm text-neutral-600">Movimientos del banco</p>
+                <p className="mt-1 text-2xl font-bold tabular-nums text-neutral-900">
                   {bancariosCanon.length.toLocaleString("es-PE")}
                   {!extractoEsExcel && (
-                    <span className="ml-2 text-sm font-normal text-neutral-400">
-                      (PDF)
+                    <span className="ml-2 text-sm font-normal text-neutral-600">
+                      · se leerán del PDF al conciliar
                     </span>
                   )}
                 </p>
               </div>
             </div>
 
-            <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm text-neutral-600">
-              <dl className="grid gap-2 sm:grid-cols-2">
+            <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm">
+              <dl className="grid gap-3 sm:grid-cols-2">
                 <div>
-                  <dt className="text-neutral-500">Período</dt>
+                  <dt className="text-neutral-600">Período</dt>
                   <dd className="font-medium text-neutral-900">
                     {periodo.etiqueta}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-neutral-500">Cuenta</dt>
+                  <dt className="text-neutral-600">Cuenta</dt>
                   <dd className="font-medium text-neutral-900">
                     {cuenta
                       ? `${cuenta.banco} ${cuenta.numero_enmascarado ?? ""}`
@@ -650,15 +734,15 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-neutral-500">Saldo libros (final)</dt>
-                  <dd className="font-medium text-neutral-900">
-                    {saldoLibros || "—"}
+                  <dt className="text-neutral-600">Saldo libros (final)</dt>
+                  <dd className="font-medium tabular-nums text-neutral-900">
+                    {saldoLibrosVista}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-neutral-500">Saldo extracto final</dt>
-                  <dd className="font-medium text-neutral-900">
-                    {saldoExtFin || "—"}
+                  <dt className="text-neutral-600">Saldo extracto final</dt>
+                  <dd className="font-medium tabular-nums text-neutral-900">
+                    {saldoExtFinVista}
                   </dd>
                 </div>
               </dl>
@@ -678,34 +762,35 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
               </p>
             )}
             {error && (
-              <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+              <p
+                role="alert"
+                className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+              >
                 {error}
               </p>
             )}
           </div>
 
-          <div className="mt-8 flex items-center justify-between gap-4">
-            <button
-              type="button"
-              onClick={() => setPaso(2)}
-              className="rounded-xl border border-neutral-300 px-5 py-3 font-medium text-neutral-700 hover:bg-neutral-50"
-            >
+          <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+            <Boton variante="secundario" tamano="lg" onClick={() => setPaso(2)}>
               Atrás
-            </button>
-            <button
-              type="button"
+            </Boton>
+            <Boton
+              tamano="lg"
               disabled={!puedeIniciar || procesando}
               onClick={iniciarConciliacion}
-              className="rounded-xl bg-neutral-900 px-6 py-3 font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
             >
               {procesando ? "Iniciando…" : "Iniciar conciliación"}
-            </button>
+            </Boton>
           </div>
         </>
       )}
 
       {aviso && (
-        <p className="mt-4 rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-700">
+        <p
+          role="status"
+          className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800"
+        >
           {aviso}
         </p>
       )}
