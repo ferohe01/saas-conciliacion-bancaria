@@ -92,19 +92,20 @@ export function generarCandidatos(
       const d = diasEntre(it.fecha, bc.fecha);
       if (d > ventana) continue;
       const comunes = palabrasComunes(it.contraparte, bc.glosa);
-      if (comunes.length === 0) continue; // exige coincidencia de nombre
-
-      const sim = jaccard(it.contraparte, bc.glosa);
       const refI = normRef(it.referencia);
       const comparteRef = refI.length > 0 && refI === normRef(bc.referencia_banco);
+      // Es candidato si comparte NOMBRE (>=1 palabra) O si la referencia/Nº de
+      // operación coincide exactamente (señal fuerte aunque la glosa no traiga
+      // el nombre). Sin ninguno de los dos, se descarta.
+      if (comunes.length === 0 && !comparteRef) continue;
+
+      const sim = jaccard(it.contraparte, bc.glosa);
       const cercMonto = 1 - Math.min(difAbs / (tolIa || 1), 1);
       const cercFecha = 1 - Math.min(d / (ventana || 1), 1);
       const score = Number(
-        (
-          0.5 * sim +
-          0.3 * cercMonto +
-          0.2 * cercFecha +
-          (comparteRef ? 0.1 : 0)
+        Math.min(
+          1,
+          0.5 * sim + 0.3 * cercMonto + 0.2 * cercFecha + (comparteRef ? 0.2 : 0),
         ).toFixed(3),
       );
 

@@ -79,4 +79,21 @@ describe("generarCandidatos", () => {
     const c = generarCandidatos([it], [bc], cfg)[0]!.candidatos[0]!;
     expect(c.features.comparte_ref).toBe(true);
   });
+
+  it("admite candidato por referencia exacta aunque la glosa no traiga el nombre", () => {
+    const it = interno({
+      contraparte: "Juan Pérez Quispe",
+      referencia: "OP-999",
+      monto: 1000,
+    });
+    const bc = banco({
+      glosa: "DEPOSITO EN EFECTIVO", // sin palabras del nombre
+      referencia_banco: "OP999",
+      monto: 1000,
+    });
+    const sl = generarCandidatos([it], [bc], cfg);
+    expect(sl).toHaveLength(1);
+    expect(sl[0]!.candidatos[0]!.features.comparte_ref).toBe(true);
+    expect(sl[0]!.candidatos[0]!.features.palabras_comunes).toEqual([]);
+  });
 });

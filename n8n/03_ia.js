@@ -51,13 +51,14 @@ function generarCandidatos(ints, bancs, tolIaMonto, tolDiasCfg, K) {
       const d = dias(it.fecha, bc.fecha);
       if (d > ventana) continue;
       const comunes = comunesEntre(it.contraparte, bc.glosa);
-      if (!comunes.length) continue;
-      const sim = jaccard(it.contraparte, bc.glosa);
       const refI = normRef(it.referencia);
       const comparteRef = refI.length > 0 && refI === normRef(bc.referencia_banco);
+      // Candidato si comparte nombre O si la referencia coincide exacta.
+      if (!comunes.length && !comparteRef) continue;
+      const sim = jaccard(it.contraparte, bc.glosa);
       const cercM = 1 - Math.min(difAbs / (tolIaMonto || 1), 1);
       const cercF = 1 - Math.min(d / (ventana || 1), 1);
-      const score = Number((0.5 * sim + 0.3 * cercM + 0.2 * cercF + (comparteRef ? 0.1 : 0)).toFixed(3));
+      const score = Number(Math.min(1, 0.5 * sim + 0.3 * cercM + 0.2 * cercF + (comparteRef ? 0.2 : 0)).toFixed(3));
       cands.push({
         id_movimiento: bc.id_movimiento,
         dif: Number((it.monto - bc.monto).toFixed(2)),
