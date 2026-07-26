@@ -24,31 +24,42 @@ for (const s of shortlists) {
   candPorInterno.set(s.id_interno, { set, catPorMov });
 }
 
-// Extraer el texto JSON de la respuesta (AI Agent -> $json.output; HTTP -> content[]).
+// Extraer los pares de la respuesta del LLM. Se cubren todas las formas:
+//  - AI Agent con Output Parser -> $json.output ya es objeto/array
+//  - AI Agent sin parser        -> $json.output es texto (JSON)
+//  - HTTP Anthropic             -> $json.content[] con bloque type=text
+//  - OpenAI (chat completions)  -> $json.choices[0].message.content
 const resp = $json;
-let texto = "";
-if (Array.isArray(resp.content)) {
-  const tb = resp.content.find((b) => b && b.type === "text");
-  texto = tb ? tb.text : "";
-} else {
-  texto =
-    resp.output ??
-    resp.text ??
-    (resp.choices && resp.choices[0] && resp.choices[0].message
-      ? resp.choices[0].message.content
-      : "") ??
-    "";
-}
-texto = String(texto).trim()
-  .replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
+let parsed = null;
 
-let pares = [];
-try {
-  const parsed = JSON.parse(texto);
-  pares = Array.isArray(parsed) ? parsed : parsed.pares ?? [];
-} catch (e) {
-  pares = [];
+const directo = resp.output ?? resp.json ?? null;
+if (directo && typeof directo === "object") {
+  parsed = directo; // ya viene parseado (Output Parser)
+} else {
+  let texto = "";
+  if (Array.isArray(resp.content)) {
+    const tb = resp.content.find((b) => b && b.type === "text");
+    texto = tb ? tb.text : "";
+  } else {
+    texto =
+      resp.output ??
+      resp.text ??
+      (resp.choices && resp.choices[0] && resp.choices[0].message
+        ? resp.choices[0].message.content
+        : "") ??
+      "";
+  }
+  texto = String(texto).trim()
+    .replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
+  try {
+    parsed = JSON.parse(texto);
+  } catch (e) {
+    parsed = null;
+  }
 }
+
+const pares =
+  Array.isArray(parsed) ? parsed : parsed && parsed.pares ? parsed.pares : [];
 
 const idxInt = new Map(internos.map((r, i) => [r.id_interno, i]));
 const idxBanc = new Map(bancarios.map((m, j) => [m.id_movimiento, j]));
