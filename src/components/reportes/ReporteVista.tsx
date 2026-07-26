@@ -4,6 +4,7 @@ import {
   type Kpis,
   type PuntoMensual,
   type FilaBanco,
+  type FilaTipo,
 } from "@/lib/reportes";
 import { formatearFecha } from "@/lib/parsing/resumen";
 
@@ -15,12 +16,14 @@ export function ReporteVista({
   kpis,
   mensual,
   bancos,
+  tipos,
   recientes,
   filtroQuery,
 }: {
   kpis: Kpis;
   mensual: PuntoMensual[];
   bancos: FilaBanco[];
+  tipos: FilaTipo[];
   recientes: {
     id: string;
     periodo_desde: string;
@@ -38,6 +41,8 @@ export function ReporteVista({
         <GraficoMensual datos={mensual} />
         <DistribucionMetodos kpis={kpis} filtroQuery={filtroQuery} />
       </div>
+
+      <TiposDiferencia tipos={tipos} />
 
       <TablaBancos bancos={bancos} />
 
@@ -190,6 +195,42 @@ function DistribucionMetodos({
                 </span>
               </span>
             </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// ── Tipo de diferencia (reason codes) — barras ranqueadas, un solo tono ─────
+function TiposDiferencia({ tipos }: { tipos: FilaTipo[] }) {
+  if (tipos.length === 0) return null;
+  const total = tipos.reduce((a, t) => a + t.valor, 0) || 1;
+  const max = Math.max(...tipos.map((t) => t.valor), 1);
+  return (
+    <div className="rounded-2xl border border-neutral-200 bg-white p-5">
+      <p className="font-semibold text-neutral-900">Tipo de diferencia</p>
+      <p className="text-xs text-neutral-500">
+        Cómo se distribuyen los pares conciliados por tipo (reason codes)
+      </p>
+      <ul className="mt-4 space-y-2.5">
+        {tipos.map((t) => (
+          <li key={t.tipo}>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-neutral-700">{t.label}</span>
+              <span className="tabular-nums text-neutral-900">
+                {NUM(t.valor)}{" "}
+                <span className="text-neutral-400">
+                  ({Math.round((t.valor / total) * 100)}%)
+                </span>
+              </span>
+            </div>
+            <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-neutral-100">
+              <div
+                className="h-2 rounded-full bg-neutral-800"
+                style={{ width: `${(t.valor / max) * 100}%` }}
+              />
+            </div>
           </li>
         ))}
       </ul>

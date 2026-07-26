@@ -1,4 +1,4 @@
-import type { Kpis, PuntoMensual, FilaBanco } from "@/lib/reportes";
+import type { Kpis, PuntoMensual, FilaBanco, FilaTipo } from "@/lib/reportes";
 
 /**
  * Exporta el reporte agregado a Excel (3 hojas: Resumen, Por mes, Por banco).
@@ -8,11 +8,12 @@ export async function exportarReporteExcel(data: {
   kpis: Kpis;
   mensual: PuntoMensual[];
   bancos: FilaBanco[];
+  tipos: FilaTipo[];
   etiqueta: string;
 }): Promise<void> {
   const XLSX = await import("xlsx");
   const wb = XLSX.utils.book_new();
-  const { kpis, mensual, bancos, etiqueta } = data;
+  const { kpis, mensual, bancos, tipos, etiqueta } = data;
 
   const resumen = [
     { Indicador: "Filtro", Valor: etiqueta },
@@ -48,6 +49,13 @@ export async function exportarReporteExcel(data: {
     wb,
     XLSX.utils.json_to_sheet(porBanco.length ? porBanco : [{ Banco: "" }]),
     "Por banco",
+  );
+
+  const porTipo = tipos.map((t) => ({ Tipo: t.label, Cantidad: t.valor }));
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(porTipo.length ? porTipo : [{ Tipo: "" }]),
+    "Por tipo",
   );
 
   XLSX.writeFile(wb, `reporte_conciliaciones_${etiqueta.replace(/\s+/g, "_")}.xlsx`);

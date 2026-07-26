@@ -6,6 +6,8 @@ import {
   porMes,
   porBanco,
   deduplicarUltimoPorPeriodo,
+  contarCategorias,
+  porTipoDiferencia,
   type JobReporte,
   type ResumenJob,
 } from "@/lib/reportes";
@@ -102,6 +104,36 @@ describe("calcularKpis", () => {
     expect(k.jobsCuadrados).toBe(1); // solo j1 cuadra
     expect(k.pctCuadre).toBe(50);
     expect(k.sugeridosIa).toBe(5);
+  });
+});
+
+describe("tipos de diferencia", () => {
+  it("contarCategorias cuenta por categoria; null→sin_diferencia/otros; ignora rechazados", () => {
+    const matches = [
+      { categoria_diferencia: "comision_bancaria", diferencia_monto: -5 },
+      { categoria_diferencia: "comision_bancaria", diferencia_monto: -3 },
+      { categoria_diferencia: null, diferencia_monto: 0 }, // sin_diferencia
+      { categoria_diferencia: null, diferencia_monto: 40 }, // otros
+      {
+        categoria_diferencia: "diferencia_moneda",
+        diferencia_monto: 200,
+        estado_revision: "rechazado", // ignorado
+      },
+    ];
+    const c = contarCategorias(matches);
+    expect(c.comision_bancaria).toBe(2);
+    expect(c.sin_diferencia).toBe(1);
+    expect(c.otros).toBe(1);
+    expect(c.diferencia_moneda).toBeUndefined();
+  });
+
+  it("porTipoDiferencia suma sobre jobs, etiqueta y ordena desc", () => {
+    const j1 = { ...jobs[0]!, categorias: { comision_bancaria: 2, sin_diferencia: 1 } };
+    const j2 = { ...jobs[1]!, categorias: { comision_bancaria: 3 } };
+    const t = porTipoDiferencia([j1, j2]);
+    expect(t[0]!.tipo).toBe("comision_bancaria");
+    expect(t[0]!.valor).toBe(5);
+    expect(t[0]!.label).toBe("Comisión bancaria");
   });
 });
 

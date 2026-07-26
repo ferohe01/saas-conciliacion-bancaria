@@ -26,6 +26,7 @@ export type JobReporte = {
   resumen: ResumenJob;
   diferenciaCuadre: number;
   createdAt: string; // ISO, para elegir la conciliación más reciente
+  categorias?: Record<string, number>; // tipos de diferencia (reason codes)
 };
 
 /**
@@ -171,6 +172,65 @@ export type FilaBanco = {
   autoConciliados: number;
   pctAutomatizacion: number;
 };
+
+// ── Tipos de diferencia (reason codes) ──────────────────────────────────────
+
+export type MatchLite = {
+  categoria_diferencia?: string | null;
+  diferencia_monto?: number | null;
+  estado_revision?: string;
+};
+
+/** Cuenta los matches de un job por tipo de diferencia (categoria). */
+export function contarCategorias(matches: MatchLite[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const m of matches ?? []) {
+    if (m.estado_revision === "rechazado") continue;
+    const cat =
+      m.categoria_diferencia ??
+      (Math.abs(Number(m.diferencia_monto ?? 0)) < 0.005
+        ? "sin_diferencia"
+        : "otros");
+    out[cat] = (out[cat] ?? 0) + 1;
+  }
+  return out;
+}
+
+const ETIQUETA_TIPO: Record<string, string> = {
+  sin_diferencia: "Sin diferencia (exacto)",
+  comision_bancaria: "Comisión bancaria",
+  pago_parcial: "Pago parcial",
+  diferencia_temporal: "Diferencia temporal",
+  diferencia_moneda: "Diferencia de moneda",
+  redondeo: "Redondeo",
+  requiere_revision: "Requiere revisión",
+  requiere_investigacion: "Requiere investigación",
+  ajuste_manual: "Ajuste manual",
+  ajuste_requerido: "Ajuste requerido",
+  otros: "Otros",
+};
+
+export function etiquetaTipo(tipo: string): string {
+  return (
+    ETIQUETA_TIPO[tipo] ??
+    tipo.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase())
+  );
+}
+
+export type FilaTipo = { tipo: string; label: string; valor: number };
+
+/** Distribución por tipo de diferencia, sumada sobre los jobs, ordenada desc. */
+export function porTipoDiferencia(jobs: JobReporte[]): FilaTipo[] {
+  const acc: Record<string, number> = {};
+  for (const j of jobs) {
+    for (const [k, v] of Object.entries(j.categorias ?? {})) {
+      acc[k] = (acc[k] ?? 0) + v;
+    }
+  }
+  return Object.entries(acc)
+    .map(([tipo, valor]) => ({ tipo, label: etiquetaTipo(tipo), valor }))
+    .sort((a, b) => b.valor - a.valor);
+}
 
 export function porBanco(jobs: JobReporte[]): FilaBanco[] {
   const map = new Map<string, FilaBanco>();

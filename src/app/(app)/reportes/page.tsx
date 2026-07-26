@@ -9,9 +9,12 @@ import {
   calcularKpis,
   porMes,
   porBanco,
+  porTipoDiferencia,
+  contarCategorias,
   deduplicarUltimoPorPeriodo,
   type JobReporte,
   type ResumenJob,
+  type MatchLite,
 } from "@/lib/reportes";
 
 type CuentaJoin = {
@@ -28,6 +31,7 @@ type JobRaw = {
   resultado: {
     resumen?: ResumenJob;
     cuadre?: { diferencia?: number };
+    matches?: MatchLite[];
   } | null;
   cuentas_bancarias: CuentaJoin;
 };
@@ -86,6 +90,7 @@ export default async function ReportesPage({
       resumen,
       diferenciaCuadre: Number(j.resultado?.cuadre?.diferencia ?? 0),
       createdAt: j.created_at,
+      categorias: contarCategorias(j.resultado?.matches ?? []),
     });
     jobsMeta.set(j.id, { periodo_desde: j.periodo_desde, banco, numero });
   }
@@ -112,6 +117,7 @@ export default async function ReportesPage({
   const kpis = calcularKpis(jobsFiltrados);
   const mensual = porMes(jobsAnio);
   const bancosAgg = porBanco(jobsFiltrados);
+  const tipos = porTipoDiferencia(jobsFiltrados);
 
   const recientes = jobsFiltrados.slice(0, 12).map((j) => {
     const meta = jobsMeta.get(j.id)!;
@@ -153,6 +159,7 @@ export default async function ReportesPage({
             kpis={kpis}
             mensual={mensual}
             bancos={bancosAgg}
+            tipos={tipos}
             etiqueta={etiqueta || String(anio)}
           />
         )}
@@ -186,6 +193,7 @@ export default async function ReportesPage({
               kpis={kpis}
               mensual={mensual}
               bancos={bancosAgg}
+              tipos={tipos}
               recientes={recientes}
               filtroQuery={filtroQuery}
             />
