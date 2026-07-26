@@ -69,6 +69,17 @@ export function ConfiguracionForm({ config }: { config: ConfigConciliacion }) {
       min: "0",
     },
     {
+      name: "ventana_ia_dias",
+      label: "Ventana de fecha para sugerencias IA",
+      descripcion:
+        "Días máximos de diferencia entre la fecha del registro y la del banco para que la IA lo considere. Amplia porque el depósito suele llegar días o semanas después (p. ej. cuotas). No afecta la conciliación automática.",
+      sufijo: "días",
+      defaultValue: config.ventana_ia_dias,
+      step: "1",
+      min: "0",
+      max: "365",
+    },
+    {
       name: "top_k_candidatos",
       label: "Candidatos que evalúa la IA",
       descripcion:

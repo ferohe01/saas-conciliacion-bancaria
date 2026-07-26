@@ -10,8 +10,8 @@ const internos = prev.pendientes_internos ?? [];
 const bancarios = prev.pendientes_bancarios ?? [];
 const cfg = prev.config ?? {};
 const tolIa = Number(cfg.tolerancia_ia_monto ?? 10);
-const tolDias = Number(cfg.tolerancia_dias ?? 3);
 const K = Number(cfg.top_k_candidatos ?? 3);
+const ventana = Number(cfg.ventana_ia_dias ?? 30); // ventana de fecha amplia para IA
 
 // ── Utilidades de matching ────────────────────────────────────────────────
 const STOP = new Set([
@@ -20,6 +20,9 @@ const STOP = new Set([
   "REPETICION", "DEVOLUCION", "CCE", "INTERBANCARIA", "INTERBANCARIO",
   "OPERACION", "NRO", "REF", "REFERENCIA", "FACTURA", "BOLETA", "SAC", "EIRL",
   "SRL", "DEL", "LOS", "LAS", "POR", "CON",
+  "EFECTIVO", "MENSUALIDAD", "MATRICULA", "PENSION", "INSCRIPCION",
+  "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO",
+  "SEPTIEMBRE", "SETIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE",
 ]);
 const palabras = (t) =>
   String(t ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase()
@@ -39,7 +42,6 @@ const dias = (a, b) => Math.abs((Date.parse(a) - Date.parse(b)) / 86400000);
 const catProb = (d) =>
   d < 0.005 ? "diferencia_temporal" : d <= 10 ? "comision_bancaria" : "requiere_investigacion";
 
-const ventana = tolDias + 4;
 const shortlists = [];
 
 for (const it of internos) {
@@ -98,8 +100,11 @@ const system = [
   "- Un movimiento bancario no debe usarse para dos registros distintos.",
   "- Debe haber correspondencia de identidad (nombre) y coherencia de monto/fecha.",
   '- Si dudas, responde "ninguno". Prefiere precisión sobre cobertura.',
+  "- La fecha puede diferir bastante (el depósito llega tarde); prioriza monto y",
+  "  nombre por sobre la cercanía de fecha.",
   "- Clasifica la diferencia en `categoria`, una de: comision_bancaria,",
-  "  pago_parcial, diferencia_temporal, redondeo, requiere_investigacion.",
+  "  pago_parcial, diferencia_temporal, diferencia_moneda, redondeo,",
+  "  requiere_investigacion.",
   "",
   'Responde ÚNICAMENTE JSON: {"pares":[{"id_interno":"...","id_movimiento":"...',
   ' o ninguno","confianza":0.0,"categoria":"...","justificacion":"..."}]}.',

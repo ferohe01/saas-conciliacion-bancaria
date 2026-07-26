@@ -26,6 +26,7 @@ export async function guardarConfiguracion(
     tolerancia_dias: num(formData.get("tolerancia_dias")),
     tolerancia_ia_monto: num(formData.get("tolerancia_ia_monto")),
     top_k_candidatos: num(formData.get("top_k_candidatos")),
+    ventana_ia_dias: num(formData.get("ventana_ia_dias")),
     umbral_confianza_auto: num(formData.get("umbral_confianza_pct")) / 100,
   };
 

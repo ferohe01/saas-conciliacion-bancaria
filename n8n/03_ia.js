@@ -10,9 +10,9 @@ const internos = prev.pendientes_internos ?? [];
 const bancarios = prev.pendientes_bancarios ?? [];
 
 const tolIa = Number(config?.tolerancia_ia_monto ?? 10);
-const tolDias = Number(config?.tolerancia_dias ?? 3);
 const umbral = Number(config?.umbral_confianza_auto ?? 0.95);
 const topK = Number(config?.top_k_candidatos ?? 3);
+const ventanaIa = Number(config?.ventana_ia_dias ?? 30);
 
 // ── Utilidades de matching ────────────────────────────────────────────────
 const STOP = new Set([
@@ -21,6 +21,9 @@ const STOP = new Set([
   "REPETICION", "DEVOLUCION", "CCE", "INTERBANCARIA", "INTERBANCARIO",
   "OPERACION", "NRO", "REF", "REFERENCIA", "FACTURA", "BOLETA", "SAC", "EIRL",
   "SRL", "DEL", "LOS", "LAS", "POR", "CON",
+  "EFECTIVO", "MENSUALIDAD", "MATRICULA", "PENSION", "INSCRIPCION",
+  "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO",
+  "SEPTIEMBRE", "SETIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE",
 ]);
 const palabras = (t) =>
   String(t ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase()
@@ -40,8 +43,7 @@ const dias = (a, b) => Math.abs((Date.parse(a) - Date.parse(b)) / 86400000);
 const catProb = (d) =>
   d < 0.005 ? "diferencia_temporal" : d <= 10 ? "comision_bancaria" : "requiere_investigacion";
 
-function generarCandidatos(ints, bancs, tolIaMonto, tolDiasCfg, K) {
-  const ventana = tolDiasCfg + 4;
+function generarCandidatos(ints, bancs, tolIaMonto, ventana, K) {
   const out = [];
   for (const it of ints) {
     const cands = [];
@@ -77,7 +79,7 @@ function generarCandidatos(ints, bancs, tolIaMonto, tolDiasCfg, K) {
 }
 
 // ── Adjudicación greedy por score ─────────────────────────────────────────
-const shortlists = generarCandidatos(internos, bancarios, tolIa, tolDias, topK);
+const shortlists = generarCandidatos(internos, bancarios, tolIa, ventanaIa, topK);
 const idxInt = new Map(internos.map((r, i) => [r.id_interno, i]));
 const idxBanc = new Map(bancarios.map((m, j) => [m.id_movimiento, j]));
 const intUsado = new Set();

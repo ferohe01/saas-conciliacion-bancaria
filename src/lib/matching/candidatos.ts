@@ -44,6 +44,7 @@ export type ConfigCandidatos = {
   tolerancia_dias: number;
   top_k_candidatos?: number;
   top_k?: number; // alias retrocompatible
+  ventana_ia_dias?: number;
 };
 
 function diasEntre(a: string, b: string): number {
@@ -78,9 +79,9 @@ export function generarCandidatos(
   cfg: ConfigCandidatos,
 ): ShortlistInterno[] {
   const tolIa = Number(cfg.tolerancia_ia_monto ?? 10);
-  const tolDias = Number(cfg.tolerancia_dias ?? 3);
   const K = cfg.top_k_candidatos ?? cfg.top_k ?? 3;
-  const ventana = tolDias + 4;
+  // Ventana de fecha amplia para IA (los depósitos de cuotas llegan tarde).
+  const ventana = Number(cfg.ventana_ia_dias ?? 30);
 
   const salida: ShortlistInterno[] = [];
 

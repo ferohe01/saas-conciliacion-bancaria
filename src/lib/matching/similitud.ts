@@ -38,6 +38,25 @@ const STOPWORDS = new Set([
   "LAS",
   "POR",
   "CON",
+  // Términos de cobros/cuotas y meses (ruido, no identidad).
+  "EFECTIVO",
+  "MENSUALIDAD",
+  "MATRICULA",
+  "PENSION",
+  "INSCRIPCION",
+  "ENERO",
+  "FEBRERO",
+  "MARZO",
+  "ABRIL",
+  "MAYO",
+  "JUNIO",
+  "JULIO",
+  "AGOSTO",
+  "SEPTIEMBRE",
+  "SETIEMBRE",
+  "OCTUBRE",
+  "NOVIEMBRE",
+  "DICIEMBRE",
 ]);
 
 /** Normaliza y tokeniza: MAYÚSCULAS sin acentos, palabras de ≥3 letras útiles. */

@@ -21,6 +21,11 @@ export const ConfigConciliacion = z.object({
   // Cuántos candidatos (los mejores por score) se le presentan a la IA por cada
   // registro interno. Más candidatos = más recall pero más costo/tokens.
   top_k_candidatos: z.number().int().min(1).max(10).default(3),
+  // Ventana de días para la candidatura de IA (más amplia que la de auto-
+  // conciliación). En cobros de cuotas, el depósito llega días/semanas después
+  // de la fecha registrada. La fecha entra al score, pero no bloquea dentro de
+  // esta ventana.
+  ventana_ia_dias: z.number().int().min(0).max(365).default(30),
 });
 export type ConfigConciliacion = z.infer<typeof ConfigConciliacion>;
 
@@ -31,4 +36,5 @@ export const CONFIG_CONCILIACION_DEFAULT: ConfigConciliacion = {
   umbral_confianza_auto: 0.95,
   tolerancia_ia_monto: 10.0,
   top_k_candidatos: 3,
+  ventana_ia_dias: 30,
 };
