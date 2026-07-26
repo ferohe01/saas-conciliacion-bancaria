@@ -80,6 +80,30 @@ describe("generarCandidatos", () => {
     expect(c.features.comparte_ref).toBe(true);
   });
 
+  it("admite por referencia EMBEBIDA en la glosa, sin nombre ni monto en banda", () => {
+    // El código HE112065245 va en la referencia interna y dentro de la glosa
+    // (no en la columna referencia_banco). Monto difiere 35 (>banda), sin nombre.
+    const it = interno({
+      contraparte: "Cliente Uno",
+      referencia: "HE112065245",
+      descripcion: null,
+      monto: 100,
+      fecha: "2026-07-01",
+    });
+    const bc = banco({
+      glosa: "PAGO HE112065245 - OTRO NOMBRE",
+      referencia_banco: "",
+      monto: 135,
+      fecha: "2026-07-18",
+    });
+    const sl = generarCandidatos([it], [bc], cfg);
+    expect(sl).toHaveLength(1);
+    const c = sl[0]!.candidatos[0]!;
+    expect(c.features.comparte_ref).toBe(true);
+    expect(c.features.palabras_comunes).toEqual([]);
+    expect(c.score).toBeGreaterThanOrEqual(0.4); // referencia = señal fuerte
+  });
+
   it("admite candidato por referencia exacta aunque la glosa no traiga el nombre", () => {
     const it = interno({
       contraparte: "Juan Pérez Quispe",

@@ -38,30 +38,46 @@ const jaccard = (a, b) => {
   let i = 0; for (const t of A) if (B.has(t)) i++;
   const u = new Set([...A, ...B]).size; return u ? i / u : 0;
 };
-const normRef = (r) => String(r ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+// Referencias: token alfanumérico con >=1 letra y >=1 dígito, longitud >=4.
+// Se extraen del campo de referencia y del texto libre (glosa/descripción).
+const esRefToken = (t) => t.length >= 4 && /[A-Z]/.test(t) && /[0-9]/.test(t);
+const refsDeTexto = (texto, set) => {
+  for (const tok of String(texto ?? "").toUpperCase().split(/[^A-Z0-9]+/)) if (esRefToken(tok)) set.add(tok);
+};
+const refCampo = (ref, set) => {
+  const c = String(ref ?? "").toUpperCase().replace(/[^A-Z0-9]/g, ""); if (esRefToken(c)) set.add(c);
+};
+const refsInterno = (it) => { const s = new Set(); refCampo(it.referencia, s); refsDeTexto(it.descripcion, s); return s; };
+const refsBanco = (bc) => { const s = new Set(); refCampo(bc.referencia_banco, s); refsDeTexto(bc.glosa, s); return s; };
+const intersecta = (a, b) => { for (const x of a) if (b.has(x)) return true; return false; };
 const dias = (a, b) => Math.abs((Date.parse(a) - Date.parse(b)) / 86400000);
 const catProb = (d) =>
   d < 0.005 ? "diferencia_temporal" : d <= 10 ? "comision_bancaria" : "requiere_investigacion";
 
 function generarCandidatos(ints, bancs, tolIaMonto, ventana, K) {
   const out = [];
+  const refsBc = bancs.map((bc) => refsBanco(bc));
   for (const it of ints) {
+    const refsIt = refsInterno(it);
     const cands = [];
-    for (const bc of bancs) {
+    for (let bi = 0; bi < bancs.length; bi++) {
+      const bc = bancs[bi];
       if (Math.sign(it.monto) !== Math.sign(bc.monto)) continue;
-      const difAbs = Math.abs(it.monto - bc.monto);
-      if (difAbs > tolIaMonto) continue;
       const d = dias(it.fecha, bc.fecha);
       if (d > ventana) continue;
+      const difAbs = Math.abs(it.monto - bc.monto);
+      const comparteRef = intersecta(refsIt, refsBc[bi]);
       const comunes = comunesEntre(it.contraparte, bc.glosa);
-      const refI = normRef(it.referencia);
-      const comparteRef = refI.length > 0 && refI === normRef(bc.referencia_banco);
-      // Candidato si comparte nombre O si la referencia coincide exacta.
-      if (!comunes.length && !comparteRef) continue;
+      // Si comparte referencia, es candidato aunque no comparta nombre ni esté
+      // en la banda de monto. Si no, exige nombre Y banda de monto.
+      if (!comparteRef) {
+        if (!comunes.length) continue;
+        if (difAbs > tolIaMonto) continue;
+      }
       const sim = jaccard(it.contraparte, bc.glosa);
       const cercM = 1 - Math.min(difAbs / (tolIaMonto || 1), 1);
       const cercF = 1 - Math.min(d / (ventana || 1), 1);
-      const score = Number(Math.min(1, 0.5 * sim + 0.3 * cercM + 0.2 * cercF + (comparteRef ? 0.2 : 0)).toFixed(3));
+      const score = Number(Math.min(1, 0.5 * sim + 0.3 * cercM + 0.2 * cercF + (comparteRef ? 0.4 : 0)).toFixed(3));
       cands.push({
         id_movimiento: bc.id_movimiento,
         dif: Number((it.monto - bc.monto).toFixed(2)),

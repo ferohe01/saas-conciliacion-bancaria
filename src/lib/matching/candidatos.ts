@@ -51,8 +51,40 @@ function diasEntre(a: string, b: string): number {
   return Math.abs((Date.parse(a) - Date.parse(b)) / 86_400_000);
 }
 
-function normRef(r: string | null | undefined): string {
-  return String(r ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+/**
+ * Referencias / códigos de pago. Un "token de referencia" es alfanumérico con
+ * al menos una letra y un dígito y longitud >= 4 (p. ej. HE112065245, PE6586…,
+ * F001234). Se extraen del campo de referencia Y del texto libre (glosa /
+ * descripción), porque muchos bancos ponen el código dentro de la glosa
+ * ("PAGO HE112065245 - NOMBRE"), no en una columna aparte.
+ */
+function esRefToken(t: string): boolean {
+  return t.length >= 4 && /[A-Z]/.test(t) && /[0-9]/.test(t);
+}
+function agregarRefsDeTexto(texto: string | null | undefined, set: Set<string>) {
+  for (const tok of String(texto ?? "").toUpperCase().split(/[^A-Z0-9]+/)) {
+    if (esRefToken(tok)) set.add(tok);
+  }
+}
+function agregarRefCampo(ref: string | null | undefined, set: Set<string>) {
+  const compacto = String(ref ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (esRefToken(compacto)) set.add(compacto);
+}
+export function refsInterno(it: RegistroInterno): Set<string> {
+  const s = new Set<string>();
+  agregarRefCampo(it.referencia, s);
+  agregarRefsDeTexto(it.descripcion, s);
+  return s;
+}
+export function refsBancarias(bc: MovimientoBancario): Set<string> {
+  const s = new Set<string>();
+  agregarRefCampo(bc.referencia_banco, s);
+  agregarRefsDeTexto(bc.glosa, s);
+  return s;
+}
+function intersecta(a: Set<string>, b: Set<string>): boolean {
+  for (const x of a) if (b.has(x)) return true;
+  return false;
 }
 
 /** Similitud Jaccard entre los tokens de dos textos (0..1). */
@@ -84,30 +116,38 @@ export function generarCandidatos(
   const ventana = Number(cfg.ventana_ia_dias ?? 30);
 
   const salida: ShortlistInterno[] = [];
+  // Referencias de cada movimiento bancario, precomputadas una sola vez.
+  const refsBanco = bancarios.map((bc) => refsBancarias(bc));
 
   for (const it of internos) {
+    const refsIt = refsInterno(it);
     const cands: Candidato[] = [];
-    for (const bc of bancarios) {
+    for (let bi = 0; bi < bancarios.length; bi++) {
+      const bc = bancarios[bi]!;
       if (Math.sign(it.monto) !== Math.sign(bc.monto)) continue;
-      const difAbs = Math.abs(it.monto - bc.monto);
-      if (difAbs > tolIa) continue;
       const d = diasEntre(it.fecha, bc.fecha);
       if (d > ventana) continue;
+
+      const difAbs = Math.abs(it.monto - bc.monto);
+      const comparteRef = intersecta(refsIt, refsBanco[bi]!);
       const comunes = palabrasComunes(it.contraparte, bc.glosa);
-      const refI = normRef(it.referencia);
-      const comparteRef = refI.length > 0 && refI === normRef(bc.referencia_banco);
-      // Es candidato si comparte NOMBRE (>=1 palabra) O si la referencia/Nº de
-      // operación coincide exactamente (señal fuerte aunque la glosa no traiga
-      // el nombre). Sin ninguno de los dos, se descarta.
-      if (comunes.length === 0 && !comparteRef) continue;
+      // Candidatura: si la REFERENCIA coincide, es candidato aunque no comparta
+      // nombre ni esté en la banda de monto (una referencia igual es señal casi
+      // definitiva → FX, pago parcial…). Si NO comparte referencia, se exige
+      // nombre (>=1 palabra) Y monto dentro de la banda.
+      if (!comparteRef) {
+        if (comunes.length === 0) continue;
+        if (difAbs > tolIa) continue;
+      }
 
       const sim = jaccard(it.contraparte, bc.glosa);
       const cercMonto = 1 - Math.min(difAbs / (tolIa || 1), 1);
       const cercFecha = 1 - Math.min(d / (ventana || 1), 1);
+      // La referencia es la señal más fuerte: bonus grande.
       const score = Number(
         Math.min(
           1,
-          0.5 * sim + 0.3 * cercMonto + 0.2 * cercFecha + (comparteRef ? 0.2 : 0),
+          0.5 * sim + 0.3 * cercMonto + 0.2 * cercFecha + (comparteRef ? 0.4 : 0),
         ).toFixed(3),
       );
 
