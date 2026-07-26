@@ -42,7 +42,7 @@ export function ReporteVista({
         <DistribucionMetodos kpis={kpis} filtroQuery={filtroQuery} />
       </div>
 
-      <TiposDiferencia tipos={tipos} />
+      <TiposDiferencia tipos={tipos} filtroQuery={filtroQuery} />
 
       <TablaBancos bancos={bancos} />
 
@@ -203,7 +203,13 @@ function DistribucionMetodos({
 }
 
 // ── Tipo de diferencia (reason codes) — barras ranqueadas, un solo tono ─────
-function TiposDiferencia({ tipos }: { tipos: FilaTipo[] }) {
+function TiposDiferencia({
+  tipos,
+  filtroQuery,
+}: {
+  tipos: FilaTipo[];
+  filtroQuery: string;
+}) {
   if (tipos.length === 0) return null;
   const total = tipos.reduce((a, t) => a + t.valor, 0) || 1;
   const max = Math.max(...tipos.map((t) => t.valor), 1);
@@ -211,26 +217,36 @@ function TiposDiferencia({ tipos }: { tipos: FilaTipo[] }) {
     <div className="rounded-2xl border border-neutral-200 bg-white p-5">
       <p className="font-semibold text-neutral-900">Tipo de diferencia</p>
       <p className="text-xs text-neutral-500">
-        Cómo se distribuyen los pares conciliados por tipo (reason codes)
+        Distribución de pares conciliados por tipo · haz clic para ver el detalle
       </p>
-      <ul className="mt-4 space-y-2.5">
+      <ul className="mt-4 space-y-1">
         {tipos.map((t) => (
           <li key={t.tipo}>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-neutral-700">{t.label}</span>
-              <span className="tabular-nums text-neutral-900">
-                {NUM(t.valor)}{" "}
-                <span className="text-neutral-400">
-                  ({Math.round((t.valor / total) * 100)}%)
+            <Link
+              href={`/reportes/tipo/${t.tipo}?${filtroQuery}`}
+              className="group block rounded-lg px-2 py-1.5 transition-colors hover:bg-neutral-50"
+            >
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-neutral-700 group-hover:text-blue-600">
+                  {t.label}
                 </span>
-              </span>
-            </div>
-            <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-neutral-100">
-              <div
-                className="h-2 rounded-full bg-neutral-800"
-                style={{ width: `${(t.valor / max) * 100}%` }}
-              />
-            </div>
+                <span className="tabular-nums text-neutral-900">
+                  {NUM(t.valor)}{" "}
+                  <span className="text-neutral-400">
+                    ({Math.round((t.valor / total) * 100)}%)
+                  </span>
+                  <span className="ml-2 text-neutral-300 group-hover:text-blue-600">
+                    →
+                  </span>
+                </span>
+              </div>
+              <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-neutral-100">
+                <div
+                  className="h-2 rounded-full bg-neutral-800 group-hover:bg-blue-600"
+                  style={{ width: `${(t.valor / max) * 100}%` }}
+                />
+              </div>
+            </Link>
           </li>
         ))}
       </ul>

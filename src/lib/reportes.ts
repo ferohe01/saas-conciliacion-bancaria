@@ -181,16 +181,22 @@ export type MatchLite = {
   estado_revision?: string;
 };
 
+/** Clave de tipo de diferencia (reason code) de un match. */
+export function categoriaDeMatch(m: MatchLite): string {
+  return (
+    m.categoria_diferencia ??
+    (Math.abs(Number(m.diferencia_monto ?? 0)) < 0.005
+      ? "sin_diferencia"
+      : "otros")
+  );
+}
+
 /** Cuenta los matches de un job por tipo de diferencia (categoria). */
 export function contarCategorias(matches: MatchLite[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const m of matches ?? []) {
     if (m.estado_revision === "rechazado") continue;
-    const cat =
-      m.categoria_diferencia ??
-      (Math.abs(Number(m.diferencia_monto ?? 0)) < 0.005
-        ? "sin_diferencia"
-        : "otros");
+    const cat = categoriaDeMatch(m);
     out[cat] = (out[cat] ?? 0) + 1;
   }
   return out;
