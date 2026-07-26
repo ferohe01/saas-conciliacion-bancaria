@@ -11,7 +11,7 @@ const bancarios = prev.pendientes_bancarios ?? [];
 const cfg = prev.config ?? {};
 const tolIa = Number(cfg.tolerancia_ia_monto ?? 10);
 const tolDias = Number(cfg.tolerancia_dias ?? 3);
-const K = 3;
+const K = Number(cfg.top_k_candidatos ?? 3);
 
 // ── Utilidades de matching ────────────────────────────────────────────────
 const STOP = new Set([

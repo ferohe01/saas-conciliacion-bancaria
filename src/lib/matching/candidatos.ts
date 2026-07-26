@@ -42,7 +42,8 @@ export type ShortlistInterno = {
 export type ConfigCandidatos = {
   tolerancia_ia_monto: number;
   tolerancia_dias: number;
-  top_k?: number;
+  top_k_candidatos?: number;
+  top_k?: number; // alias retrocompatible
 };
 
 function diasEntre(a: string, b: string): number {
@@ -78,7 +79,7 @@ export function generarCandidatos(
 ): ShortlistInterno[] {
   const tolIa = Number(cfg.tolerancia_ia_monto ?? 10);
   const tolDias = Number(cfg.tolerancia_dias ?? 3);
-  const K = cfg.top_k ?? 3;
+  const K = cfg.top_k_candidatos ?? cfg.top_k ?? 3;
   const ventana = tolDias + 4;
 
   const salida: ShortlistInterno[] = [];

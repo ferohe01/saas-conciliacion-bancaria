@@ -69,6 +69,17 @@ export function ConfiguracionForm({ config }: { config: ConfigConciliacion }) {
       min: "0",
     },
     {
+      name: "top_k_candidatos",
+      label: "Candidatos que evalúa la IA",
+      descripcion:
+        "Cuántos movimientos bancarios (los mejores por score) se le presentan a la IA por cada registro. Más candidatos = más cobertura, pero más costo. Entre 1 y 10.",
+      sufijo: "",
+      defaultValue: config.top_k_candidatos,
+      step: "1",
+      min: "1",
+      max: "10",
+    },
+    {
       name: "umbral_confianza_pct",
       label: "Umbral de auto-conciliación IA",
       descripcion:

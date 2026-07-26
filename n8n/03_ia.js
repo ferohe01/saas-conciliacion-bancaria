@@ -12,6 +12,7 @@ const bancarios = prev.pendientes_bancarios ?? [];
 const tolIa = Number(config?.tolerancia_ia_monto ?? 10);
 const tolDias = Number(config?.tolerancia_dias ?? 3);
 const umbral = Number(config?.umbral_confianza_auto ?? 0.95);
+const topK = Number(config?.top_k_candidatos ?? 3);
 
 // ── Utilidades de matching ────────────────────────────────────────────────
 const STOP = new Set([
@@ -76,7 +77,7 @@ function generarCandidatos(ints, bancs, tolIaMonto, tolDiasCfg, K) {
 }
 
 // ── Adjudicación greedy por score ─────────────────────────────────────────
-const shortlists = generarCandidatos(internos, bancarios, tolIa, tolDias, 3);
+const shortlists = generarCandidatos(internos, bancarios, tolIa, tolDias, topK);
 const idxInt = new Map(internos.map((r, i) => [r.id_interno, i]));
 const idxBanc = new Map(bancarios.map((m, j) => [m.id_movimiento, j]));
 const intUsado = new Set();

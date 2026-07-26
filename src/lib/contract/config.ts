@@ -18,6 +18,9 @@ export const ConfigConciliacion = z.object({
   // Banda de diferencia de monto para SUGERIR con IA (más amplia que la difusa,
   // pero acotada). Solo se sugiere si |diferencia| <= este valor.
   tolerancia_ia_monto: MontoNoNegativo.default(10),
+  // Cuántos candidatos (los mejores por score) se le presentan a la IA por cada
+  // registro interno. Más candidatos = más recall pero más costo/tokens.
+  top_k_candidatos: z.number().int().min(1).max(10).default(3),
 });
 export type ConfigConciliacion = z.infer<typeof ConfigConciliacion>;
 
@@ -27,4 +30,5 @@ export const CONFIG_CONCILIACION_DEFAULT: ConfigConciliacion = {
   tolerancia_dias: 3,
   umbral_confianza_auto: 0.95,
   tolerancia_ia_monto: 10.0,
+  top_k_candidatos: 3,
 };
