@@ -24,6 +24,10 @@ const nodes = [
       httpMethod: "POST",
       path: "conciliaciones",
       responseMode: "responseNode",
+      // Token compartido obligatorio: el backend lo manda en `x-n8n-token`
+      // (ver src/lib/n8n/cliente.ts). La credencial en sí NO viaja en el JSON
+      // — tras importar hay que seleccionarla, igual que la del modelo.
+      authentication: "headerAuth",
       options: {},
     },
     id: randomUUID(),

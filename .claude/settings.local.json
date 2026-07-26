@@ -74,7 +74,20 @@
       "Bash(curl -sS -v https://supabase.fernandorh.com/)",
       "Bash(curl -sS -o /dev/null -w \"http_code=%{http_code} -> %{redirect_url}\\\\n\" http://supabase.fernandorh.com/)",
       "Bash(grep -nE \"eyJ[A-Za-z0-9_-]{20,}|[a-f0-9]{32,}\" .env.example)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(git remote *)",
+      "Bash(ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -T git@github.com)",
+      "Bash(git push *)",
+      "Bash(curl -sS -o /dev/null -w \"  http=%{http_code} ssl_verify=%{ssl_verify_result} tiempo=%{time_total}s\\\\n\" https://conciliacion.fernandorh.com/)",
+      "Bash(curl -sS -o /dev/null -w \"  http=%{http_code} -> %{redirect_url}\\\\n\" http://conciliacion.fernandorh.com/)",
+      "Bash(curl -sS -w \"  [%{http_code}]\\\\n\" https://conciliacion.fernandorh.com/api/health)",
+      "Bash(curl -sS -D - -o /dev/null https://conciliacion.fernandorh.com/)",
+      "Bash(curl -sS https://conciliacion.fernandorh.com/login)",
+      "Bash(curl -sS -X POST https://conciliacion.fernandorh.com/api/webhooks/resultado-conciliacion -H 'Content-Type: application/json' -d '{\"job_id\":\"prueba\"}' -w '  [%{http_code}]\\\\n')",
+      "Bash(curl -sS -X POST https://conciliacion.fernandorh.com/api/webhooks/resultado-conciliacion -H 'Content-Type: application/json' -H 'x-n8n-token: token-incorrecto' -d '{\"job_id\":\"prueba\"}' -w '  [%{http_code}]\\\\n')",
+      "Bash(curl -sS -X POST https://conciliacion.fernandorh.com/api/conciliacion/iniciar -H 'Content-Type: application/json' -d '{}' -w '  [%{http_code}]\\\\n')",
+      "Bash(curl -sS -X POST https://n8npucp.fernandorh.com/webhook/conciliaciones -H \"Content-Type: application/json\" -H \"x-n8n-token: incorrecto\" -d '{}')",
+      "Bash(npx vitest *)"
     ]
   }
 }

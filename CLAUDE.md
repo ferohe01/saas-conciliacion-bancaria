@@ -193,7 +193,10 @@ importable. Dos variantes:
 
 Regenerar: `node n8n/build_workflow.mjs && node n8n/build_workflow_ia.mjs`. Tras
 reimportar, hay que **reseleccionar la credencial del modelo** (no viaja en el
-JSON) y pegar el `service_role` en el nodo "Actualizar Supabase". El backend
+JSON), pegar el `service_role` en el nodo "Actualizar Supabase" y **seleccionar
+la credencial Header Auth del nodo Webhook** (`x-n8n-token` = `N8N_WEBHOOK_TOKEN`;
+el nodo declara `authentication: "headerAuth"`, pero la credencial tampoco viaja
+en el JSON — sin seleccionarla el webhook queda **abierto a cualquiera**). El backend
 **siempre** dispara n8n real (no hay simulador local). Los nodos `n8n/*.js` son la
 **fuente única** del motor: no hay implementación paralela en la app. Todo cambio
 de lógica de conciliación se hace ahí y se verifica **end-to-end** en n8n (los
