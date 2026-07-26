@@ -365,6 +365,44 @@ los más recientes. La arquitectura ya está lista: solo cambiaría **cómo
 `construirEjemplos` selecciona** el subconjunto; el resto del flujo (payload →
 prompt) queda igual.
 
+## Despliegue en producción (VPS Contabo + Dokploy)
+
+Todo corre en un único VPS (`95.111.245.187`) orquestado por **Dokploy**, con
+Traefik terminando TLS (Let's Encrypt) delante de cada servicio:
+
+| Servicio | Dominio | Notas |
+|---|---|---|
+| App (esta) | `conciliacion.fernandorh.com` | Application, build **Dockerfile**, puerto 3000 |
+| Supabase | `supabase.fernandorh.com` | Compose; solo se expone `kong` (8000) |
+| n8n | `n8npucp.fernandorh.com` | Webhook de producción `/webhook/conciliaciones` |
+
+- **Imagen:** `Dockerfile` multi-etapa sobre `node:22-alpine`, `output:
+  "standalone"` en `next.config.mjs`, usuario no-root. `/api/health` existe para
+  el health check y el rollback automático de Dokploy.
+- **⚠️ Las `NEXT_PUBLIC_*` se incrustan en build-time**, así que van **dos
+  veces** en Dokploy: en *Environment* (runtime) y en *Build Time Arguments*.
+  Solo en runtime → el bundle sale con `createBrowserClient("","")` y el login
+  falla en el navegador aunque el servidor no dé ningún error. El resto de
+  variables (`SUPABASE_SERVICE_ROLE_KEY`, `N8N_WEBHOOK_TOKEN`) **nunca** como
+  build arg: quedarían en las capas de la imagen.
+- **Migraciones:** `supabase db push` **no aplica** — Supabase es self-hosted y
+  el repo no es un proyecto de CLI (no hay `config.toml`). Se aplica
+  `supabase/apply_all.sql` desde el SQL Editor de Studio o por `psql`. El script
+  es re-ejecutable.
+- **Supabase debe ir por HTTPS**: con la app en HTTPS, un Supabase en `http://`
+  queda bloqueado por mixed content. Sus propias variables `API_EXTERNAL_URL`,
+  `SUPABASE_PUBLIC_URL` y `SITE_URL` deben apuntar a los dominios definitivos.
+
+### Pendientes conocidos en producción
+
+- **Realtime devuelve 403** en el handshake WebSocket (preexistente al
+  despliegue; ocurría igual con el host anterior). Kong autentica bien y es el
+  servicio Realtime quien rechaza. La pantalla de progreso funciona igualmente
+  por el polling de respaldo de `ProgresoConciliacion.tsx`. Diagnóstico
+  pendiente con los logs del contenedor `realtime`.
+- Las 3 vulnerabilidades *high* de build-time de Next siguen aceptadas (ver
+  Fase 7).
+
 ## Notas de arranque (Supabase)
 
 El entorno se conecta después (scaffold-only). Para levantarlo:
