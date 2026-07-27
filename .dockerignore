@@ -24,3 +24,6 @@ vitest.config.ts
 # el motor vive fuera (n8n externo)
 n8n
 supabase
+
+# scripts de operacion del VPS, no de la imagen
+ops
