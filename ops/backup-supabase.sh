@@ -17,7 +17,7 @@ DIR=/opt/backups/supabase                        # dumps locales
 DIAS_LOCAL=14                                    # retencion en el VPS
 RCLONE_REMOTE="b2:conciliacion-backups/supabase" # destino remoto ("" = no subir)
 DIAS_REMOTO=90                                   # retencion en el remoto
-PATRON_CONTENEDOR="supabase-db"                  # trozo del nombre del contenedor
+PATRON_CONTENEDOR="supabase-.*-db-1"             # debe casar con EXACTAMENTE uno
 LOG=/var/log/backup-supabase.log
 
 exec >> "$LOG" 2>&1

@@ -407,8 +407,16 @@ Dos capas, complementarias:
   la independencia del proveedor. Usa **`pg_dumpall`, no `pg_dump`**: sin el
   esquema `auth` se restauran los datos pero nadie puede iniciar sesión.
 
-Un backup no probado no es un backup: restaurar sobre un Postgres desechable y
-comprobar `select count(*) from auth.users` es parte del procedimiento.
+Un backup no probado no es un backup. **Procedimiento de restauración verificado
+en `ops/RESTAURAR.md`** — con una trampa que cuesta cara: restaurar sobre un
+Supabase recién desplegado deja `auth.users` **vacío** (su init crea un esquema
+`auth` más antiguo y el `COPY` del dump falla), así que vuelven los datos pero
+nadie puede iniciar sesión. Hay que soltar `auth` y `storage` antes de restaurar,
+y restaurar como `supabase_admin`, no como `postgres`.
+
+Estado: instalado en el VPS (`/usr/local/bin/backup-supabase.sh`, cron 3:00,
+`/opt/backups/supabase`, 14 días de rotación). **`RCLONE_REMOTE` está vacío**:
+los dumps solo viven en el VPS hasta que se configure el bucket externo.
 
 ### Pendientes conocidos en producción
 
