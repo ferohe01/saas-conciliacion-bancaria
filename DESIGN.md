@@ -340,8 +340,10 @@ neutro en Tinta. Un monto grande no se pinta para llamar la atención; se ordena
 
 ## Layout
 
-El área autenticada es un **lienzo de Papel** (`#f5f5f5`) sobre el que flotan
-tarjetas blancas; la barra de navegación es blanca con una línea inferior. El
+El área autenticada es una **guarda lateral persistente** de 256px sobre
+superficie blanca, separada por una línea de 1px, y a su derecha un **lienzo de
+Papel** (`#f5f5f5`) sobre el que flotan tarjetas blancas. Por debajo de `lg`
+(1024px) la guarda se repliega en un cajón sobre una barra superior delgada. El
 ritmo vertical entre bloques es constante: **24px** (`space-y-6`), con 32px de
 respiro de página.
 
@@ -353,7 +355,7 @@ El ancho del contenedor lo dicta la tarea, no una grilla global:
 | Configuración | 672px | Lista de campos numéricos, lectura en una columna |
 | Wizard | 768px | Un paso a la vez, sin distracción lateral |
 | Resultado de conciliación | 896px | Dos paneles enfrentados necesitan aire |
-| Shell de la app (resto) | 1024px | Tablas y reportes |
+| Shell de la app (resto) | 1152px | Tablas, reportes y el panel de control |
 | Portada | 1152px | Hero dividido a media página |
 
 **Densidad y responsive.** El sistema es de una sola columna en móvil y abre a
@@ -465,11 +467,20 @@ pegado, no compuesto.
 
 ### Navigation
 
-Barra blanca con línea inferior de Línea, contenida a 1024px. Los enlaces son
-0.875rem en Plomo con radio de control; el activo se marca con fondo Papel y
-texto Tinta en peso 500 — **fondo, no subrayado ni color de acento**, para que el
-azul siga significando "paso vivo del wizard". El nombre de la empresa vive a la
-derecha, truncado, junto al botón Salir.
+**Guarda lateral de 256px**, superficie blanca con borde derecho de Línea, fija
+a pantalla completa desde `lg`. De arriba abajo: marca, la acción primaria
+**Nueva conciliación** (botón Tinta de ancho completo, el único elemento de la
+guarda con fondo pleno), los cinco destinos, y al pie el nombre de la empresa
+truncado sobre el botón Salir.
+
+Los enlaces son 0.875rem en Plomo con radio de control y un ícono de 16px en
+Plomo Claro; el activo se marca con fondo Papel, texto Tinta en peso 500 e ícono
+en Tinta — **fondo, no subrayado ni color de acento**, para que el azul siga
+significando "paso vivo del wizard".
+
+Por debajo de `lg` la guarda se convierte en cajón: barra superior con marca y
+disparador, panel de 288px sobre velo `neutral-900/20`, sombra Flotante (aquí sí
+flota de verdad), cierre con Escape devolviendo el foco al disparador.
 
 ### Badges de método
 

@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { AppNav } from "@/components/app/AppNav";
+import { AppSidebar } from "@/components/app/AppSidebar";
 import { getEmpresaActual } from "@/lib/auth";
 
 /**
@@ -29,10 +29,17 @@ export default async function AppLayout({
       >
         Saltar al contenido
       </a>
-      <AppNav empresaNombre={empresa.nombre} />
-      <main id="contenido" className="mx-auto max-w-5xl px-4 py-8">
-        {children}
-      </main>
+      <AppSidebar empresaNombre={empresa.nombre} />
+      {/* La guarda es fija a partir de lg; el lienzo se desplaza para no quedar
+          debajo. Cada pantalla fija su propio ancho por tarea dentro de él. */}
+      <div className="lg:pl-64">
+        <main
+          id="contenido"
+          className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8"
+        >
+          {children}
+        </main>
+      </div>
     </div>
   );
 }
