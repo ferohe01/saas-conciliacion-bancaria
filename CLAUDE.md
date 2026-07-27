@@ -393,6 +393,23 @@ Traefik terminando TLS (Let's Encrypt) delante de cada servicio:
   queda bloqueado por mixed content. Sus propias variables `API_EXTERNAL_URL`,
   `SUPABASE_PUBLIC_URL` y `SITE_URL` deben apuntar a los dominios definitivos.
 
+### Backups
+
+Dos capas, complementarias:
+
+- **Auto Backup de instancia (Contabo)** — snapshot del VPS entero. Cubre la
+  pérdida total del servidor **incluyendo n8n (workflows y credenciales),
+  Dokploy y Traefik**, que ningún dump de Postgres se lleva. No permite
+  recuperación granular y vive en la misma cuenta que el servidor.
+- **`ops/backup-supabase.sh`** — `pg_dumpall` diario con rotación y subida a un
+  bucket externo (cron a las 3:00 en el VPS; el script no lo usa la app). Cubre
+  lo que el snapshot no: "recupera solo esta tabla", el error detectado tarde, y
+  la independencia del proveedor. Usa **`pg_dumpall`, no `pg_dump`**: sin el
+  esquema `auth` se restauran los datos pero nadie puede iniciar sesión.
+
+Un backup no probado no es un backup: restaurar sobre un Postgres desechable y
+comprobar `select count(*) from auth.users` es parte del procedimiento.
+
 ### Pendientes conocidos en producción
 
 - **Realtime devuelve 403** en el handshake WebSocket (preexistente al
