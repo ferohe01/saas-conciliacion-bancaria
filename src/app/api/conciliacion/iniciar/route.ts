@@ -174,6 +174,22 @@ export async function POST(request: Request) {
   // Disparar el procesamiento en n8n (webhook con token).
   const envio = await enviarAN8n(validado.data);
   if (!envio.ok) {
+    if (envio.entregaIncierta) {
+      // Se agotó el tiempo con la petición ya en vuelo: NO se sabe si n8n la
+      // recibió. Marcar 'error' seria mentir — puede estar procesándose, y el
+      // resultado llegaría después pisando ese estado. El job se queda en
+      // 'pendiente' y la pantalla de progreso (Realtime + polling) resuelve
+      // sola el caso bueno; si n8n nunca lo recibió, queda visible en el
+      // historial para reintentarlo.
+      await admin
+        .from("jobs_conciliacion")
+        .update({ error_detalle: envio.error })
+        .eq("id", jobId);
+      return NextResponse.json(
+        { job_id: jobId, aviso: envio.error },
+        { status: 202 },
+      );
+    }
     await admin
       .from("jobs_conciliacion")
       .update({ estado: "error", error_detalle: envio.error })
