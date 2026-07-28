@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { esRucValido, esRegionValida, esTelefonoValido } from "@/lib/peru";
 
 /**
  * POST /api/auth/registro
@@ -14,17 +15,54 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * confirmación de email en el MVP (email_confirm: true).
  */
 
-const RegistroSchema = z.object({
-  nombre_empresa: z.string().trim().min(2, "El nombre de la empresa es muy corto"),
-  ruc: z
+const telefono = (campo: string) =>
+  z
     .string()
     .trim()
-    .regex(/^\d{11}$/, "El RUC debe tener 11 dígitos")
-    .optional()
-    .or(z.literal("").transform(() => undefined)),
+    .refine(esTelefonoValido, `El ${campo} no parece válido (6 a 15 dígitos)`);
+
+const RegistroSchema = z.object({
+  // Empresa
+  nombre_empresa: z.string().trim().min(2, "El nombre de la empresa es muy corto"),
+  ruc: z.string().trim().refine(esRucValido, "El RUC debe tener 11 dígitos"),
+  region: z.string().trim().refine(esRegionValida, "Elige una región válida"),
+  provincia: z.string().trim().min(2, "Indica la provincia"),
+  direccion: z.string().trim().min(5, "La dirección es muy corta"),
+  telefono_empresa: telefono("teléfono de la empresa"),
+  // Administrador. Su correo ES el usuario con el que inicia sesión.
+  admin_nombre: z.string().trim().min(3, "Indica el nombre completo"),
+  admin_telefono: telefono("teléfono"),
   email: z.string().trim().email("Correo inválido"),
   password: z.string().min(8, "La contraseña debe tener al menos 8 caracteres"),
 });
+
+/** Nombre visible de cada campo, para que un error diga cuál falta. */
+const ETIQUETAS: Record<string, string> = {
+  nombre_empresa: "la razón social",
+  ruc: "el RUC",
+  region: "la región",
+  provincia: "la provincia",
+  direccion: "la dirección",
+  telefono_empresa: "el teléfono de la empresa",
+  admin_nombre: "el nombre del administrador",
+  admin_telefono: "el teléfono del administrador",
+  email: "el correo electrónico",
+  password: "la contraseña",
+};
+
+/**
+ * Zod devuelve "Required" en inglés cuando falta un campo. Se traduce nombrando
+ * el campo: un error debe decir qué pasó y qué hacer, no solo que algo falló.
+ */
+function mensajeDeError(error: z.ZodError): string {
+  const issue = error.issues[0];
+  if (!issue) return "Datos inválidos";
+  if (issue.message === "Required") {
+    const campo = ETIQUETAS[String(issue.path[0])] ?? "un dato obligatorio";
+    return `Falta ${campo}.`;
+  }
+  return issue.message;
+}
 
 export async function POST(request: Request) {
   if (
@@ -47,12 +85,13 @@ export async function POST(request: Request) {
   const parsed = RegistroSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error.issues[0]?.message ?? "Datos inválidos" },
+      { error: mensajeDeError(parsed.error) },
       { status: 400 },
     );
   }
 
-  const { nombre_empresa, ruc, email, password } = parsed.data;
+  const d = parsed.data;
+  const { email, password } = d;
   const admin = createAdminClient();
 
   // 1) Crear el usuario (confirmado, sin correo de verificación en el MVP).
@@ -81,7 +120,14 @@ export async function POST(request: Request) {
   // 2) Crear la empresa.
   const { data: empresa, error: empresaError } = await admin
     .from("empresas")
-    .insert({ nombre: nombre_empresa, ruc: ruc ?? null })
+    .insert({
+      nombre: d.nombre_empresa,
+      ruc: d.ruc,
+      region: d.region,
+      provincia: d.provincia,
+      direccion: d.direccion,
+      telefono: d.telefono_empresa,
+    })
     .select("id")
     .single();
 
@@ -97,7 +143,13 @@ export async function POST(request: Request) {
   // 3) Crear la membresía (rol admin).
   const { error: membresiaError } = await admin
     .from("usuarios_empresa")
-    .insert({ usuario_id: usuarioId, empresa_id: empresa.id, rol: "admin" });
+    .insert({
+      usuario_id: usuarioId,
+      empresa_id: empresa.id,
+      rol: "admin",
+      nombre_completo: d.admin_nombre,
+      telefono: d.admin_telefono,
+    });
 
   if (membresiaError) {
     // Rollback: eliminar empresa y usuario.

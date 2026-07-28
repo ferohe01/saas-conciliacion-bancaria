@@ -4,6 +4,7 @@ import { RegistroForm } from "@/components/auth/RegistroForm";
 export default function RegistroPage() {
   return (
     <AuthShell
+      ancho="amplio"
       titulo="Crear cuenta"
       subtitulo="Registra tu empresa y empieza a conciliar."
       pie={{

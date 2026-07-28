@@ -362,7 +362,8 @@ El ancho del contenedor lo dicta la tarea, no una grilla global:
 
 | Superficie | Ancho | Por qué |
 |---|---|---|
-| Auth (login/registro) | 448px | Un formulario corto, centrado en pantalla completa |
+| Auth · login | 448px | Un formulario corto, centrado en pantalla completa |
+| Auth · registro | 768px | Ficha de empresa y de administrador, en dos columnas desde `md` |
 | Configuración | 672px | Lista de campos numéricos, lectura en una columna |
 | Wizard | 768px | Un paso a la vez, sin distracción lateral |
 | Resultado de conciliación | 896px | Dos paneles enfrentados necesitan aire |

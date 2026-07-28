@@ -110,6 +110,9 @@ supabase/
     0004_config_empresa.sql  Columna empresas.config_conciliacion (JSONB).
     0005_plan_empresa.sql    Período de prueba (plan, prueba_hasta) + GRANT
                              por columna que impide auto-activarse el plan.
+    0006_datos_registro.sql  Ficha de empresa (region, provincia, direccion,
+                             telefono) y del administrador (nombre_completo,
+                             telefono en usuarios_empresa).
 tests/                     Vitest (unit).
 ```
 

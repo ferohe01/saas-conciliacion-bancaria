@@ -3,6 +3,39 @@ import { ModalPago } from "@/components/app/ModalPago";
 import { avisoPorVencer, type EstadoSuscripcion } from "@/lib/suscripcion";
 
 /**
+ * Cuántos días de prueba quedan. Se calla en dos casos: cuando el plan ya está
+ * activo (quien paga no tiene por qué ver un contador) y cuando la prueba
+ * venció (para eso está el bloqueo, que dice bastante más).
+ *
+ * Neutro mientras hay margen; ámbar en la última semana, que es cuando pasa de
+ * ser un dato a requerir atención.
+ */
+export function ChipPrueba({ estado }: { estado: EstadoSuscripcion }) {
+  if (estado.plan !== "prueba" || estado.expirada) return null;
+
+  const urgente = estado.diasRestantes <= 7;
+  const dias = estado.diasRestantes;
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm ${
+        urgente
+          ? "border-amber-200 bg-amber-50 text-amber-900"
+          : "border-neutral-200 bg-white text-neutral-700"
+      }`}
+    >
+      <span className="font-medium">Prueba gratuita</span>
+      <span aria-hidden className="text-neutral-400">
+        ·
+      </span>
+      <span className="tabular-nums">
+        {dias === 1 ? "queda 1 día" : `quedan ${dias} días`}
+      </span>
+    </span>
+  );
+}
+
+/**
  * Estado de la prueba, contado al usuario.
  *
  * Tono ÁMBAR a propósito (DESIGN.md § Colors): "requiere tu atención", que no

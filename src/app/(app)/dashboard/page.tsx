@@ -23,7 +23,11 @@ import { formatearFecha } from "@/lib/parsing/resumen";
 import { BancoIcon } from "@/components/wizard/icons";
 import { EstadoVacio, BadgeEstadoJob, Tarjeta, clasesBoton } from "@/components/ui";
 import { estadoSuscripcion } from "@/lib/suscripcion";
-import { PruebaVencida, PruebaPorVencer } from "@/components/app/AvisoPrueba";
+import {
+  PruebaVencida,
+  PruebaPorVencer,
+  ChipPrueba,
+} from "@/components/app/AvisoPrueba";
 import {
   calcularKpis,
   porMes,
@@ -373,6 +377,9 @@ export default async function DashboardPage() {
           <p className="mt-1 text-sm text-neutral-600">
             {empresa?.nombre} · ejercicio <span className="tabular-nums">{anio}</span>
           </p>
+          <div className="mt-2">
+            <ChipPrueba estado={suscripcion} />
+          </div>
         </div>
         {suscripcion.puedeConciliar && (
           <Link href="/wizard" className={clasesBoton("primario", "md")}>
