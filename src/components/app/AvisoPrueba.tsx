@@ -1,9 +1,6 @@
-import { Tarjeta, clasesBoton } from "@/components/ui";
-import {
-  avisoPorVencer,
-  CONTACTO_SUSCRIPCION,
-  type EstadoSuscripcion,
-} from "@/lib/suscripcion";
+import { Tarjeta } from "@/components/ui";
+import { ModalPago } from "@/components/app/ModalPago";
+import { avisoPorVencer, type EstadoSuscripcion } from "@/lib/suscripcion";
 
 /**
  * Estado de la prueba, contado al usuario.
@@ -28,12 +25,7 @@ export function PruebaVencida({ compacto = false }: { compacto?: boolean }) {
               : "Puedes seguir entrando y consultando tus conciliaciones, reportes y cuentas sin límite. Lo único que queda en pausa es generar una conciliación nueva."}
           </p>
         </div>
-        <a
-          href={CONTACTO_SUSCRIPCION}
-          className={`${clasesBoton("primario", "md")} shrink-0`}
-        >
-          Activar mi cuenta
-        </a>
+        <ModalPago />
       </div>
     </Tarjeta>
   );
@@ -43,15 +35,13 @@ export function PruebaVencida({ compacto = false }: { compacto?: boolean }) {
 export function PruebaPorVencer({ estado }: { estado: EstadoSuscripcion }) {
   const texto = avisoPorVencer(estado);
   if (!texto) return null;
+  // <div>, no <p>: el modal renderiza un <dialog>, que es contenido de flujo y
+  // dentro de un párrafo haría que el navegador cerrase el <p> por su cuenta
+  // → discrepancia de hidratación en React.
   return (
-    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
       <span>{texto}</span>
-      <a
-        href={CONTACTO_SUSCRIPCION}
-        className="rounded font-medium underline underline-offset-2 transition-colors hover:text-amber-950"
-      >
-        Activar mi cuenta
-      </a>
-    </p>
+      <ModalPago variante="enlace" />
+    </div>
   );
 }

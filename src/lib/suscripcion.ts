@@ -13,12 +13,31 @@
 export const DIAS_PRUEBA = 30;
 
 /**
- * Destino del llamado a la acción cuando la prueba vence.
+ * Canal de contacto para dudas sobre la activación.
  *
- * ⚠️ PLACEHOLDER: cámbialo por el canal real de contacto comercial (correo de
- * la empresa, WhatsApp o formulario). No es un dato que se pueda inventar.
+ * ⚠️ PLACEHOLDER: cámbialo por el correo comercial real.
  */
 export const CONTACTO_SUSCRIPCION = "mailto:ferohe22@gmail.com";
+
+/**
+ * Datos para activar la cuenta. Fuente única: los usa el modal de pago y
+ * cualquier texto que los mencione.
+ *
+ * Hoy solo hay transferencia bancaria; cuando entre una pasarela, esto deja de
+ * ser una constante y pasa a ser una opción más.
+ */
+export const DATOS_PAGO = {
+  banco: "Banco de Crédito del Perú",
+  bancoCorto: "BCP",
+  tipo: "Cuenta de ahorro en soles",
+  moneda: "S/",
+  numero: "193-30402506-001",
+  /** Código de Cuenta Interbancario: necesario para transferir desde otro banco. */
+  cci: "00219313040250600118",
+  // Literal como lo dio el titular: debe coincidir con el registro del banco.
+  titular: "Fernando Rodriguez Henostroza",
+  cargo: "CEO",
+} as const;
 
 export type PlanEmpresa = "prueba" | "activo";
 

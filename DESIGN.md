@@ -272,6 +272,17 @@ Paleta **Okabe-Ito**, validada para daltonismo, usada exclusivamente en los
 gráficos de `/reportes`: **Exacta** `#009E73` · **Difusa** `#0072B2` ·
 **Sugerido IA** `#CC79A7` · **Sin conciliar** `#D55E00`.
 
+### Marcas de terceros
+
+Los colores corporativos de los bancos (BCP `#F87C00`, y los que se sumen) **no
+pertenecen al sistema**: son marca ajena. Solo pueden aparecer dentro del
+identificador de ese banco —un badge, un logotipo— y nunca como fondo de
+superficie, borde, texto ni estado. Un naranja de banco jamás significa
+"atención" aquí: para eso está el Ámbar de Agrupación.
+
+Cuando exista el archivo oficial del logotipo, sustituye el identificador de
+texto por la imagen y el color desaparece del código.
+
 ### Named Rules
 
 **La Regla del Color Ganado.** El color aparece cuando algo *pasó*: se emparejó
