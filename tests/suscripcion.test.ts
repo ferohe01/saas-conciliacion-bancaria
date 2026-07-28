@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   estadoSuscripcion,
   avisoPorVencer,
+  ahorroAnual,
   montoPEN,
   PLANES_SUSCRIPCION,
   DATOS_PAGO,
@@ -124,7 +125,19 @@ describe("datos comerciales", () => {
       PLANES_SUSCRIPCION.map((p) => [p.id, p.monto]),
     );
     expect(porId.mensual).toBe(99.9);
-    expect(porId.anual).toBe(1199.9);
+    expect(porId.anual).toBe(999);
+  });
+
+  it("el ahorro anual sale de los precios, no escrito a mano", () => {
+    // 99.90 x 12 = 1198.80; 1198.80 - 999 = 199.80
+    expect(ahorroAnual()).toBe(199.8);
+  });
+
+  it("el plan anual cuesta menos que doce meses sueltos", () => {
+    const porId = Object.fromEntries(
+      PLANES_SUSCRIPCION.map((p) => [p.id, p.monto]),
+    );
+    expect(porId.anual!).toBeLessThan(porId.mensual! * 12);
   });
 
   it("el CCI tiene los 20 digitos que exige el formato peruano", () => {

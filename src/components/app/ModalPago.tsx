@@ -5,6 +5,7 @@ import {
   CONTACTO_SUSCRIPCION,
   DATOS_PAGO,
   PLANES_SUSCRIPCION,
+  ahorroAnual,
   montoPEN,
 } from "@/lib/suscripcion";
 import { clasesBoton } from "@/components/ui";
@@ -164,15 +165,26 @@ export function ModalPago({
             Elige tu plan
           </h3>
           <ul className="mt-2 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-200">
-            {PLANES_SUSCRIPCION.map((p) => (
-              <li key={p.id} className="bg-white px-4 py-3.5">
-                <p className="text-sm font-medium text-neutral-900">{p.nombre}</p>
-                <p className="mt-1 text-xl font-bold tabular-nums text-neutral-900">
-                  {montoPEN(p.monto)}
-                </p>
-                <p className="mt-0.5 text-sm text-neutral-600">{p.periodo}</p>
-              </li>
-            ))}
+            {PLANES_SUSCRIPCION.map((p) => {
+              const ahorro = p.id === "anual" ? ahorroAnual() : 0;
+              return (
+                <li key={p.id} className="bg-white px-4 py-3.5">
+                  <p className="text-sm font-medium text-neutral-900">{p.nombre}</p>
+                  <p className="mt-1 text-xl font-bold tabular-nums text-neutral-900">
+                    {montoPEN(p.monto)}
+                  </p>
+                  <p className="mt-0.5 text-sm text-neutral-600">{p.periodo}</p>
+                  {/* Sin verde: en este sistema el verde significa "conciliado",
+                      no "bueno". El énfasis va por peso, que es lo que manda la
+                      Regla de la Cifra sin Adorno. */}
+                  {ahorro > 0 && (
+                    <p className="mt-1.5 text-sm font-medium tabular-nums text-neutral-900">
+                      Ahorras {montoPEN(ahorro)}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
           </ul>
 
           <h3 className="mt-5 text-[0.6875rem] font-medium tracking-[0.05em] text-neutral-500 uppercase">

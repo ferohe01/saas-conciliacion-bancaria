@@ -29,8 +29,21 @@ export const CONTACTO_SUSCRIPCION = "mailto:ferohe22@gmail.com";
 /** Planes de suscripción. Importes en soles (PEN). */
 export const PLANES_SUSCRIPCION = [
   { id: "mensual", nombre: "Mensual", monto: 99.9, periodo: "por mes" },
-  { id: "anual", nombre: "Anual", monto: 1199.9, periodo: "por año" },
+  { id: "anual", nombre: "Anual", monto: 999, periodo: "por año" },
 ] as const;
+
+/**
+ * Cuánto ahorra el plan anual frente a pagar doce meses sueltos.
+ * Se calcula, no se escribe a mano: si mañana cambia un precio, el ahorro
+ * anunciado cambia con él en vez de quedar mintiendo.
+ * Devuelve 0 cuando el anual no ahorra nada (entonces no hay nada que presumir).
+ */
+export function ahorroAnual(): number {
+  const mensual = PLANES_SUSCRIPCION.find((p) => p.id === "mensual")?.monto ?? 0;
+  const anual = PLANES_SUSCRIPCION.find((p) => p.id === "anual")?.monto ?? 0;
+  const ahorro = mensual * 12 - anual;
+  return ahorro > 0 ? Math.round(ahorro * 100) / 100 : 0;
+}
 
 /** Formatea un importe en soles: S/ 1,199.90 */
 export function montoPEN(monto: number): string {
