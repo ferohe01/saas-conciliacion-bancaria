@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { AppSidebar } from "@/components/app/AppSidebar";
+import { ScrollAlInicio } from "@/components/app/ScrollAlInicio";
 import { getEmpresaActual } from "@/lib/auth";
 import { estadoSuscripcion } from "@/lib/suscripcion";
 
@@ -30,6 +31,7 @@ export default async function AppLayout({
       >
         Saltar al contenido
       </a>
+      <ScrollAlInicio />
       <AppSidebar
         empresaNombre={empresa.nombre}
         puedeConciliar={estadoSuscripcion(empresa).puedeConciliar}
