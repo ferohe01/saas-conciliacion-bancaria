@@ -26,6 +26,20 @@ export const CONTACTO_SUSCRIPCION = "mailto:ferohe22@gmail.com";
  * Hoy solo hay transferencia bancaria; cuando entre una pasarela, esto deja de
  * ser una constante y pasa a ser una opción más.
  */
+/** Planes de suscripción. Importes en soles (PEN). */
+export const PLANES_SUSCRIPCION = [
+  { id: "mensual", nombre: "Mensual", monto: 99.9, periodo: "por mes" },
+  { id: "anual", nombre: "Anual", monto: 1199.9, periodo: "por año" },
+] as const;
+
+/** Formatea un importe en soles: S/ 1,199.90 */
+export function montoPEN(monto: number): string {
+  return `S/ ${monto.toLocaleString("es-PE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
 export const DATOS_PAGO = {
   banco: "Banco de Crédito del Perú",
   bancoCorto: "BCP",

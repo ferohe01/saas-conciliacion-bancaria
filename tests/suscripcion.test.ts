@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   estadoSuscripcion,
   avisoPorVencer,
+  montoPEN,
+  PLANES_SUSCRIPCION,
+  DATOS_PAGO,
   DIAS_PRUEBA,
 } from "../src/lib/suscripcion";
 
@@ -106,5 +109,29 @@ describe("avisoPorVencer", () => {
 
   it("no avisa en plan activo", () => {
     expect(avisoPorVencer(estadoSuscripcion({ plan: "activo" }, AHORA))).toBeNull();
+  });
+});
+
+describe("datos comerciales", () => {
+  it("montoPEN muestra siempre dos decimales", () => {
+    expect(montoPEN(99.9)).toBe("S/ 99.90");
+    expect(montoPEN(1199.9)).toBe("S/ 1,199.90");
+    expect(montoPEN(0)).toBe("S/ 0.00");
+  });
+
+  it("los dos planes existen con sus importes", () => {
+    const porId = Object.fromEntries(
+      PLANES_SUSCRIPCION.map((p) => [p.id, p.monto]),
+    );
+    expect(porId.mensual).toBe(99.9);
+    expect(porId.anual).toBe(1199.9);
+  });
+
+  it("el CCI tiene los 20 digitos que exige el formato peruano", () => {
+    expect(DATOS_PAGO.cci).toMatch(/^\d{20}$/);
+  });
+
+  it("el numero de cuenta conserva su formato con guiones", () => {
+    expect(DATOS_PAGO.numero).toMatch(/^\d{3}-\d{8}-\d{3}$/);
   });
 });

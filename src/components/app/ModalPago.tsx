@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CONTACTO_SUSCRIPCION, DATOS_PAGO } from "@/lib/suscripcion";
+import {
+  CONTACTO_SUSCRIPCION,
+  DATOS_PAGO,
+  PLANES_SUSCRIPCION,
+  montoPEN,
+} from "@/lib/suscripcion";
 import { clasesBoton } from "@/components/ui";
 
 /**
@@ -153,7 +158,27 @@ export function ModalPago({
         </div>
 
         <div className="px-6 py-5">
-          <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+          {/* Primero cuánto, después a dónde: el usuario elige importe y luego
+              transfiere. El filete lo dibuja el fondo asomando por el gap. */}
+          <h3 className="text-[0.6875rem] font-medium tracking-[0.05em] text-neutral-500 uppercase">
+            Elige tu plan
+          </h3>
+          <ul className="mt-2 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-200">
+            {PLANES_SUSCRIPCION.map((p) => (
+              <li key={p.id} className="bg-white px-4 py-3.5">
+                <p className="text-sm font-medium text-neutral-900">{p.nombre}</p>
+                <p className="mt-1 text-xl font-bold tabular-nums text-neutral-900">
+                  {montoPEN(p.monto)}
+                </p>
+                <p className="mt-0.5 text-sm text-neutral-600">{p.periodo}</p>
+              </li>
+            ))}
+          </ul>
+
+          <h3 className="mt-5 text-[0.6875rem] font-medium tracking-[0.05em] text-neutral-500 uppercase">
+            Transfiere a esta cuenta
+          </h3>
+          <div className="mt-2 rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
             <div className="flex items-center gap-3">
               <MarcaBanco />
               <div className="min-w-0">
@@ -178,8 +203,11 @@ export function ModalPago({
           </div>
 
           <p className="mt-4 text-sm text-neutral-700">
-            Cuando hayas hecho la transferencia, envíanos el comprobante y
-            activamos tu cuenta. Conservas todas tus conciliaciones anteriores:
+            Cuando hayas hecho la transferencia, envíanos el comprobante{" "}
+            <strong className="font-medium text-neutral-900">
+              indicando el plan elegido
+            </strong>{" "}
+            y activamos tu cuenta. Conservas todas tus conciliaciones anteriores:
             la activación solo vuelve a habilitar la creación de nuevas.
           </p>
         </div>
