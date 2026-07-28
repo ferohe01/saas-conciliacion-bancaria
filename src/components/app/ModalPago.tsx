@@ -5,8 +5,10 @@ import {
   CONTACTO_SUSCRIPCION,
   DATOS_PAGO,
   PLANES_SUSCRIPCION,
+  PLAN_POR_DEFECTO,
   ahorroAnual,
   montoPEN,
+  type PlanId,
 } from "@/lib/suscripcion";
 import { clasesBoton } from "@/components/ui";
 
@@ -95,6 +97,9 @@ export function ModalPago({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [abierto, setAbierto] = useState(false);
+  const [plan, setPlan] = useState<PlanId>(PLAN_POR_DEFECTO);
+  const elegido =
+    PLANES_SUSCRIPCION.find((p) => p.id === plan) ?? PLANES_SUSCRIPCION[0];
 
   // <dialog> se abre por método, no por atributo: showModal() es lo que activa
   // el backdrop, la inercia del fondo y la trampa de foco.
@@ -161,31 +166,59 @@ export function ModalPago({
         <div className="px-6 py-5">
           {/* Primero cuánto, después a dónde: el usuario elige importe y luego
               transfiere. El filete lo dibuja el fondo asomando por el gap. */}
-          <h3 className="text-[0.6875rem] font-medium tracking-[0.05em] text-neutral-500 uppercase">
-            Elige tu plan
-          </h3>
-          <ul className="mt-2 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-200">
-            {PLANES_SUSCRIPCION.map((p) => {
-              const ahorro = p.id === "anual" ? ahorroAnual() : 0;
-              return (
-                <li key={p.id} className="bg-white px-4 py-3.5">
-                  <p className="text-sm font-medium text-neutral-900">{p.nombre}</p>
-                  <p className="mt-1 text-xl font-bold tabular-nums text-neutral-900">
-                    {montoPEN(p.monto)}
-                  </p>
-                  <p className="mt-0.5 text-sm text-neutral-600">{p.periodo}</p>
-                  {/* Sin verde: en este sistema el verde significa "conciliado",
-                      no "bueno". El énfasis va por peso, que es lo que manda la
-                      Regla de la Cifra sin Adorno. */}
-                  {ahorro > 0 && (
-                    <p className="mt-1.5 text-sm font-medium tabular-nums text-neutral-900">
-                      Ahorras {montoPEN(ahorro)}
-                    </p>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          {/* Radios nativos, no divs con onClick: traen gratis las flechas del
+              teclado, el agrupado por `name` y el anuncio correcto en lectores
+              de pantalla. El input va oculto y se dibuja el círculo, porque el
+              color no puede ser el único indicador de qué está elegido. */}
+          <fieldset>
+            <legend className="text-[0.6875rem] font-medium tracking-[0.05em] text-neutral-500 uppercase">
+              Elige tu plan
+            </legend>
+            <div className="mt-2 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-200">
+              {PLANES_SUSCRIPCION.map((p) => {
+                const ahorro = p.id === "anual" ? ahorroAnual() : 0;
+                return (
+                  <label
+                    key={p.id}
+                    className="group block h-full cursor-pointer bg-white px-4 py-3.5 transition-colors hover:bg-neutral-50 has-[:checked]:bg-blue-50 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-200 has-[:focus-visible]:ring-inset"
+                  >
+                    <input
+                      type="radio"
+                      name="plan-suscripcion"
+                      value={p.id}
+                      checked={plan === p.id}
+                      onChange={() => setPlan(p.id)}
+                      className="sr-only"
+                    />
+                    <span className="flex items-center gap-2">
+                      <span
+                        aria-hidden
+                        className="grid h-4 w-4 shrink-0 place-items-center rounded-full border border-neutral-400 group-has-[:checked]:border-blue-600"
+                      >
+                        <span className="h-2 w-2 rounded-full bg-transparent group-has-[:checked]:bg-blue-600" />
+                      </span>
+                      <span className="text-sm font-medium text-neutral-900">
+                        {p.nombre}
+                      </span>
+                    </span>
+                    <span className="mt-1 block text-xl font-bold tabular-nums text-neutral-900">
+                      {montoPEN(p.monto)}
+                    </span>
+                    <span className="mt-0.5 block text-sm text-neutral-600">
+                      {p.periodo}
+                    </span>
+                    {/* Sin verde: aquí el verde significa "conciliado", no
+                        "bueno". El énfasis va por peso. */}
+                    {ahorro > 0 && (
+                      <span className="mt-1.5 block text-sm font-medium tabular-nums text-neutral-900">
+                        Ahorras {montoPEN(ahorro)}
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
 
           <h3 className="mt-5 text-[0.6875rem] font-medium tracking-[0.05em] text-neutral-500 uppercase">
             Transfiere a esta cuenta
@@ -211,13 +244,27 @@ export function ModalPago({
                 etiqueta="Titular"
                 valor={`${DATOS_PAGO.titular} · ${DATOS_PAGO.cargo}`}
               />
+              {/* El importe cierra el bloque: es el último dato que el usuario
+                  necesita antes de ir a su banca. Cambia con el plan elegido. */}
+              <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5">
+                <dt className="text-sm font-medium text-neutral-900">
+                  Importe a pagar
+                </dt>
+                <dd className="text-lg font-bold tabular-nums text-neutral-900">
+                  {montoPEN(elegido.monto)}{" "}
+                  <span className="text-sm font-normal text-neutral-600">
+                    ({elegido.nombre.toLowerCase()})
+                  </span>
+                </dd>
+              </div>
             </dl>
           </div>
 
           <p className="mt-4 text-sm text-neutral-700">
-            Cuando hayas hecho la transferencia, envíanos el comprobante{" "}
+            Cuando hayas hecho la transferencia, envíanos el comprobante
+            indicando que elegiste el{" "}
             <strong className="font-medium text-neutral-900">
-              indicando el plan elegido
+              plan {elegido.nombre.toLowerCase()}
             </strong>{" "}
             y activamos tu cuenta. Conservas todas tus conciliaciones anteriores:
             la activación solo vuelve a habilitar la creación de nuevas.

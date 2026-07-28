@@ -28,9 +28,14 @@ export const CONTACTO_SUSCRIPCION = "mailto:ferohe22@gmail.com";
  */
 /** Planes de suscripción. Importes en soles (PEN). */
 export const PLANES_SUSCRIPCION = [
-  { id: "mensual", nombre: "Mensual", monto: 99.9, periodo: "por mes" },
+  { id: "mensual", nombre: "Mensual", monto: 99, periodo: "por mes" },
   { id: "anual", nombre: "Anual", monto: 999, periodo: "por año" },
 ] as const;
+
+export type PlanId = (typeof PLANES_SUSCRIPCION)[number]["id"];
+
+/** Plan preseleccionado en el modal de pago. */
+export const PLAN_POR_DEFECTO: PlanId = "anual";
 
 /**
  * Cuánto ahorra el plan anual frente a pagar doce meses sueltos.

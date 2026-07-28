@@ -5,6 +5,7 @@ import {
   ahorroAnual,
   montoPEN,
   PLANES_SUSCRIPCION,
+  PLAN_POR_DEFECTO,
   DATOS_PAGO,
   DIAS_PRUEBA,
 } from "../src/lib/suscripcion";
@@ -124,13 +125,18 @@ describe("datos comerciales", () => {
     const porId = Object.fromEntries(
       PLANES_SUSCRIPCION.map((p) => [p.id, p.monto]),
     );
-    expect(porId.mensual).toBe(99.9);
+    expect(porId.mensual).toBe(99);
     expect(porId.anual).toBe(999);
   });
 
   it("el ahorro anual sale de los precios, no escrito a mano", () => {
-    // 99.90 x 12 = 1198.80; 1198.80 - 999 = 199.80
-    expect(ahorroAnual()).toBe(199.8);
+    // 99 x 12 = 1188; 1188 - 999 = 189
+    expect(ahorroAnual()).toBe(189);
+  });
+
+  it("el plan preseleccionado es el anual", () => {
+    expect(PLAN_POR_DEFECTO).toBe("anual");
+    expect(PLANES_SUSCRIPCION.some((p) => p.id === PLAN_POR_DEFECTO)).toBe(true);
   });
 
   it("el plan anual cuesta menos que doce meses sueltos", () => {
