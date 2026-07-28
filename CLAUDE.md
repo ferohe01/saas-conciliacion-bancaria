@@ -108,6 +108,8 @@ supabase/
     0002_rls.sql           Row Level Security (helper es_miembro + políticas).
     0003_realtime.sql      Realtime en jobs_conciliacion (progreso en vivo).
     0004_config_empresa.sql  Columna empresas.config_conciliacion (JSONB).
+    0005_plan_empresa.sql    Período de prueba (plan, prueba_hasta) + GRANT
+                             por columna que impide auto-activarse el plan.
 tests/                     Vitest (unit).
 ```
 
@@ -204,9 +206,36 @@ nodos Code no se testean unitariamente en el repo). Regla al editar: mantener la
 forma de salida de cada nodo (`job_id`, `metadata`, `config`, `matches`,
 `pendientes_*`) para no romper el nodo siguiente.
 
+## Período de prueba (30 días)
+
+La promesa comercial "tu primer período es gratis" vivía solo como texto en la
+portada. Desde la migración `0005` es real:
+
+- Cada empresa nace con `plan='prueba'` y `prueba_hasta = created_at + 30 días`.
+- Al vencer, la empresa **conserva todo el acceso de lectura** (historial,
+  resultados, reportes, cuentas, configuración) y pierde **una sola**
+  capacidad: iniciar una conciliación nueva.
+- Criterio en `src/lib/suscripcion.ts` (puro, con tests). Un `plan` desconocido
+  se degrada a `'prueba'`, nunca a acceso libre; una fecha ausente **no**
+  bloquea (el coste de un falso bloqueo supera al de una prueba de más).
+- **El control se hace cumplir en el servidor**, en
+  `POST /api/conciliacion/iniciar` (403 `prueba_vencida`). La interfaz además lo
+  explica y no carga el wizard, pero ocultar un botón no es un control.
+- **`plan` y `prueba_hasta` NO son escribibles por el usuario.** La política
+  `empresas_update` autoriza por fila, no por columna, así que `0005` revoca el
+  UPDATE amplio y lo reconcede solo sobre `nombre`, `ruc` y
+  `config_conciliacion`. Sin ese GRANT el usuario se auto-activaría con la key
+  `anon`.
+- Extender o convertir a cliente de pago es un UPDATE con `service_role`
+  (ver comentario al pie de `0005`). No hay pasarela de pago: sigue fuera de
+  alcance.
+- ⚠️ `CONTACTO_SUSCRIPCION` en `suscripcion.ts` es un **placeholder**: hay que
+  cambiarlo por el canal comercial real.
+
 ## Fuera de alcance del MVP
 
-Equipos/roles/invitaciones/SSO · facturación y pagos · pgvector/semántica ·
+Equipos/roles/invitaciones/SSO · facturación y pagos (cobro, planes, pasarela —
+el límite de prueba de `0005` no es facturación) · pgvector/semántica ·
 OCR y XML UBL de facturas · integraciones ERP/bancos/Open Banking · tablas
 normalizadas de transacciones/matches (el JSONB del job basta) · el motor de
 conciliación (vive en n8n).

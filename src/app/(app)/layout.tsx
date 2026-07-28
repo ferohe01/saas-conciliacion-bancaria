@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { AppSidebar } from "@/components/app/AppSidebar";
 import { getEmpresaActual } from "@/lib/auth";
+import { estadoSuscripcion } from "@/lib/suscripcion";
 
 /**
  * Layout del área autenticada. El middleware ya protege estas rutas; aquí se
@@ -29,7 +30,10 @@ export default async function AppLayout({
       >
         Saltar al contenido
       </a>
-      <AppSidebar empresaNombre={empresa.nombre} />
+      <AppSidebar
+        empresaNombre={empresa.nombre}
+        puedeConciliar={estadoSuscripcion(empresa).puedeConciliar}
+      />
       {/* La guarda es fija a partir de lg; el lienzo se desplaza para no quedar
           debajo. Cada pantalla fija su propio ancho por tarea dentro de él. */}
       <div className="lg:pl-64">

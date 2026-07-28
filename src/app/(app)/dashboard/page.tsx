@@ -22,6 +22,8 @@ import { PanelAprendizajeCompacto } from "@/components/reportes/ReporteVista";
 import { formatearFecha } from "@/lib/parsing/resumen";
 import { BancoIcon } from "@/components/wizard/icons";
 import { EstadoVacio, BadgeEstadoJob, Tarjeta, clasesBoton } from "@/components/ui";
+import { estadoSuscripcion } from "@/lib/suscripcion";
+import { PruebaVencida, PruebaPorVencer } from "@/components/app/AvisoPrueba";
 import {
   calcularKpis,
   porMes,
@@ -256,6 +258,7 @@ export default async function DashboardPage() {
   const empresa = await getEmpresaActual();
   const supabase = await createClient();
   const anio = new Date().getUTCFullYear();
+  const suscripcion = estadoSuscripcion(empresa ?? {});
 
   const [
     { data: histAprend },
@@ -371,10 +374,20 @@ export default async function DashboardPage() {
             {empresa?.nombre} · ejercicio <span className="tabular-nums">{anio}</span>
           </p>
         </div>
-        <Link href="/wizard" className={clasesBoton("primario", "md")}>
-          Conciliar un período
-        </Link>
+        {suscripcion.puedeConciliar && (
+          <Link href="/wizard" className={clasesBoton("primario", "md")}>
+            Conciliar un período
+          </Link>
+        )}
       </header>
+
+      {/* El estado de la cuenta va antes que nada: cambia lo que el usuario
+          puede hacer en esta pantalla. */}
+      {suscripcion.expirada ? (
+        <PruebaVencida />
+      ) : (
+        <PruebaPorVencer estado={suscripcion} />
+      )}
 
       {/* Lo que reclama criterio humano va antes que cualquier métrica. */}
       {porRevisar > 0 && jobConPendientes && (

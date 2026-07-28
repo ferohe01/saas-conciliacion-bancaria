@@ -89,11 +89,13 @@ function esActivo(pathname: string, href: string): boolean {
 function Contenido({
   pathname,
   empresaNombre,
+  puedeConciliar,
   saliendo,
   cerrarSesion,
 }: {
   pathname: string;
   empresaNombre: string;
+  puedeConciliar: boolean;
   saliendo: boolean;
   cerrarSesion: () => void;
 }) {
@@ -106,21 +108,29 @@ function Contenido({
         </Link>
       </div>
 
-      {/* La acción que da sentido al producto, fija y siempre alcanzable. */}
+      {/* La acción que da sentido al producto, fija y siempre alcanzable.
+          Con la prueba vencida deja de ser el botón primario negro: sigue
+          llevando a /wizard, que es donde se explica por qué está en pausa,
+          pero no promete en negro una acción que ya no puede cumplir. */}
       <div className="px-3 pb-3">
         <Link
           href="/wizard"
           aria-current={enWizard ? "page" : undefined}
           className={[
             "flex min-h-11 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
-            enWizard
-              ? "bg-neutral-800 text-white"
-              : "bg-neutral-900 text-white hover:bg-neutral-800",
+            !puedeConciliar
+              ? "border border-neutral-300 bg-white text-neutral-500 hover:bg-neutral-50"
+              : enWizard
+                ? "bg-neutral-800 text-white"
+                : "bg-neutral-900 text-white hover:bg-neutral-800",
           ].join(" ")}
         >
           <IconoNueva className="h-4 w-4 shrink-0" />
-          Nueva conciliación
+          <span className="truncate">Nueva conciliación</span>
         </Link>
+        {!puedeConciliar && (
+          <p className="px-1 pt-2 text-xs text-amber-800">Prueba vencida</p>
+        )}
       </div>
 
       <nav aria-label="Principal" className="min-h-0 flex-1 overflow-y-auto px-3">
@@ -168,7 +178,13 @@ function Contenido({
   );
 }
 
-export function AppSidebar({ empresaNombre }: { empresaNombre: string }) {
+export function AppSidebar({
+  empresaNombre,
+  puedeConciliar,
+}: {
+  empresaNombre: string;
+  puedeConciliar: boolean;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [abierto, setAbierto] = useState(false);
@@ -201,7 +217,7 @@ export function AppSidebar({ empresaNombre }: { empresaNombre: string }) {
     router.refresh();
   }
 
-  const props = { pathname, empresaNombre, saliendo, cerrarSesion };
+  const props = { pathname, empresaNombre, puedeConciliar, saliendo, cerrarSesion };
 
   return (
     <>

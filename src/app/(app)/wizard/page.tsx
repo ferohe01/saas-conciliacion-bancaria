@@ -1,4 +1,9 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getEmpresaActual } from "@/lib/auth";
+import { estadoSuscripcion } from "@/lib/suscripcion";
+import { PruebaVencida } from "@/components/app/AvisoPrueba";
+import { clasesBoton } from "@/components/ui";
 import {
   WizardContainer,
   type CuentaOpcion,
@@ -10,6 +15,47 @@ import {
  */
 export default async function WizardPage() {
   const supabase = await createClient();
+  const empresa = await getEmpresaActual();
+  const suscripcion = estadoSuscripcion(empresa ?? {});
+
+  // Prueba vencida: no se carga el wizard. El endpoint lo rechazaría igual
+  // (route.ts), pero dejar entrar al flujo para fallar al final sería cruel:
+  // el usuario habría subido y mapeado sus archivos para nada.
+  if (!suscripcion.puedeConciliar) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-6">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold tracking-tight text-neutral-900">
+            Nueva conciliación
+          </h1>
+        </div>
+        <PruebaVencida />
+        <p className="text-center text-sm text-neutral-600">
+          Mientras tanto,{" "}
+          <Link
+            href="/conciliacion"
+            className="rounded font-medium text-blue-700 underline underline-offset-2 transition-colors hover:text-blue-800"
+          >
+            revisa tus conciliaciones anteriores
+          </Link>{" "}
+          o{" "}
+          <Link
+            href="/reportes"
+            className="rounded font-medium text-blue-700 underline underline-offset-2 transition-colors hover:text-blue-800"
+          >
+            consulta tus reportes
+          </Link>
+          .
+        </p>
+        <div className="text-center">
+          <Link href="/dashboard" className={clasesBoton("secundario", "md")}>
+            Volver al panel
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   const { data } = await supabase
     .from("cuentas_bancarias")
     .select("id, banco, numero_enmascarado, moneda, mapeo_columnas")

@@ -6,6 +6,10 @@ export type EmpresaActual = {
   nombre: string;
   ruc: string | null;
   rol: string;
+  /** Plan y fin de la prueba: los consume `lib/suscripcion`. */
+  plan: string | null;
+  prueba_hasta: string | null;
+  created_at: string | null;
 };
 
 /**
@@ -34,7 +38,7 @@ export async function getEmpresaActual(): Promise<EmpresaActual | null> {
 
   const { data, error } = await supabase
     .from("usuarios_empresa")
-    .select("rol, empresa_id, empresas(nombre, ruc)")
+    .select("rol, empresa_id, empresas(nombre, ruc, plan, prueba_hasta, created_at)")
     .eq("usuario_id", user.id)
     .limit(1)
     .maybeSingle();
@@ -53,5 +57,8 @@ export async function getEmpresaActual(): Promise<EmpresaActual | null> {
     nombre: empresa.nombre,
     ruc: empresa.ruc ?? null,
     rol: data.rol,
+    plan: empresa.plan ?? null,
+    prueba_hasta: empresa.prueba_hasta ?? null,
+    created_at: empresa.created_at ?? null,
   };
 }

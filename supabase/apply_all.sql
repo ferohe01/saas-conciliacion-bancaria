@@ -285,3 +285,34 @@ alter table public.jobs_conciliacion replica identity full;
 
 alter table public.empresas
   add column if not exists config_conciliacion jsonb;
+
+-- ============================================================================
+-- 0005_plan_empresa.sql — Período de prueba de 30 días por empresa
+--
+-- Hace real la promesa comercial que hasta ahora solo era texto en la portada.
+-- Al vencer, la empresa conserva TODO el acceso de lectura y pierde una sola
+-- capacidad: iniciar una conciliación nueva.
+-- ============================================================================
+
+alter table public.empresas
+  add column if not exists plan          text not null default 'prueba',
+  add column if not exists prueba_hasta  timestamptz;
+
+update public.empresas
+   set prueba_hasta = created_at + interval '30 days'
+ where prueba_hasta is null;
+
+alter table public.empresas drop constraint if exists empresas_plan_check;
+alter table public.empresas
+  add constraint empresas_plan_check check (plan in ('prueba', 'activo'));
+
+-- CIERRE IMPRESCINDIBLE: `empresas_update` autoriza a un miembro a actualizar
+-- SU empresa, y RLS opera por fila, no por columna. Sin esto el usuario podría
+-- hacer `update empresas set plan='activo'` con la key anon y concederse acceso
+-- ilimitado — el límite sería decorativo.
+revoke update on public.empresas from authenticated;
+grant  update (nombre, ruc, config_conciliacion) on public.empresas to authenticated;
+
+-- Extender una prueba o convertir a cliente de pago (desde el SQL editor):
+--   update public.empresas set plan = 'activo' where id = '...';
+--   update public.empresas set prueba_hasta = now() + interval '30 days' where id = '...';

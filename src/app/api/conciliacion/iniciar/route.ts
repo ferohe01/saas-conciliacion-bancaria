@@ -7,6 +7,7 @@ import { getConfigEmpresa } from "@/lib/config";
 import { generarJobId } from "@/lib/jobs";
 import { enviarAN8n } from "@/lib/n8n/cliente";
 import { construirEjemplos, type JobHistorico } from "@/lib/aprendizaje";
+import { estadoSuscripcion } from "@/lib/suscripcion";
 import {
   PayloadConciliacion,
   Periodo,
@@ -43,6 +44,21 @@ export async function POST(request: Request) {
   const empresa = await getEmpresaActual();
   if (!usuario || !empresa) {
     return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+  }
+
+  // Período de prueba: este es el punto donde el límite se hace cumplir. La
+  // interfaz además lo explica y desactiva el acceso al wizard, pero ocultar un
+  // botón no es un control — cualquiera puede llamar a este endpoint directo.
+  const suscripcion = estadoSuscripcion(empresa);
+  if (!suscripcion.puedeConciliar) {
+    return NextResponse.json(
+      {
+        error:
+          "Tu período de prueba terminó. Puedes seguir consultando tus conciliaciones anteriores; para generar una nueva, escríbenos y activamos tu cuenta.",
+        motivo: "prueba_vencida",
+      },
+      { status: 403 },
+    );
   }
 
   let body: unknown;
