@@ -64,6 +64,36 @@ function mensajeDeError(error: z.ZodError): string {
   return issue.message;
 }
 
+/**
+ * Deshace un alta a medias.
+ *
+ * Lo importante no es solo borrar, sino **enterarse si el borrado falla**: la
+ * versión anterior ignoraba el resultado, así que un rollback fallido dejaba un
+ * resto invisible. Cuando eso ocurre se registra con los identificadores, que
+ * es lo único que permite limpiarlo después a mano.
+ */
+async function deshacer(
+  admin: ReturnType<typeof createAdminClient>,
+  { empresaId, usuarioId }: { empresaId?: string; usuarioId?: string },
+) {
+  if (usuarioId) {
+    const { error } = await admin.auth.admin.deleteUser(usuarioId);
+    if (error) {
+      console.error(
+        `[registro] rollback: no se pudo borrar el usuario ${usuarioId} — queda huerfano en Auth y su correo bloqueado: ${error.message}`,
+      );
+    }
+  }
+  if (empresaId) {
+    const { error } = await admin.from("empresas").delete().eq("id", empresaId);
+    if (error) {
+      console.error(
+        `[registro] rollback: no se pudo borrar la empresa ${empresaId}: ${error.message}`,
+      );
+    }
+  }
+}
+
 export async function POST(request: Request) {
   if (
     !process.env.NEXT_PUBLIC_SUPABASE_URL ||
@@ -94,30 +124,21 @@ export async function POST(request: Request) {
   const { email, password } = d;
   const admin = createAdminClient();
 
-  // 1) Crear el usuario (confirmado, sin correo de verificación en el MVP).
-  const { data: userData, error: userError } =
-    await admin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-    });
+  // ─────────────────────────────────────────────────────────────────────────
+  // Orden: EMPRESA → USUARIO → MEMBRESÍA.
+  //
+  // Antes se creaba primero el usuario, y eso hacía que cualquier fallo
+  // posterior dejara un usuario de Auth huérfano si el rollback también
+  // fallaba. Un usuario huérfano es el peor resto posible: no sirve para nada
+  // (sin empresa, la app devuelve al login en bucle) y además **inutiliza el
+  // correo para siempre**, porque el alta responde "ya existe una cuenta".
+  //
+  // Con la empresa primero, el resto en el peor caso es una fila de `empresas`
+  // sin dueño: invisible, inofensiva y que se limpia con un DELETE normal, no
+  // con una llamada a la API de Auth.
+  // ─────────────────────────────────────────────────────────────────────────
 
-  if (userError || !userData.user) {
-    const msg = userError?.message ?? "";
-    const yaExiste = /already|registered|exists/i.test(msg);
-    return NextResponse.json(
-      {
-        error: yaExiste
-          ? "Ya existe una cuenta con ese correo."
-          : "No se pudo crear la cuenta.",
-      },
-      { status: yaExiste ? 409 : 400 },
-    );
-  }
-
-  const usuarioId = userData.user.id;
-
-  // 2) Crear la empresa.
+  // 1) Crear la empresa. Si falla aquí, no hay nada que deshacer.
   const { data: empresa, error: empresaError } = await admin
     .from("empresas")
     .insert({
@@ -132,13 +153,35 @@ export async function POST(request: Request) {
     .single();
 
   if (empresaError || !empresa) {
-    // Rollback: eliminar el usuario recién creado.
-    await admin.auth.admin.deleteUser(usuarioId);
     return NextResponse.json(
       { error: "No se pudo crear la empresa." },
       { status: 500 },
     );
   }
+
+  // 2) Crear el usuario (confirmado, sin correo de verificación en el MVP).
+  const { data: userData, error: userError } =
+    await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    });
+
+  if (userError || !userData.user) {
+    await deshacer(admin, { empresaId: empresa.id });
+    const msg = userError?.message ?? "";
+    const yaExiste = /already|registered|exists/i.test(msg);
+    return NextResponse.json(
+      {
+        error: yaExiste
+          ? "Ya existe una cuenta con ese correo."
+          : "No se pudo crear la cuenta.",
+      },
+      { status: yaExiste ? 409 : 400 },
+    );
+  }
+
+  const usuarioId = userData.user.id;
 
   // 3) Crear la membresía (rol admin).
   const { error: membresiaError } = await admin
@@ -152,9 +195,7 @@ export async function POST(request: Request) {
     });
 
   if (membresiaError) {
-    // Rollback: eliminar empresa y usuario.
-    await admin.from("empresas").delete().eq("id", empresa.id);
-    await admin.auth.admin.deleteUser(usuarioId);
+    await deshacer(admin, { empresaId: empresa.id, usuarioId });
     return NextResponse.json(
       { error: "No se pudo vincular el usuario con la empresa." },
       { status: 500 },
