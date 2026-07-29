@@ -209,6 +209,32 @@ nodos Code no se testean unitariamente en el repo). Regla al editar: mantener la
 forma de salida de cada nodo (`job_id`, `metadata`, `config`, `matches`,
 `pendientes_*`) para no romper el nodo siguiente.
 
+## Comprobantes: cuentas por cobrar (Fase A)
+
+`comprobantes` dejó de ser solo materia prima de entrada. Antes se conciliaba y
+**nada volvía**: la factura casaba con un depósito, la persona lo confirmaba, y
+el comprobante no se enteraba. Ahora el bucle está cerrado.
+
+- **`saldo`** es la verdad; **`estado`** (pendiente/parcial/cobrado/anulado) es
+  una columna **generada** a partir de él. Un estado que se actualizara por
+  separado acabaría contradiciendo al saldo.
+- **`aplicaciones_cobro`** (N:N) registra qué movimiento pagó qué comprobante.
+  Tabla y no columna porque un comprobante puede cobrarse en varios depósitos
+  (pago parcial) y un depósito puede cubrir varios comprobantes (la agrupación
+  1:N que el motor ya detecta).
+- **El saldo lo mantiene un trigger en la base**, no la aplicación: cualquier
+  camino que escriba aplicaciones queda igual de correcto.
+- **El puente es `RegistroInterno.comprobante_id`** en el payload. El `resultado`
+  de n8n solo referencia `id_interno` (sintético, "REG-0007"), así que sin ese
+  campo no habría forma de volver del match al comprobante.
+- Reparto en `src/lib/cobranzas.ts` (puro, con tests): se aplica lo que entró
+  por banco en proporción al peso de cada comprobante, con tope en su importe.
+- Al confirmar decisiones se **reemplaza** el conjunto de aplicaciones del job,
+  no se suma: así deshacer una aceptación devuelve el saldo solo.
+
+Solo cuentan los estados confirmados por una persona (`aceptado`, `modificado`,
+`manual`). Una sugerencia de IA sin revisar **no cobra nada**.
+
 ## Período de prueba (30 días)
 
 La promesa comercial "tu primer período es gratis" vivía solo como texto en la

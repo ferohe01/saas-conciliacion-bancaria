@@ -58,6 +58,16 @@ export const RegistroInterno = z.object({
   referencia: z.string().nullable().optional(),
   contraparte: z.string().nullable().optional(),
   descripcion: z.string().nullable().optional(),
+  /**
+   * Comprobante del que salió este registro, cuando la fuente fue la tabla
+   * `comprobantes` (no un Excel suelto).
+   *
+   * El motor lo ignora: el `resultado` sigue referenciando solo `id_interno`.
+   * Existe para que, al confirmar una decisión humana, se pueda volver del
+   * match al comprobante y descontarle el saldo. Sin este puente, `id_interno`
+   * es un identificador sintético ("REG-0007") que no lleva a ninguna parte.
+   */
+  comprobante_id: z.string().uuid().nullable().optional(),
 });
 export type RegistroInterno = z.infer<typeof RegistroInterno>;
 

@@ -123,6 +123,9 @@ export async function getComprobantesCanonicos(
     const tipo = c.tipo === "pago" ? "pago" : "cobranza";
     const monto = Math.abs(Number(c.monto ?? 0));
     return {
+      // Se conserva el id legible para la pantalla de revisión —un UUID en una
+      // tabla de dos mil filas no hay quien lo lea— y el vínculo real al
+      // comprobante viaja aparte, en `comprobante_id`.
       id_interno: `REG-${String(i + 1).padStart(4, "0")}`,
       fecha: String(c.fecha),
       monto: tipo === "pago" ? -monto : monto,
@@ -130,6 +133,7 @@ export async function getComprobantesCanonicos(
       referencia: c.serie_numero ?? null,
       contraparte: c.razon_social_contraparte ?? null,
       descripcion: c.descripcion ?? null,
+      comprobante_id: c.id,
     };
   });
 }

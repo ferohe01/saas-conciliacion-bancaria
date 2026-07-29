@@ -9,6 +9,11 @@ import {
   ResultadoConciliacion,
   type Match,
 } from "@/lib/contract/resultado";
+import {
+  calcularAplicaciones,
+  type RegistroPayload,
+  type MovimientoPayload,
+} from "@/lib/cobranzas";
 
 /**
  * Acciones de la revisión humana. Persisten CADA decisión dentro de
@@ -51,8 +56,71 @@ async function guardar(jobId: string, resultado: ResultadoConciliacion) {
     .update({ resultado })
     .eq("id", jobId);
   if (error) return { ok: false, error: "No se pudo guardar la decisión." };
+
+  await sincronizarCobranzas(jobId, resultado);
   revalidatePath(`/conciliacion/${jobId}`);
   return { ok: true };
+}
+
+/**
+ * Refleja las decisiones confirmadas en el saldo de los comprobantes.
+ *
+ * Se REEMPLAZA el conjunto completo de aplicaciones del job en vez de ir
+ * añadiendo: así el estado siempre corresponde a las decisiones actuales, y
+ * deshacer una aceptación devuelve el saldo solo. Ir sumando obligaría a
+ * rastrear cada cambio y acabaría desincronizado.
+ *
+ * El saldo lo recalcula un trigger en la base (migración 0008), no este código:
+ * cualquier otro camino que escriba aplicaciones queda igual de correcto.
+ *
+ * Un fallo aquí NO tumba la decisión humana, que ya está guardada y es lo
+ * irreemplazable; se registra para poder reconstruirlo.
+ */
+async function sincronizarCobranzas(
+  jobId: string,
+  resultado: ResultadoConciliacion,
+) {
+  try {
+    const admin = createAdminClient();
+    const { data: job } = await admin
+      .from("jobs_conciliacion")
+      .select("empresa_id, usuario_id, payload_entrada")
+      .eq("id", jobId)
+      .maybeSingle();
+
+    const payload = job?.payload_entrada as {
+      registros_internos?: RegistroPayload[];
+      movimientos_bancarios?: MovimientoPayload[];
+    } | null;
+    if (!job || !payload?.registros_internos) return;
+
+    // Si ningún registro vino de la tabla de comprobantes (fuente Excel), no
+    // hay nada que actualizar.
+    if (!payload.registros_internos.some((r) => r.comprobante_id)) return;
+
+    const aplicaciones = calcularAplicaciones(
+      resultado.matches,
+      payload.registros_internos,
+      payload.movimientos_bancarios ?? [],
+    );
+
+    await admin.from("aplicaciones_cobro").delete().eq("job_id", jobId);
+    if (aplicaciones.length > 0) {
+      await admin.from("aplicaciones_cobro").insert(
+        aplicaciones.map((a) => ({
+          ...a,
+          job_id: jobId,
+          empresa_id: job.empresa_id,
+          usuario_id: job.usuario_id,
+        })),
+      );
+    }
+  } catch (e) {
+    console.error(
+      `[cobranzas] no se pudo sincronizar el saldo de comprobantes del job ${jobId}:`,
+      e,
+    );
+  }
 }
 
 const AccionSchema = z.enum(["aceptado", "rechazado", "modificado"]);
