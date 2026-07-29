@@ -69,13 +69,25 @@ const IconoConfig = (p: IconProps) => (
   />
 );
 
-const ENLACES: {
+const IconoCobranzas = (p: IconProps) => (
+  <Ico
+    {...p}
+    d={["M12 2v20", "M17 6.5c0-1.9-2.2-3-5-3s-5 1.1-5 3 2.2 2.7 5 3.2 5 1.3 5 3.3-2.2 3-5 3-5-1.1-5-3"]}
+  />
+);
+
+type Enlace = {
   href: string;
   label: string;
   Icono: (p: IconProps) => React.JSX.Element;
-}[] = [
+  /** Solo se muestra si el módulo correspondiente está contratado. */
+  modulo?: "cobranzas";
+};
+
+const ENLACES: Enlace[] = [
   { href: "/dashboard", label: "Panel", Icono: IconoPanel },
   { href: "/conciliacion", label: "Historial", Icono: IconoHistorial },
+  { href: "/cobranzas", label: "Cobranzas", Icono: IconoCobranzas, modulo: "cobranzas" },
   { href: "/reportes", label: "Reportes", Icono: IconoReportes },
   { href: "/cuentas", label: "Cuentas", Icono: IconoCuentas },
   { href: "/configuracion", label: "Configuración", Icono: IconoConfig },
@@ -90,12 +102,14 @@ function Contenido({
   pathname,
   empresaNombre,
   puedeConciliar,
+  modulos,
   saliendo,
   cerrarSesion,
 }: {
   pathname: string;
   empresaNombre: string;
   puedeConciliar: boolean;
+  modulos: string[];
   saliendo: boolean;
   cerrarSesion: () => void;
 }) {
@@ -135,7 +149,9 @@ function Contenido({
 
       <nav aria-label="Principal" className="min-h-0 flex-1 overflow-y-auto px-3">
         <ul className="space-y-0.5">
-          {ENLACES.map(({ href, label, Icono }) => {
+          {ENLACES.filter(
+            (e) => !e.modulo || modulos.includes(e.modulo),
+          ).map(({ href, label, Icono }) => {
             const activo = esActivo(pathname, href);
             return (
               <li key={href}>
@@ -181,9 +197,12 @@ function Contenido({
 export function AppSidebar({
   empresaNombre,
   puedeConciliar,
+  modulos,
 }: {
   empresaNombre: string;
   puedeConciliar: boolean;
+  /** Ids de los módulos contratados y vigentes. */
+  modulos: string[];
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -217,7 +236,14 @@ export function AppSidebar({
     router.refresh();
   }
 
-  const props = { pathname, empresaNombre, puedeConciliar, saliendo, cerrarSesion };
+  const props = {
+    pathname,
+    empresaNombre,
+    puedeConciliar,
+    modulos,
+    saliendo,
+    cerrarSesion,
+  };
 
   return (
     <>

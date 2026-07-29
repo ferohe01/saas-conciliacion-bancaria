@@ -3,6 +3,8 @@ import { AppSidebar } from "@/components/app/AppSidebar";
 import { ScrollAlInicio } from "@/components/app/ScrollAlInicio";
 import { getEmpresaActual } from "@/lib/auth";
 import { estadoSuscripcion } from "@/lib/suscripcion";
+import { getSuscripcionesModulo } from "@/lib/modulos-servidor";
+import { MODULOS, tieneModulo } from "@/lib/modulos";
 
 /**
  * Layout del área autenticada. El middleware ya protege estas rutas; aquí se
@@ -23,6 +25,14 @@ export default async function AppLayout({
 
   if (!empresa) redirect("/login");
 
+  // Módulos contratados y vigentes: la barra lateral solo muestra lo que la
+  // empresa tiene. Cada pantalla vuelve a comprobarlo por su cuenta —esto
+  // orienta, no protege.
+  const suscripciones = await getSuscripcionesModulo();
+  const modulosActivos = MODULOS.filter((m) =>
+    tieneModulo(m.id, suscripciones),
+  ).map((m) => m.id as string);
+
   return (
     <div className="min-h-screen bg-neutral-100">
       <a
@@ -35,6 +45,7 @@ export default async function AppLayout({
       <AppSidebar
         empresaNombre={empresa.nombre}
         puedeConciliar={estadoSuscripcion(empresa).puedeConciliar}
+        modulos={modulosActivos}
       />
       {/* La guarda es fija a partir de lg; el lienzo se desplaza para no quedar
           debajo. Cada pantalla fija su propio ancho por tarea dentro de él. */}
