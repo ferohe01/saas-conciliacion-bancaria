@@ -17,12 +17,26 @@ import { DocumentoIcon } from "@/components/wizard/icons";
  * vista de cuentas por cobrar.
  */
 
-const ETIQUETA_ESTADO: Record<string, string> = {
-  pendiente: "Pendiente",
-  parcial: "Parcial",
-  cobrado: "Cobrado",
-  anulado: "Anulado",
-};
+/**
+ * El estado se dice en el idioma de cada lado.
+ *
+ * "Cobrado" para una factura que TÚ pagaste a un proveedor suena al revés: no
+ * la cobraste, la pagaste. El estado en la base es uno solo (`cobrado`); lo que
+ * cambia es cómo se cuenta.
+ */
+function etiquetaEstado(estado: string, tipo: string | null): string {
+  const esPago = tipo === "pago";
+  switch (estado) {
+    case "cobrado":
+      return esPago ? "Pagado" : "Cobrado";
+    case "parcial":
+      return "Parcial";
+    case "anulado":
+      return "Anulado";
+    default:
+      return "Pendiente";
+  }
+}
 
 type Fila = {
   id: string;
@@ -84,6 +98,7 @@ export default async function ComprobantesPage() {
                   <th scope="col" className="px-5 py-2.5 font-medium text-neutral-600">Fecha</th>
                   <th scope="col" className="px-3 py-2.5 font-medium text-neutral-600">Vence</th>
                   <th scope="col" className="px-3 py-2.5 font-medium text-neutral-600">Documento</th>
+                  <th scope="col" className="px-3 py-2.5 font-medium text-neutral-600">Tipo</th>
                   <th scope="col" className="px-3 py-2.5 font-medium text-neutral-600">Contraparte</th>
                   <th scope="col" className="px-3 py-2.5 text-right font-medium text-neutral-600">Monto</th>
                   <th scope="col" className="px-3 py-2.5 text-right font-medium text-neutral-600">Saldo</th>
@@ -103,6 +118,19 @@ export default async function ComprobantesPage() {
                       </td>
                       <td className="px-3 py-2.5 whitespace-nowrap text-neutral-800">
                         {f.serie_numero ?? "—"}
+                      </td>
+                      {/* Con la palabra, no solo con el signo y el color: la
+                          tabla mezcla lo que te deben con lo que debes. */}
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-xs font-medium ${
+                            f.tipo === "pago"
+                              ? "bg-neutral-100 text-neutral-700"
+                              : "bg-blue-50 text-blue-800"
+                          }`}
+                        >
+                          {f.tipo === "pago" ? "Pago" : "Cobranza"}
+                        </span>
                       </td>
                       <td className="max-w-[16rem] truncate px-3 py-2.5 text-neutral-700">
                         {f.razon_social_contraparte ?? "—"}
@@ -132,7 +160,7 @@ export default async function ComprobantesPage() {
                                   : "bg-neutral-100 text-neutral-700"
                           }`}
                         >
-                          {ETIQUETA_ESTADO[estado] ?? estado}
+                          {etiquetaEstado(estado, f.tipo)}
                         </span>
                       </td>
                     </tr>
