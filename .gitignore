@@ -37,3 +37,8 @@ yarn-error.log*
 
 # datos de prueba generados (ver ops/generar-datos-prueba.mjs)
 data/pruebas/
+
+# permisos locales de Claude Code: son por máquina y acumulan rutas y
+# credenciales pegadas en los comandos autorizados. El allowlist compartido
+# del proyecto vive en .claude/settings.json, que sí se versiona.
+.claude/settings.local.json

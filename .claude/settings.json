@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run typecheck)",
+      "Bash(npm run typecheck *)",
+      "Bash(npm run test)",
+      "Bash(npm run test *)",
+      "Bash(npm audit)",
+      "Bash(npm audit *)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npx tsc --noEmit *)",
+      "Bash(npx vitest run)",
+      "Bash(npx vitest run *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(Test-Path *)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "PowerShell(Get-ScheduledTask *)",
+      "PowerShell(Get-ScheduledTaskInfo *)"
+    ]
+  }
+}
