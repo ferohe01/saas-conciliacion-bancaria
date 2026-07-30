@@ -10,6 +10,7 @@ import type { WorkBook } from "xlsx";
 
 export const COLUMNAS_PLANTILLA = [
   "fecha",
+  "fecha_vencimiento",
   "monto",
   "tipo",
   "referencia",
@@ -20,6 +21,7 @@ export const COLUMNAS_PLANTILLA = [
 
 const FILA_EJEMPLO: Record<(typeof COLUMNAS_PLANTILLA)[number], string> = {
   fecha: "15/06/2026",
+  fecha_vencimiento: "15/07/2026",
   monto: "4950.00",
   tipo: "cobranza",
   referencia: "F001-234",

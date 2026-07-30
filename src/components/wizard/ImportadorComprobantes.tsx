@@ -10,6 +10,7 @@ import { importarComprobantes } from "@/app/(app)/wizard/actions";
 
 type FilaImport = {
   fecha: string;
+  fecha_vencimiento: string | null;
   monto: number;
   tipo: "cobranza" | "pago";
   referencia: string | null;
@@ -44,6 +45,9 @@ function normalizarFilas(crudas: Record<string, unknown>[]): {
     }
     validas.push({
       fecha,
+      // Opcional: muchas ventas son al contado. Si falta, el aging usa la
+      // fecha de emision como referencia.
+      fecha_vencimiento: normalizarFecha(f["fecha_vencimiento"]) ?? null,
       monto,
       tipo,
       referencia: texto(f["referencia"]),

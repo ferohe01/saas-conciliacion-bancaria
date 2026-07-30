@@ -15,6 +15,7 @@ import type { RegistroInterno } from "@/lib/contract/payload";
 
 const ComprobanteImport = z.object({
   fecha: FechaISO,
+  fecha_vencimiento: FechaISO.optional().nullable(),
   monto: z.number().finite(),
   tipo: z.enum(["cobranza", "pago"]),
   referencia: z.string().trim().optional().nullable(),
@@ -51,6 +52,7 @@ export async function importarComprobantes(
   const registros = parsed.data.map((c) => ({
     empresa_id: empresa.empresa_id,
     fecha: c.fecha,
+    fecha_vencimiento: c.fecha_vencimiento ?? null,
     monto: c.monto,
     tipo: c.tipo,
     serie_numero: c.referencia ?? null,

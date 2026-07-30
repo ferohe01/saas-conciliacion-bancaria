@@ -34,3 +34,6 @@ yarn-error.log*
 
 # testing
 /coverage
+
+# datos de prueba generados (ver ops/generar-datos-prueba.mjs)
+data/pruebas/
