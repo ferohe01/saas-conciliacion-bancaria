@@ -5,22 +5,27 @@ import { buscarModulo } from "@/lib/modulos";
 import { CONTACTO_SUSCRIPCION, montoPEN } from "@/lib/suscripcion";
 import { calcularAging, type ComprobanteCobrar } from "@/lib/aging";
 import { VistaAging } from "@/components/app/VistaAging";
+import { COLUMNAS_SALDO } from "@/app/(app)/cobranzas/page";
 import { EncabezadoPagina, EstadoVacio, clasesBoton } from "@/components/ui";
 import { DocumentoIcon, CandadoIcon } from "@/components/wizard/icons";
 
-export const COLUMNAS_SALDO =
-  "id, fecha, fecha_vencimiento, monto, saldo, tipo, estado, serie_numero, ruc_contraparte, razon_social_contraparte";
-
-export default async function CobranzasPage() {
-  // El límite se hace cumplir AQUÍ, en el servidor. Ocultar el enlace en la
-  // barra lateral orienta, pero no protege: esta ruta se alcanza escribiéndola.
+/**
+ * Cuentas por pagar: el lado espejo de las cobranzas.
+ *
+ * Mismo cálculo y misma vista; cambia el tipo de comprobante y las palabras.
+ * Se mantienen en pantallas separadas a propósito: sumar lo que te deben con lo
+ * que debes da un número que no responde a ninguna pregunta, y cada lado se
+ * gestiona distinto — a los clientes los persigues, a los proveedores los
+ * programas.
+ */
+export default async function PagosPage() {
   const permitido = await empresaTieneModulo("cobranzas");
   const modulo = buscarModulo("cobranzas")!;
 
   if (!permitido) {
     return (
       <div className="space-y-6">
-        <EncabezadoPagina titulo="Cuentas por cobrar" />
+        <EncabezadoPagina titulo="Cuentas por pagar" />
         <EstadoVacio
           icono={<CandadoIcon className="h-6 w-6" />}
           titulo="Este módulo no está contratado"
@@ -37,25 +42,25 @@ export default async function CobranzasPage() {
     );
   }
 
-  const supabase = await createClient(); // RLS: solo la empresa del usuario
+  const supabase = await createClient();
   const { data } = await supabase
     .from("comprobantes")
     .select(COLUMNAS_SALDO)
     .order("fecha", { ascending: true });
 
-  const aging = calcularAging((data ?? []) as ComprobanteCobrar[], new Date(), "cobranza");
+  const aging = calcularAging((data ?? []) as ComprobanteCobrar[], new Date(), "pago");
 
   if (aging.documentos === 0) {
     return (
       <div className="space-y-6">
         <EncabezadoPagina
-          titulo="Cuentas por cobrar"
-          descripcion="Quién te debe y desde cuándo."
+          titulo="Cuentas por pagar"
+          descripcion="A quién le debes y para cuándo."
         />
         <EstadoVacio
           icono={<DocumentoIcon className="h-6 w-6" />}
-          titulo="Nadie te debe nada"
-          texto="Aquí aparecen tus facturas pendientes de cobro. Carga tus comprobantes y, cada vez que concilies, lo cobrado se descuenta solo."
+          titulo="No debes nada"
+          texto="Aquí aparecen las facturas de tus proveedores pendientes de pago. Cárgalas como comprobantes de tipo «pago» y, al conciliar, lo pagado se descuenta solo."
           accion={
             <Link href="/comprobantes" className={clasesBoton("primario", "md")}>
               Cargar comprobantes
@@ -69,19 +74,19 @@ export default async function CobranzasPage() {
   return (
     <div className="space-y-6">
       <EncabezadoPagina
-        titulo="Cuentas por cobrar"
-        descripcion="Quién te debe y desde cuándo. Cada conciliación descuenta lo cobrado."
+        titulo="Cuentas por pagar"
+        descripcion="A quién le debes y para cuándo. Cada conciliación descuenta lo pagado."
       />
       <VistaAging
         aging={aging}
         textos={{
-          total: "Total por cobrar",
-          notaVencido: "conviene reclamar",
-          contraparte: "Cliente",
-          tituloTabla: "Por cliente",
+          total: "Total por pagar",
+          notaVencido: "ya deberías haberlo pagado",
+          contraparte: "Proveedor",
+          tituloTabla: "Por proveedor",
           subtituloTabla:
-            "Ordenado por lo vencido: por ahí conviene empezar a cobrar.",
-          pie: "Estos saldos se actualizan solos: cada vez que se concilia un depósito con una factura, lo cobrado se descuenta del comprobante.",
+            "Ordenado por lo vencido: eso es lo que más urge programar.",
+          pie: "Estos saldos se actualizan solos: cada vez que se concilia un cargo con una factura de proveedor, lo pagado se descuenta del comprobante.",
         }}
       />
     </div>

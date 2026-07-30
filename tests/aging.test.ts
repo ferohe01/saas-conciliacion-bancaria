@@ -82,13 +82,13 @@ describe("calcularAging", () => {
       ],
       HOY,
     );
-    expect(r.clientes[0]!.cliente).toBe("Debe poco pero vencido");
+    expect(r.contrapartes[0]!.contraparte).toBe("Debe poco pero vencido");
   });
 
   it("los pagos no son deuda de clientes: se excluyen", () => {
     const r = calcularAging([cmp({ tipo: "pago", saldo: 900 })], HOY);
     expect(r.total).toBe(0);
-    expect(r.clientes).toHaveLength(0);
+    expect(r.contrapartes).toHaveLength(0);
   });
 
   it("lo cobrado y lo anulado no cuentan", () => {
@@ -113,14 +113,51 @@ describe("calcularAging", () => {
       [cmp({ razon_social_contraparte: "", saldo: 400, fecha_vencimiento: dia(-5) })],
       HOY,
     );
-    expect(r.clientes[0]!.cliente).toBe("Sin identificar");
+    expect(r.contrapartes[0]!.contraparte).toBe("Sin identificar");
     expect(r.total).toBe(400);
   });
 
   it("sin comprobantes devuelve un resumen en cero, no revienta", () => {
     const r = calcularAging([], HOY);
     expect(r.total).toBe(0);
-    expect(r.clientes).toEqual([]);
+    expect(r.contrapartes).toEqual([]);
     expect(r.porTramo.d1_30).toBe(0);
+  });
+});
+
+describe("los dos lados nunca se mezclan", () => {
+  const mixto = [
+    cmp({ tipo: "cobranza", razon_social_contraparte: "Cliente A", saldo: 1000, fecha_vencimiento: dia(-10) }),
+    cmp({ tipo: "cobranza", razon_social_contraparte: "Cliente B", saldo: 500, fecha_vencimiento: dia(5) }),
+    cmp({ tipo: "pago", razon_social_contraparte: "Proveedor X", saldo: 700, fecha_vencimiento: dia(-20) }),
+    cmp({ tipo: "pago", razon_social_contraparte: "Proveedor Y", saldo: 300, fecha_vencimiento: dia(15) }),
+  ];
+
+  it("por cobrar solo suma cobranzas", () => {
+    const r = calcularAging(mixto, HOY, "cobranza");
+    expect(r.total).toBe(1500);
+    expect(r.documentos).toBe(2);
+    expect(r.contrapartes.map((c) => c.contraparte).sort()).toEqual(["Cliente A", "Cliente B"]);
+  });
+
+  it("por pagar solo suma pagos", () => {
+    const r = calcularAging(mixto, HOY, "pago");
+    expect(r.total).toBe(1000);
+    expect(r.documentos).toBe(2);
+    expect(r.contrapartes.map((c) => c.contraparte).sort()).toEqual(["Proveedor X", "Proveedor Y"]);
+  });
+
+  it("los totales de los dos lados nunca se suman entre si", () => {
+    const cobrar = calcularAging(mixto, HOY, "cobranza").total;
+    const pagar = calcularAging(mixto, HOY, "pago").total;
+    // Cada lado responde a su propia pregunta; la suma no significa nada.
+    expect(cobrar).not.toBe(pagar);
+    expect(cobrar + pagar).toBe(2500);
+  });
+
+  it("un comprobante sin tipo cuenta como cobranza", () => {
+    const r = calcularAging([cmp({ tipo: null, saldo: 400 })], HOY, "cobranza");
+    expect(r.total).toBe(400);
+    expect(calcularAging([cmp({ tipo: null, saldo: 400 })], HOY, "pago").total).toBe(0);
   });
 });

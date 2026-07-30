@@ -17,7 +17,7 @@ describe("catálogo", () => {
   });
 
   it("buscarModulo encuentra y descarta", () => {
-    expect(buscarModulo("cobranzas")?.nombre).toBe("Cuentas por cobrar");
+    expect(buscarModulo("cobranzas")?.nombre).toBe("Cuentas por cobrar y pagar");
     expect(buscarModulo("inventado")).toBeUndefined();
   });
 });

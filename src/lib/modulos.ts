@@ -28,9 +28,9 @@ export type Modulo = {
 export const MODULOS: readonly Modulo[] = [
   {
     id: "cobranzas",
-    nombre: "Cuentas por cobrar",
+    nombre: "Cuentas por cobrar y pagar",
     descripcion:
-      "Mira quién te debe y desde cuándo. Cada conciliación descuenta lo cobrado, así que el saldo de cada cliente se mantiene solo.",
+      "Mira quién te debe y a quién le debes, con su antigüedad. Cada conciliación descuenta lo cobrado y lo pagado, así que los saldos se mantienen solos.",
     precioMensual: null,
   },
 ] as const;
