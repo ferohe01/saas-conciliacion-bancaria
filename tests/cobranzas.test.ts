@@ -164,3 +164,78 @@ describe("calcularAplicaciones", () => {
     expect(r.map((x) => x.monto_aplicado)).toEqual([33.33, 66.67]);
   });
 });
+
+describe("diferencias absorbidas (comisión, redondeo)", () => {
+  const TOL = { tolerancia_monto_abs: 5, tolerancia_monto_pct: 0.5 };
+  const conCategoria = (categoria: string): MatchLite[] => [
+    {
+      ids_internos: ["REG-1"],
+      ids_movimientos: ["MOV-1"],
+      estado_revision: "auto",
+      categoria_diferencia: categoria,
+    },
+  ];
+
+  it("una comisión bancaria deja la factura COBRADA, no en parcial", () => {
+    // Facturas de 1850, el banco abona 1846.50: la comisión no es deuda.
+    const r = calcularAplicaciones(
+      conCategoria("comision_bancaria"),
+      [reg("REG-1", 1850, "c1")],
+      [mov("MOV-1", 1846.5)],
+      TOL,
+    );
+    expect(r[0]!.monto_aplicado).toBe(1850);
+  });
+
+  it("el redondeo también se absorbe", () => {
+    const r = calcularAplicaciones(
+      conCategoria("redondeo"),
+      [reg("REG-1", 990, "c1")],
+      [mov("MOV-1", 989.5)],
+      TOL,
+    );
+    expect(r[0]!.monto_aplicado).toBe(990);
+  });
+
+  it("NO se absorbe si el faltante excede las tolerancias de la empresa", () => {
+    // Etiquetado como comisión pero faltan 200: eso no es una comisión.
+    // Sin este límite, un match mal categorizado cerraría una factura impagada.
+    const r = calcularAplicaciones(
+      conCategoria("comision_bancaria"),
+      [reg("REG-1", 1000, "c1")],
+      [mov("MOV-1", 800)],
+      TOL,
+    );
+    expect(r[0]!.monto_aplicado).toBe(800);
+  });
+
+  it("un pago parcial NO se absorbe: ahí falta dinero de verdad", () => {
+    const r = calcularAplicaciones(
+      conCategoria("pago_parcial"),
+      [reg("REG-1", 1000, "c1")],
+      [mov("MOV-1", 998)],
+      TOL,
+    );
+    expect(r[0]!.monto_aplicado).toBe(998);
+  });
+
+  it("sin tolerancias configuradas no se absorbe nada", () => {
+    const r = calcularAplicaciones(
+      conCategoria("comision_bancaria"),
+      [reg("REG-1", 1850, "c1")],
+      [mov("MOV-1", 1846.5)],
+    );
+    expect(r[0]!.monto_aplicado).toBe(1846.5);
+  });
+
+  it("el porcentaje también sirve de límite en importes grandes", () => {
+    // 0.5% de 50000 = 250, asi que un faltante de 200 entra.
+    const r = calcularAplicaciones(
+      conCategoria("comision_bancaria"),
+      [reg("REG-1", 50000, "c1")],
+      [mov("MOV-1", 49800)],
+      TOL,
+    );
+    expect(r[0]!.monto_aplicado).toBe(50000);
+  });
+});

@@ -25,7 +25,29 @@ export type MatchLite = {
   ids_internos: string[];
   ids_movimientos: string[];
   estado_revision?: string | null;
+  categoria_diferencia?: string | null;
 };
+
+/**
+ * Tolerancias de la empresa, tal como viajan en `payload.config`. Se usan como
+ * límite de seguridad al absorber diferencias.
+ */
+export type ToleranciasLite = {
+  tolerancia_monto_abs?: number | null;
+  tolerancia_monto_pct?: number | null;
+};
+
+/**
+ * Diferencias que NO son deuda: el cliente pagó completo y por el camino se
+ * perdió algo que no le vas a reclamar.
+ *
+ * Sin esto, una comisión bancaria de S/ 3.50 dejaba la factura en 'parcial' con
+ * ese saldo — técnicamente cierto y comercialmente absurdo: nadie persigue tres
+ * soles y medio, pero ensucia las cuentas por cobrar de todos los clientes.
+ *
+ * `pago_parcial` NO entra: ahí sí falta dinero de verdad.
+ */
+export const CATEGORIAS_ABSORBIDAS = ["comision_bancaria", "redondeo"] as const;
 
 export type Aplicacion = {
   comprobante_id: string;
@@ -81,6 +103,7 @@ export function calcularAplicaciones(
   matches: MatchLite[],
   registros: RegistroPayload[],
   movimientos: MovimientoPayload[],
+  tolerancias: ToleranciasLite = {},
 ): Aplicacion[] {
   const porRegistro = new Map(registros.map((r) => [r.id_interno, r]));
   const porMovimiento = new Map(movimientos.map((m) => [m.id_movimiento, m]));
@@ -108,8 +131,26 @@ export function calcularAplicaciones(
     // Sin datos del movimiento (p. ej. un extracto en PDF, que procesa n8n y
     // no viaja en el payload) se asume cobro completo: es lo que la persona
     // acaba de confirmar mirando ambos lados.
-    const factor =
-      totalBanco > 0 ? Math.min(1, totalBanco / totalRegistros) : 1;
+    let factor = totalBanco > 0 ? Math.min(1, totalBanco / totalRegistros) : 1;
+
+    // Diferencia absorbida (comisión, redondeo): se da la factura por cobrada
+    // entera. Pero solo si el faltante cabe en las tolerancias que la empresa
+    // configuró — las mismas con las que el motor decidió emparejarlos. Si el
+    // motor etiquetó mal un match y falta el 40%, ese hueco NO se tapa.
+    if (
+      totalBanco > 0 &&
+      factor < 1 &&
+      (CATEGORIAS_ABSORBIDAS as readonly string[]).includes(
+        m.categoria_diferencia ?? "",
+      )
+    ) {
+      const faltante = totalRegistros - totalBanco;
+      const limiteAbs = Math.max(0, Number(tolerancias.tolerancia_monto_abs ?? 0));
+      const limitePct =
+        (totalRegistros * Math.max(0, Number(tolerancias.tolerancia_monto_pct ?? 0))) /
+        100;
+      if (faltante <= Math.max(limiteAbs, limitePct)) factor = 1;
+    }
 
     // Clave estable del conjunto de movimientos que pagó: hace la operación
     // idempotente contra la restricción única de la tabla.

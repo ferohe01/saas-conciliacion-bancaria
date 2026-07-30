@@ -91,6 +91,7 @@ async function sincronizarCobranzas(
     const payload = job?.payload_entrada as {
       registros_internos?: RegistroPayload[];
       movimientos_bancarios?: MovimientoPayload[];
+      config?: { tolerancia_monto_abs?: number; tolerancia_monto_pct?: number };
     } | null;
     if (!job || !payload?.registros_internos) return;
 
@@ -98,10 +99,13 @@ async function sincronizarCobranzas(
     // hay nada que actualizar.
     if (!payload.registros_internos.some((r) => r.comprobante_id)) return;
 
+    // Las tolerancias van con el job, no las actuales de la empresa: si mañana
+    // las cambian, lo ya conciliado no debe reinterpretarse solo.
     const aplicaciones = calcularAplicaciones(
       resultado.matches,
       payload.registros_internos,
       payload.movimientos_bancarios ?? [],
+      payload.config ?? {},
     );
 
     await admin.from("aplicaciones_cobro").delete().eq("job_id", jobId);
