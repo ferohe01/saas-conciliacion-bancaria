@@ -132,6 +132,8 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
   const [comprobantesResumen, setComprobantesResumen] = useState<{
     registros: number;
     suma: number;
+    /** Total cargado en la empresa, sin filtrar por período. */
+    totalCargados: number;
   } | null>(null);
   const [recargaComprobantes, setRecargaComprobantes] = useState(0);
 
@@ -177,18 +179,31 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
     let cancelado = false;
     (async () => {
       const supabase = createClient();
-      const { data } = await supabase
-        .from("comprobantes")
-        .select("monto")
-        .gte("fecha", periodo.desde)
-        .lte("fecha", periodo.hasta);
+      // Se pide también el TOTAL sin filtro de fecha: si el usuario cargó 5
+      // comprobantes y en el período caen 2, decir solo "2 registros" parece
+      // que se perdieron los otros. Saber que existen fuera del período evita
+      // esa alarma —y también avisa de que quizá eligió el mes equivocado.
+      const [{ data }, { count: total }] = await Promise.all([
+        supabase
+          .from("comprobantes")
+          .select("monto")
+          .gte("fecha", periodo.desde)
+          .lte("fecha", periodo.hasta),
+        supabase
+          .from("comprobantes")
+          .select("id", { count: "exact", head: true }),
+      ]);
       if (cancelado) return;
       const filas = data ?? [];
       const suma = filas.reduce(
         (acc, r) => acc + Math.abs(Number(r.monto ?? 0)),
         0,
       );
-      setComprobantesResumen({ registros: filas.length, suma });
+      setComprobantesResumen({
+        registros: filas.length,
+        suma,
+        totalCargados: total ?? filas.length,
+      });
     })();
     return () => {
       cancelado = true;
@@ -497,17 +512,34 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
                     Comprobantes del período
                   </p>
                   {comprobantesResumen ? (
-                    <p className="mt-1 text-sm text-neutral-600">
-                      {comprobantesResumen.registros.toLocaleString("es-PE")}{" "}
-                      registros ·{" "}
-                      {formatearPEN(comprobantesResumen.suma, moneda)}
-                    </p>
+                    <>
+                      <p className="mt-1 text-sm text-neutral-600">
+                        {comprobantesResumen.registros.toLocaleString("es-PE")}{" "}
+                        registros ·{" "}
+                        {formatearPEN(comprobantesResumen.suma, moneda)}
+                      </p>
+                      {/* Decir cuántos quedan fuera evita la alarma de "se
+                          perdieron mis datos" y avisa de que quizá el mes
+                          elegido no es el que el usuario tenía en mente. */}
+                      {comprobantesResumen.totalCargados >
+                        comprobantesResumen.registros && (
+                        <p className="mt-1 text-sm text-neutral-500">
+                          Tienes{" "}
+                          <span className="tabular-nums">
+                            {comprobantesResumen.totalCargados.toLocaleString("es-PE")}
+                          </span>{" "}
+                          comprobantes cargados en total; el resto es de otros
+                          períodos. Cambia el mes si buscabas esos.
+                        </p>
+                      )}
+                    </>
                   ) : (
                     <p className="mt-1 text-sm text-neutral-500">Cargando…</p>
                   )}
                   {comprobantesResumen?.registros === 0 && (
                     <p className="mt-1 text-sm text-amber-600">
-                      No hay comprobantes en este período. Impórtalos abajo.
+                      No hay comprobantes en este período. Impórtalos abajo o
+                      elige otro mes.
                     </p>
                   )}
                 </div>
