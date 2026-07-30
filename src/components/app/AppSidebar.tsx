@@ -69,6 +69,9 @@ const IconoConfig = (p: IconProps) => (
   />
 );
 
+const IconoDocumento = (p: IconProps) => (
+  <Ico {...p} d={["M6 3h8l4 4v14H6z", "M14 3v4h4", "M9 12h6", "M9 16h6"]} />
+);
 const IconoCobranzas = (p: IconProps) => (
   <Ico
     {...p}
@@ -87,6 +90,9 @@ type Enlace = {
 const ENLACES: Enlace[] = [
   { href: "/dashboard", label: "Panel", Icono: IconoPanel },
   { href: "/conciliacion", label: "Historial", Icono: IconoHistorial },
+  // Base: cargar comprobantes alimenta la conciliación. El módulo Cobranzas
+  // solo añade la vista de quién te debe.
+  { href: "/comprobantes", label: "Comprobantes", Icono: IconoDocumento },
   { href: "/cobranzas", label: "Cobranzas", Icono: IconoCobranzas, modulo: "cobranzas" },
   { href: "/reportes", label: "Reportes", Icono: IconoReportes },
   { href: "/cuentas", label: "Cuentas", Icono: IconoCuentas },

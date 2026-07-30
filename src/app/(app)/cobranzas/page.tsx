@@ -55,7 +55,7 @@ export default async function CobranzasPage() {
           titulo="Todavía no hay nada por cobrar"
           texto="Aquí aparecen tus facturas pendientes. Carga tus comprobantes y, cada vez que concilies, lo cobrado se descuenta solo."
           accion={
-            <Link href="/wizard" className={clasesBoton("primario", "md")}>
+            <Link href="/comprobantes" className={clasesBoton("primario", "md")}>
               Cargar comprobantes
             </Link>
           }
