@@ -232,8 +232,17 @@ el comprobante no se enteraba. Ahora el bucle está cerrado.
 - Al confirmar decisiones se **reemplaza** el conjunto de aplicaciones del job,
   no se suma: así deshacer una aceptación devuelve el saldo solo.
 
-Solo cuentan los estados confirmados por una persona (`aceptado`, `modificado`,
-`manual`). Una sugerencia de IA sin revisar **no cobra nada**.
+**Qué descuenta saldo** (`ESTADOS_CONFIRMADOS`): `auto`, `aceptado` y
+`modificado`. Quedan fuera `pendiente` y `rechazado`.
+
+`auto` es lo que emiten los nodos del motor (`01_exacta.js`, `02_difusa.js`,
+`03_ia.js` por encima de `umbral_confianza_auto`) y **cuenta**: exigir un clic
+humano en cada match exacto vaciaría de sentido el producto. Una sugerencia
+`pendiente` **no cobra nada** hasta que alguien la aprueba.
+
+⚠️ Esta lista se lee del enum `EstadoRevision` y de los nodos de n8n, nunca se
+deduce de los nombres: la primera versión omitió `auto` y dejó 29 de 33 pares
+conciliados sin descontar saldo. `manual` es un **método**, no un estado.
 
 ## Período de prueba (30 días)
 

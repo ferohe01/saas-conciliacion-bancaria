@@ -13,16 +13,33 @@ const reg = (id: string, monto: number, comprobante_id?: string | null) => ({
 const mov = (id: string, monto: number) => ({ id_movimiento: id, monto });
 
 describe("estaConfirmado", () => {
-  it("solo cuenta lo que una persona confirmó", () => {
-    expect(estaConfirmado({ ids_internos: [], ids_movimientos: [], estado_revision: "aceptado" })).toBe(true);
-    expect(estaConfirmado({ ids_internos: [], ids_movimientos: [], estado_revision: "modificado" })).toBe(true);
-    expect(estaConfirmado({ ids_internos: [], ids_movimientos: [], estado_revision: "manual" })).toBe(true);
+  const m = (estado_revision?: string) => ({
+    ids_internos: [],
+    ids_movimientos: [],
+    estado_revision,
   });
 
-  it("una sugerencia pendiente NO cobra nada", () => {
-    expect(estaConfirmado({ ids_internos: [], ids_movimientos: [], estado_revision: "pendiente" })).toBe(false);
-    expect(estaConfirmado({ ids_internos: [], ids_movimientos: [], estado_revision: "rechazado" })).toBe(false);
-    expect(estaConfirmado({ ids_internos: [], ids_movimientos: [] })).toBe(false);
+  it("las conciliaciones AUTOMATICAS del motor cuentan", () => {
+    // 'auto' es lo que emiten 01_exacta, 02_difusa y 03_ia por encima del
+    // umbral. Omitirlo dejaba 29 de 33 pares sin descontar saldo.
+    expect(estaConfirmado(m("auto"))).toBe(true);
+  });
+
+  it("lo que una persona confirmo cuenta", () => {
+    expect(estaConfirmado(m("aceptado"))).toBe(true);
+    expect(estaConfirmado(m("modificado"))).toBe(true);
+  });
+
+  it("lo pendiente y lo rechazado NO cobran nada", () => {
+    expect(estaConfirmado(m("pendiente"))).toBe(false);
+    expect(estaConfirmado(m("rechazado"))).toBe(false);
+    expect(estaConfirmado(m())).toBe(false);
+  });
+
+  it("un estado inventado no concede cobro", () => {
+    // 'manual' es un METODO, no un estado de revision. La primera version lo
+    // incluia por error.
+    expect(estaConfirmado(m("manual"))).toBe(false);
   });
 });
 
@@ -97,6 +114,14 @@ describe("calcularAplicaciones", () => {
       { ids_internos: ["REG-1"], ids_movimientos: ["MOV-1"], estado_revision: "aceptado" },
     ];
     expect(calcularAplicaciones(m, [reg("REG-1", 500, null)], [mov("MOV-1", 500)])).toEqual([]);
+  });
+
+  it("un match automatico del motor SI descuenta saldo", () => {
+    const m: MatchLite[] = [
+      { ids_internos: ["REG-1"], ids_movimientos: ["MOV-1"], estado_revision: "auto" },
+    ];
+    const r = calcularAplicaciones(m, [reg("REG-1", 900, "c1")], [mov("MOV-1", 900)]);
+    expect(r[0]!.monto_aplicado).toBe(900);
   });
 
   it("una sugerencia sin revisar no toca ningún saldo", () => {

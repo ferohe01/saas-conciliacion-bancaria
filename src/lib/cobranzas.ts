@@ -33,8 +33,24 @@ export type Aplicacion = {
   monto_aplicado: number;
 };
 
-/** Un match cuenta como cobro solo si una persona lo confirmó. */
-export const ESTADOS_CONFIRMADOS = ["aceptado", "modificado", "manual"] as const;
+/**
+ * Estados en los que un emparejamiento **se sostiene** y por tanto descuenta
+ * saldo. Los valores son los de `EstadoRevision` del contrato.
+ *
+ *  - `auto`: lo concilió el motor dentro de las tolerancias de la empresa
+ *    (exacta, difusa, o IA por encima de `umbral_confianza_auto`). Cuenta:
+ *    exigir un clic humano en cada match exacto vaciaría de sentido el
+ *    producto — la conciliación automática ES la función.
+ *  - `aceptado` / `modificado`: una persona lo confirmó.
+ *
+ * Fuera quedan `pendiente` (espera criterio humano) y `rechazado` (lo negó).
+ *
+ * ⚠️ Esta lista se leyó del enum y se verificó contra lo que emiten los nodos
+ * de n8n (`01_exacta.js`, `02_difusa.js`, `03_ia.js`). La primera versión la
+ * dedujo de los nombres y omitió `auto`: el resultado fue que 29 de 33 pares
+ * conciliados no descontaban nada.
+ */
+export const ESTADOS_CONFIRMADOS = ["auto", "aceptado", "modificado"] as const;
 
 export function estaConfirmado(m: MatchLite): boolean {
   return (ESTADOS_CONFIRMADOS as readonly string[]).includes(
