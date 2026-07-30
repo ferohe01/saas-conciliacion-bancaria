@@ -52,7 +52,7 @@ archivo estaba **rastreado por git** desde el primer commit.
 
 | Dato | Valor |
 |---|---|
-| Commits afectados | `763e899` (2026-07-24), `25f2ef3`, `ea59697` |
+| Commits afectados | 3, entre el 2026-07-24 y el 2026-07-25 |
 | Rama | `origin/master` — **pusheado** |
 | Repo | `github.com/ferohe01/saas-conciliacion-bancaria` — **público** |
 | Clave filtrada | `SUPABASE_SERVICE_ROLE_KEY`, **idéntica a la que está en uso** |
@@ -195,7 +195,8 @@ mantienen su copia, y los bots que rastrean GitHub buscando claves ya tuvieron
 seis días para encontrarla. Rotar es lo que corta el acceso; reescribir es
 higiene posterior y opcional.
 
-Si se hace, reescribe todos los SHA a partir de `763e899` — coordinarlo si hay
+Si se hace, reescribe todos los SHA a partir del primer commit afectado
+(localizarlo con `git log -S` sobre la clave) — coordinarlo si hay
 más de un clon del repo.
 
 ## Revisión forense (paso 6, hecha el 2026-07-31)
