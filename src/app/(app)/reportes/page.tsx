@@ -28,6 +28,7 @@ type CuentaJoin = {
 type JobRaw = {
   id: string;
   periodo_desde: string;
+  periodo_hasta: string;
   estado: string;
   cuenta_id: string;
   created_at: string;
@@ -60,7 +61,7 @@ export default async function ReportesPage({
       supabase
         .from("jobs_conciliacion")
         .select(
-          "id, periodo_desde, estado, cuenta_id, created_at, resultado, cuentas_bancarias(banco, numero_enmascarado)",
+          "id, periodo_desde, periodo_hasta, estado, cuenta_id, created_at, resultado, cuentas_bancarias(banco, numero_enmascarado)",
         )
         .eq("estado", "completado")
         .order("periodo_desde", { ascending: false }),
@@ -101,6 +102,8 @@ export default async function ReportesPage({
       id: j.id,
       anio: Number(j.periodo_desde.slice(0, 4)),
       mes: Number(j.periodo_desde.slice(5, 7)),
+      periodoDesde: j.periodo_desde,
+      periodoHasta: j.periodo_hasta,
       banco,
       cuentaId: j.cuenta_id,
       numero,

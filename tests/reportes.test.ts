@@ -30,6 +30,8 @@ const jobs: JobReporte[] = [
     id: "j1",
     anio: 2026,
     mes: 6,
+    periodoDesde: "2026-06-01",
+    periodoHasta: "2026-06-30",
     banco: "BCP",
     cuentaId: "c1",
     numero: "****1",
@@ -41,6 +43,8 @@ const jobs: JobReporte[] = [
     id: "j2",
     anio: 2026,
     mes: 7,
+    periodoDesde: "2026-07-01",
+    periodoHasta: "2026-07-31",
     banco: "BBVA",
     cuentaId: "c2",
     numero: "****2",
@@ -52,6 +56,8 @@ const jobs: JobReporte[] = [
     id: "j3",
     anio: 2025,
     mes: 6,
+    periodoDesde: "2025-06-01",
+    periodoHasta: "2025-06-30",
     banco: "BCP",
     cuentaId: "c1",
     numero: "****1",
@@ -77,6 +83,62 @@ describe("deduplicarUltimoPorPeriodo", () => {
 
   it("no colapsa períodos o cuentas distintas", () => {
     expect(deduplicarUltimoPorPeriodo(jobs)).toHaveLength(3);
+  });
+
+  // Regresión: la clave era `cuenta|año|mes`, así que tres cortes del mismo
+  // julio colapsaban en uno solo y los totales del mes salían falsos.
+  it("conserva los cortes parciales de un mismo mes", () => {
+    const base = jobs[1]!;
+    const cortes: JobReporte[] = [
+      {
+        ...base,
+        id: "corte-1",
+        periodoDesde: "2026-07-01",
+        periodoHasta: "2026-07-10",
+        resumen: resumen({ total_internos: 20, conciliados_exactos: 20 }),
+        createdAt: "2026-07-11T10:00:00.000Z",
+      },
+      {
+        ...base,
+        id: "corte-2",
+        periodoDesde: "2026-07-11",
+        periodoHasta: "2026-07-20",
+        resumen: resumen({ total_internos: 30, conciliados_exactos: 30 }),
+        createdAt: "2026-07-21T10:00:00.000Z",
+      },
+      {
+        ...base,
+        id: "corte-3",
+        periodoDesde: "2026-07-21",
+        periodoHasta: "2026-07-31",
+        resumen: resumen({ total_internos: 50, conciliados_exactos: 50 }),
+        createdAt: "2026-08-01T10:00:00.000Z",
+      },
+    ];
+    const dedup = deduplicarUltimoPorPeriodo(cortes);
+    expect(dedup).toHaveLength(3);
+    // Los tres cortes suman el mes entero: 100, no solo los 50 del último.
+    expect(calcularKpis(dedup).registros).toBe(100);
+  });
+
+  it("sigue colapsando reprocesos del mismo corte", () => {
+    const base = jobs[1]!;
+    const corte = { ...base, periodoDesde: "2026-07-01", periodoHasta: "2026-07-10" };
+    const dedup = deduplicarUltimoPorPeriodo([
+      { ...corte, id: "v1", createdAt: "2026-07-11T10:00:00.000Z" },
+      { ...corte, id: "v2", createdAt: "2026-07-12T10:00:00.000Z" }, // reproceso
+    ]);
+    expect(dedup).toHaveLength(1);
+    expect(dedup[0]!.id).toBe("v2");
+  });
+
+  it("no confunde el mismo rango en cuentas distintas", () => {
+    const base = jobs[1]!;
+    const dedup = deduplicarUltimoPorPeriodo([
+      { ...base, id: "a", cuentaId: "c1" },
+      { ...base, id: "b", cuentaId: "c2" },
+    ]);
+    expect(dedup).toHaveLength(2);
   });
 });
 

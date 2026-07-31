@@ -19,7 +19,9 @@ export type ResumenJob = {
 export type JobReporte = {
   id: string;
   anio: number;
-  mes: number; // 1..12
+  mes: number; // 1..12, derivado de periodoDesde (para la tendencia mensual)
+  periodoDesde: string; // ISO YYYY-MM-DD — el rango real conciliado
+  periodoHasta: string; // ISO YYYY-MM-DD
   banco: string;
   cuentaId: string;
   numero: string | null;
@@ -30,14 +32,23 @@ export type JobReporte = {
 };
 
 /**
- * Deduplica: una conciliación es "por período + cuenta". Si se re-corrió el
- * mismo período+cuenta, se conserva SOLO la más reciente (la definitiva), para
- * que el reporte no sume corridas repetidas. El historial sí conserva todas.
+ * Deduplica corridas repetidas: si el MISMO rango de la MISMA cuenta se
+ * concilió varias veces, se conserva solo la más reciente. El historial en
+ * /conciliacion sí las conserva todas.
+ *
+ * ⚠️ La clave es el rango exacto (`periodoDesde`–`periodoHasta`), NO el mes.
+ * Agrupar por mes parecía equivalente mientras cada mes se conciliaba de una
+ * sola vez, pero descarta silenciosamente los cortes parciales: con julio
+ * dividido en 1–10, 11–20 y 21–31, sobrevivía únicamente el último corte y los
+ * totales del mes salían falsos, no incompletos.
+ *
+ * Dos corridas del mismo rango siguen colapsando en una, que es justo lo que
+ * evita contar dos veces un período reprocesado.
  */
 export function deduplicarUltimoPorPeriodo(jobs: JobReporte[]): JobReporte[] {
   const porClave = new Map<string, JobReporte>();
   for (const j of jobs) {
-    const clave = `${j.cuentaId}|${j.anio}|${j.mes}`;
+    const clave = `${j.cuentaId}|${j.periodoDesde}|${j.periodoHasta}`;
     const previo = porClave.get(clave);
     if (!previo || j.createdAt > previo.createdAt) porClave.set(clave, j);
   }

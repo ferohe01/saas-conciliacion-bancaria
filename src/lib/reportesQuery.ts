@@ -40,7 +40,7 @@ export async function cargarReporteDetalle(): Promise<{
   const { data } = await supabase
     .from("jobs_conciliacion")
     .select(
-      "id, periodo_desde, cuenta_id, created_at, resultado, payload_entrada, cuentas_bancarias(banco, numero_enmascarado, moneda)",
+      "id, periodo_desde, periodo_hasta, cuenta_id, created_at, resultado, payload_entrada, cuentas_bancarias(banco, numero_enmascarado, moneda)",
     )
     .eq("estado", "completado")
     .order("periodo_desde", { ascending: false });
@@ -51,6 +51,7 @@ export async function cargarReporteDetalle(): Promise<{
   for (const j of (data ?? []) as Array<{
     id: string;
     periodo_desde: string;
+    periodo_hasta: string;
     cuenta_id: string;
     created_at: string;
     resultado: (ResultadoConciliacion & { resumen?: ResumenJob }) | null;
@@ -67,6 +68,8 @@ export async function cargarReporteDetalle(): Promise<{
       id: j.id,
       anio: Number(j.periodo_desde.slice(0, 4)),
       mes: Number(j.periodo_desde.slice(5, 7)),
+      periodoDesde: j.periodo_desde,
+      periodoHasta: j.periodo_hasta,
       banco,
       cuentaId: j.cuenta_id,
       numero,

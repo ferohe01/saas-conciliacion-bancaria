@@ -107,6 +107,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ job_id: activo.id, idempotente: true });
   }
 
+  // Versión: cuántas veces se ha corrido ya este mismo cuenta+rango. La corrida
+  // anterior (si la hay) queda como origen, para poder seguir la trazabilidad
+  // de un reproceso hasta la conciliación de la que salió.
+  const { data: previas } = await admin
+    .from("jobs_conciliacion")
+    .select("id, version")
+    .eq("empresa_id", empresa.empresa_id)
+    .eq("cuenta_id", req.cuenta_id)
+    .eq("periodo_desde", req.periodo.desde)
+    .eq("periodo_hasta", req.periodo.hasta)
+    .order("version", { ascending: false })
+    .limit(1);
+  const anterior = previas?.[0] ?? null;
+  const version = (anterior?.version ?? 0) + 1;
+
   const jobId = generarJobId(req.periodo.desde);
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
@@ -162,6 +177,14 @@ export async function POST(request: Request) {
     periodo_desde: req.periodo.desde,
     periodo_hasta: req.periodo.hasta,
     estado: "pendiente",
+    // Nace como borrador: aprobarla es un acto humano posterior (Fase B).
+    estado_contable: "borrador",
+    version,
+    conciliacion_origen_id: anterior?.id ?? null,
+    // Se promueven a columna para poder validar que un corte encadene con el
+    // anterior; dentro del JSONB del payload no son consultables.
+    saldo_inicial_banco: req.saldos?.saldo_extracto_inicial ?? null,
+    saldo_final_banco: req.saldos?.saldo_extracto_final ?? null,
     payload_entrada: validado.data,
   });
   if (insError) {
