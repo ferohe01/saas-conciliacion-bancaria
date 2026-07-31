@@ -105,6 +105,12 @@ export async function guardarMapeoCuenta(
 /**
  * Registros internos desde la tabla `comprobantes` para el período, ya en forma
  * canónica RegistroInterno (fuente "Usar mis comprobantes registrados").
+ *
+ * ⚠️ Deja fuera lo que ya está cobrado y lo anulado. Un comprobante saldado no
+ * es materia de conciliación: volver a ofrecerlo lleva a conciliarlo por
+ * segunda vez desde otra cuenta bancaria del mismo período —algo que el sistema
+ * permite a propósito, porque son extractos distintos— y a descontar su importe
+ * dos veces. Lo que ya se cobró no vuelve a la mesa.
  */
 export async function getComprobantesCanonicos(
   desde: string,
@@ -114,10 +120,11 @@ export async function getComprobantesCanonicos(
   const { data } = await supabase
     .from("comprobantes")
     .select(
-      "id, fecha, monto, tipo, serie_numero, ruc_contraparte, razon_social_contraparte, descripcion",
+      "id, fecha, monto, saldo, tipo, estado, serie_numero, ruc_contraparte, razon_social_contraparte, descripcion",
     )
     .gte("fecha", desde)
     .lte("fecha", hasta)
+    .not("estado", "in", "(cobrado,anulado)")
     .order("fecha", { ascending: true });
 
   const filas = data ?? [];

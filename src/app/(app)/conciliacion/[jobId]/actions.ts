@@ -93,6 +93,49 @@ async function guardar(jobId: string, resultado: ResultadoConciliacion) {
  * Un fallo aquí NO tumba la decisión humana, que ya está guardada y es lo
  * irreemplazable; se registra para poder reconstruirlo.
  */
+/**
+ * Cuánto le queda por cobrar a cada comprobante del payload, descontando lo que
+ * han aplicado OTROS jobs y no este.
+ *
+ * Se calcula sobre el importe del comprobante y no sobre su columna `saldo`
+ * porque el saldo ya incluye las aplicaciones de este mismo job, que están a
+ * punto de borrarse y rehacerse.
+ */
+async function disponiblePorComprobante(
+  jobId: string,
+  registros: RegistroPayload[],
+): Promise<Map<string, number>> {
+  const ids = [...new Set(registros.map((r) => r.comprobante_id).filter(Boolean))];
+  const disponible = new Map<string, number>();
+  if (ids.length === 0) return disponible;
+
+  const admin = createAdminClient();
+  const [{ data: comps }, { data: otras }] = await Promise.all([
+    admin.from("comprobantes").select("id, monto").in("id", ids as string[]),
+    admin
+      .from("aplicaciones_cobro")
+      .select("comprobante_id, monto_aplicado")
+      .in("comprobante_id", ids as string[])
+      .neq("job_id", jobId),
+  ]);
+
+  const aplicadoPorOtros = new Map<string, number>();
+  for (const a of otras ?? []) {
+    const id = a.comprobante_id as string;
+    aplicadoPorOtros.set(
+      id,
+      (aplicadoPorOtros.get(id) ?? 0) + Number(a.monto_aplicado ?? 0),
+    );
+  }
+
+  for (const c of comps ?? []) {
+    const id = c.id as string;
+    const importe = Math.abs(Number(c.monto ?? 0));
+    disponible.set(id, Math.max(0, importe - (aplicadoPorOtros.get(id) ?? 0)));
+  }
+  return disponible;
+}
+
 async function sincronizarCobranzas(
   jobId: string,
   resultado: ResultadoConciliacion,
@@ -123,6 +166,14 @@ async function sincronizarCobranzas(
     // hay nada que actualizar.
     if (!payload.registros_internos.some((r) => r.comprobante_id)) return;
 
+    // Cuánto le queda por cobrar a cada comprobante, SIN contar lo que aplicó
+    // este mismo job: sus aplicaciones se borran y se rehacen unas líneas más
+    // abajo, así que contarlas dejaría la segunda pasada sin nada que aplicar.
+    const disponible = await disponiblePorComprobante(
+      jobId,
+      payload.registros_internos,
+    );
+
     // Las tolerancias van con el job, no las actuales de la empresa: si mañana
     // las cambian, lo ya conciliado no debe reinterpretarse solo.
     const aplicaciones = calcularAplicaciones(
@@ -130,6 +181,7 @@ async function sincronizarCobranzas(
       payload.registros_internos,
       payload.movimientos_bancarios ?? [],
       payload.config ?? {},
+      disponible,
     );
 
     await admin.from("aplicaciones_cobro").delete().eq("job_id", jobId);

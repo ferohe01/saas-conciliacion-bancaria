@@ -239,3 +239,68 @@ describe("diferencias absorbidas (comisión, redondeo)", () => {
     expect(r[0]!.monto_aplicado).toBe(50000);
   });
 });
+
+describe("tope por saldo disponible (doble descuento)", () => {
+  const match: MatchLite = {
+    ids_internos: ["REG-1"],
+    ids_movimientos: ["MOV-1"],
+    estado_revision: "aceptado",
+  };
+  const registros = [reg("REG-1", 1000, "comp-1")];
+  const movimientos = [mov("MOV-1", 1000)];
+
+  it("sin mapa de disponibles aplica el importe completo (comportamiento previo)", () => {
+    const r = calcularAplicaciones(match ? [match] : [], registros, movimientos, {});
+    expect(r[0]!.monto_aplicado).toBe(1000);
+  });
+
+  /*
+   * El caso que motivó el arreglo: la misma factura conciliada desde dos
+   * cuentas bancarias distintas en el mismo período. Ambas conciliaciones
+   * pueden estar aprobadas a la vez —son extractos distintos— y antes cada una
+   * descontaba el importe COMPLETO, dejando el saldo en negativo sin avisar.
+   */
+  it("una factura ya cobrada por otro job no recibe nada", () => {
+    const r = calcularAplicaciones(
+      [match],
+      registros,
+      movimientos,
+      {},
+      new Map([["comp-1", 0]]),
+    );
+    expect(r).toHaveLength(0);
+  });
+
+  it("si le queda menos de lo que entró, se aplica solo lo que le queda", () => {
+    const r = calcularAplicaciones(
+      [match],
+      registros,
+      movimientos,
+      {},
+      new Map([["comp-1", 300]]),
+    );
+    expect(r).toHaveLength(1);
+    expect(r[0]!.monto_aplicado).toBe(300);
+  });
+
+  it("dos matches del mismo job no se pasan entre los dos", () => {
+    const dos: MatchLite[] = [
+      { ids_internos: ["REG-1"], ids_movimientos: ["MOV-1"], estado_revision: "aceptado" },
+      { ids_internos: ["REG-2"], ids_movimientos: ["MOV-2"], estado_revision: "aceptado" },
+    ];
+    const r = calcularAplicaciones(
+      dos,
+      [reg("REG-1", 600, "comp-1"), reg("REG-2", 600, "comp-1")],
+      [mov("MOV-1", 600), mov("MOV-2", 600)],
+      {},
+      new Map([["comp-1", 1000]]),
+    );
+    const total = r.reduce((s, a) => s + a.monto_aplicado, 0);
+    expect(total).toBe(1000); // 600 + 400, no 1200
+  });
+
+  it("un comprobante que no está en el mapa no recibe nada", () => {
+    const r = calcularAplicaciones([match], registros, movimientos, {}, new Map());
+    expect(r).toHaveLength(0);
+  });
+});

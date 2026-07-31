@@ -134,6 +134,8 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
     suma: number;
     /** Total cargado en la empresa, sin filtrar por período. */
     totalCargados: number;
+    /** Del período, pero ya saldados: no entran a conciliar. */
+    yaCobrados: number;
   } | null>(null);
   const [recargaComprobantes, setRecargaComprobantes] = useState(0);
 
@@ -185,16 +187,28 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
       // comprobantes y en el período caen 2, decir solo "2 registros" parece
       // que se perdieron los otros. Saber que existen fuera del período evita
       // esa alarma —y también avisa de que quizá eligió el mes equivocado.
-      const [{ data }, { count: total }] = await Promise.all([
-        supabase
-          .from("comprobantes")
-          .select("monto")
-          .gte("fecha", periodo.desde)
-          .lte("fecha", periodo.hasta),
-        supabase
-          .from("comprobantes")
-          .select("id", { count: "exact", head: true }),
-      ]);
+      const [{ data }, { count: total }, { count: yaCobrados }] =
+        await Promise.all([
+          // Mismo criterio que `getComprobantesCanonicos`: lo saldado y lo
+          // anulado no entra, así que tampoco debe contarse aquí.
+          supabase
+            .from("comprobantes")
+            .select("monto")
+            .gte("fecha", periodo.desde)
+            .lte("fecha", periodo.hasta)
+            .not("estado", "in", "(cobrado,anulado)"),
+          supabase
+            .from("comprobantes")
+            .select("id", { count: "exact", head: true }),
+          // Los que caen en el período pero ya se cobraron: hay que decir que
+          // se dejan fuera, o parecerá que faltan.
+          supabase
+            .from("comprobantes")
+            .select("id", { count: "exact", head: true })
+            .gte("fecha", periodo.desde)
+            .lte("fecha", periodo.hasta)
+            .eq("estado", "cobrado"),
+        ]);
       if (cancelado) return;
       const filas = data ?? [];
       const suma = filas.reduce(
@@ -205,6 +219,7 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
         registros: filas.length,
         suma,
         totalCargados: total ?? filas.length,
+        yaCobrados: yaCobrados ?? 0,
       });
     })();
     return () => {
@@ -561,6 +576,21 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
                           </span>{" "}
                           comprobantes cargados en total; el resto es de otros
                           períodos. Cambia el mes si buscabas esos.
+                        </p>
+                      )}
+                      {/* Lo ya cobrado se queda fuera a propósito. Callarlo
+                          haría pensar que faltan facturas; decirlo convierte
+                          una ausencia sospechosa en una decisión entendible. */}
+                      {comprobantesResumen.yaCobrados > 0 && (
+                        <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                          <span className="font-medium tabular-nums">
+                            {comprobantesResumen.yaCobrados.toLocaleString("es-PE")}
+                          </span>{" "}
+                          {comprobantesResumen.yaCobrados === 1
+                            ? "comprobante de este período ya está cobrado y no entra"
+                            : "comprobantes de este período ya están cobrados y no entran"}
+                          : se conciliaron antes. Así no se descuenta su saldo
+                          dos veces.
                         </p>
                       )}
                     </>

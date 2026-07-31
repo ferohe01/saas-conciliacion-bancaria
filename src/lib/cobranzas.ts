@@ -98,16 +98,36 @@ const redondear = (n: number) => Math.round(n * 100) / 100;
  *
  * El factor se limita a 1: si entró de más (una comisión a favor, un redondeo)
  * no se le "cobra" a la factura más de lo que vale.
+ *
+ * **Tope por saldo disponible (`disponiblePorComprobante`).** Un comprobante no
+ * puede recibir más de lo que le queda por cobrar. Sin este tope, la misma
+ * factura conciliada desde dos cuentas bancarias distintas en el mismo período
+ * —algo que el sistema permite a propósito, porque son extractos distintos—
+ * descontaba su importe COMPLETO dos veces y dejaba el saldo en negativo, sin
+ * avisar a nadie.
+ *
+ * El disponible se calcula EXCLUYENDO lo que aplicó este mismo job: al
+ * resincronizar sus decisiones, sus propias aplicaciones se borran y se
+ * rehacen, así que contarlas haría que la segunda pasada no aplicara nada.
+ * Si no se pasa el mapa, no se topa: quien no sabe el saldo no puede acotarlo,
+ * y los tests de reparto puro no tienen por qué conocerlo.
  */
 export function calcularAplicaciones(
   matches: MatchLite[],
   registros: RegistroPayload[],
   movimientos: MovimientoPayload[],
   tolerancias: ToleranciasLite = {},
+  disponiblePorComprobante?: ReadonlyMap<string, number>,
 ): Aplicacion[] {
   const porRegistro = new Map(registros.map((r) => [r.id_interno, r]));
   const porMovimiento = new Map(movimientos.map((m) => [m.id_movimiento, m]));
   const salida: Aplicacion[] = [];
+
+  // Se va descontando conforme se aplica: dos matches del mismo job que tocan
+  // la misma factura no pueden pasarse entre los dos.
+  const restante = disponiblePorComprobante
+    ? new Map(disponiblePorComprobante)
+    : null;
 
   for (const m of matches) {
     if (!estaConfirmado(m)) continue;
@@ -157,10 +177,19 @@ export function calcularAplicaciones(
     const clave = [...m.ids_movimientos].sort().join("+") || "sin-movimiento";
 
     for (const r of regs) {
-      const monto = redondear(abs(r.monto) * factor);
+      const id = r.comprobante_id!;
+      let monto = redondear(abs(r.monto) * factor);
+
+      if (restante) {
+        const queda = redondear(restante.get(id) ?? 0);
+        if (queda <= 0) continue; // ya está cobrado: no se le aplica nada
+        if (monto > queda) monto = queda;
+        restante.set(id, redondear(queda - monto));
+      }
+
       if (monto <= 0) continue;
       salida.push({
-        comprobante_id: r.comprobante_id!,
+        comprobante_id: id,
         id_movimiento: clave,
         monto_aplicado: monto,
       });
