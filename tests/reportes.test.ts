@@ -6,6 +6,7 @@ import {
   porMes,
   porBanco,
   deduplicarUltimoPorPeriodo,
+  enFocoDelFiltro,
   contarCategorias,
   porTipoDiferencia,
   type JobReporte,
@@ -214,5 +215,52 @@ describe("porMes y porBanco", () => {
     expect(filas).toHaveLength(2);
     expect(filas[0]!.banco).toBe("BCP"); // 100 > 50
     expect(filas[0]!.registros).toBe(100);
+  });
+});
+
+describe("enFocoDelFiltro", () => {
+  const bancos = new Map([
+    ["c1", "BCP"],
+    ["c2", "BBVA"],
+  ]);
+  const filas = [
+    { id: "a", periodo_desde: "2026-07-01", cuenta_id: "c1" },
+    { id: "b", periodo_desde: "2026-07-15", cuenta_id: "c2" },
+    { id: "c", periodo_desde: "2026-08-01", cuenta_id: "c1" },
+    { id: "d", periodo_desde: "2025-07-01", cuenta_id: "c1" },
+  ];
+  const todo = { anio: 2026, mes: "todos", banco: "todos", cuentaId: "todos" } as const;
+
+  it("acota por año", () => {
+    expect(enFocoDelFiltro(filas, todo, bancos).map((f) => f.id)).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+  });
+
+  it("acota por mes", () => {
+    const r = enFocoDelFiltro(filas, { ...todo, mes: 7 }, bancos);
+    expect(r.map((f) => f.id)).toEqual(["a", "b"]);
+  });
+
+  it("acota por cuenta y por banco", () => {
+    expect(
+      enFocoDelFiltro(filas, { ...todo, cuentaId: "c2" }, bancos).map((f) => f.id),
+    ).toEqual(["b"]);
+    expect(
+      enFocoDelFiltro(filas, { ...todo, banco: "BBVA" }, bancos).map((f) => f.id),
+    ).toEqual(["b"]);
+  });
+
+  // El bug reportado: al elegir una cuenta sin conciliaciones, el panel seguía
+  // anunciando las sugerencias pendientes de otra cuenta.
+  it("una cuenta sin conciliaciones en el período no arrastra nada", () => {
+    const r = enFocoDelFiltro(
+      filas,
+      { anio: 2026, mes: 8, banco: "todos", cuentaId: "c2" },
+      bancos,
+    );
+    expect(r).toHaveLength(0);
   });
 });

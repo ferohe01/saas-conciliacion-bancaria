@@ -62,6 +62,38 @@ export type FiltroReporte = {
   cuentaId: string | "todos";
 };
 
+/**
+ * Aplica el filtro del panel a filas de job SIN normalizar a `JobReporte`.
+ *
+ * `filtrarAnual`/`filtrarMes` solo sirven para lo ya agregado, que en el panel
+ * son únicamente las conciliaciones aprobadas. Pero el panel también muestra
+ * trabajo pendiente y actividad reciente, que viven en las NO aprobadas, y eso
+ * quedaba fuera de todo filtro: elegir una cuenta sin conciliaciones seguía
+ * anunciando "12 sugerencias esperan tu revisión" de otra cuenta distinta.
+ */
+export function enFocoDelFiltro<
+  T extends { periodo_desde: string; cuenta_id: string },
+>(
+  jobs: readonly T[],
+  filtro: FiltroReporte,
+  bancoDeCuenta: ReadonlyMap<string, string>,
+): T[] {
+  return jobs.filter((j) => {
+    if (Number(j.periodo_desde.slice(0, 4)) !== filtro.anio) return false;
+    if (filtro.mes !== "todos" && Number(j.periodo_desde.slice(5, 7)) !== filtro.mes) {
+      return false;
+    }
+    if (filtro.cuentaId !== "todos" && j.cuenta_id !== filtro.cuentaId) return false;
+    if (
+      filtro.banco !== "todos" &&
+      bancoDeCuenta.get(j.cuenta_id) !== filtro.banco
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
 // Colores categóricos (Okabe-Ito, validados para daltonismo).
 export const COLOR_METODO = {
   exacta: "#009E73",

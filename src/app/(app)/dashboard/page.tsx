@@ -33,6 +33,7 @@ import {
   porMes,
   filtrarAnual,
   filtrarMes,
+  enFocoDelFiltro,
   deduplicarUltimoPorPeriodo,
   COLOR_METODO,
   type JobReporte,
@@ -63,6 +64,8 @@ type JobRaw = {
 type JobDash = {
   id: string;
   estado: string;
+  estado_contable: string | null;
+  cuenta_id: string;
   periodo_desde: string;
   periodo_hasta: string;
   resultado: {
@@ -300,11 +303,19 @@ export default async function DashboardPage({
       )
       .eq("estado", "completado")
       .eq("estado_contable", "aprobada"),
+    // Actividad reciente y trabajo pendiente. Se traen más de las que se
+    // muestran porque hay que filtrarlas por período y cuenta después: quedarse
+    // con 6 antes de filtrar dejaba fuera conciliaciones que sí encajan.
+    // Las terminales no entran: revisar sugerencias de una conciliación anulada
+    // o reemplazada no es trabajo pendiente.
     supabase
       .from("jobs_conciliacion")
-      .select("id, estado, periodo_desde, periodo_hasta, resultado")
+      .select(
+        "id, estado, estado_contable, cuenta_id, periodo_desde, periodo_hasta, resultado",
+      )
+      .not("estado_contable", "in", "(anulada,reemplazada)")
       .order("created_at", { ascending: false })
-      .limit(6),
+      .limit(60),
     supabase.from("cuentas_bancarias").select("id", { count: "exact", head: true }),
     supabase
       .from("cuentas_bancarias")
@@ -381,18 +392,30 @@ export default async function DashboardPage({
     kpis.metodos.ia +
     kpis.metodos.sin_conciliar;
 
-  const recientes = (recientesData ?? []) as JobDash[];
   const sinCuentas = (numCuentas ?? 0) === 0;
 
+  // El filtro tiene que alcanzar a TODO lo que hay en la página, no solo a las
+  // cifras agregadas. Cuando no lo hacía, elegir una cuenta sin conciliaciones
+  // seguía anunciando las sugerencias pendientes de otra cuenta: el panel decía
+  // que había trabajo justo donde no lo había.
+  const bancoDeCuenta = new Map(cuentas.map((c) => [c.id, c.banco]));
+  const enFoco = enFocoDelFiltro(
+    (recientesData ?? []) as JobDash[],
+    { anio, mes, banco: bancoSel, cuentaId: cuentaSel },
+    bancoDeCuenta,
+  );
+
+  const recientes = enFoco.slice(0, 6);
+
   // Lo único que de verdad reclama a la persona: sugerencias sin criterio.
-  const porRevisar = recientes.reduce(
+  const porRevisar = enFoco.reduce(
     (acc, j) =>
       acc +
       (j.resultado?.matches ?? []).filter((m) => m.estado_revision === "pendiente")
         .length,
     0,
   );
-  const jobConPendientes = recientes.find((j) =>
+  const jobConPendientes = enFoco.find((j) =>
     (j.resultado?.matches ?? []).some((m) => m.estado_revision === "pendiente"),
   );
 
@@ -483,6 +506,16 @@ export default async function DashboardPage({
           cuenta: cuentaSel,
         }}
       />
+
+      {/* Un recorte vacío enseñado como ceros se lee como "no tienes nada",
+          no como "no hay nada aquí". Hay que decir cuál de las dos es. */}
+      {enFoco.length === 0 && jobsDef.length === 0 && (
+        <p className="rounded-2xl border border-neutral-200 bg-white px-5 py-4 text-sm text-neutral-600">
+          No hay conciliaciones para este recorte
+          {hayFiltroFino ? "" : ` del ejercicio ${anio}`}. Prueba con otro
+          período o cuenta{hayFiltroFino ? ", o quita los filtros" : ""}.
+        </p>
+      )}
 
       {/* Lo que reclama criterio humano va antes que cualquier métrica. */}
       {porRevisar > 0 && jobConPendientes && (
