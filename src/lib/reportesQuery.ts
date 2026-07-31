@@ -43,6 +43,7 @@ export async function cargarReporteDetalle(): Promise<{
       "id, periodo_desde, periodo_hasta, cuenta_id, created_at, resultado, payload_entrada, cuentas_bancarias(banco, numero_enmascarado, moneda)",
     )
     .eq("estado", "completado")
+    .eq("estado_contable", "aprobada")
     .order("periodo_desde", { ascending: false });
 
   const jobs: JobReporte[] = [];

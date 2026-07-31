@@ -31,11 +31,16 @@ import {
 import {
   calcularKpis,
   porMes,
+  filtrarAnual,
+  filtrarMes,
   deduplicarUltimoPorPeriodo,
   COLOR_METODO,
   type JobReporte,
   type ResumenJob,
 } from "@/lib/reportes";
+import { FiltrosReporte } from "@/components/reportes/FiltrosReporte";
+import { AvisoSinAprobar } from "@/components/conciliacion/AvisoSinAprobar";
+import { nombreMes } from "@/lib/periodo";
 
 type CuentaJoin =
   | { banco: string }
@@ -259,17 +264,23 @@ function Metodos({
   );
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
+  const sp = await searchParams;
   const empresa = await getEmpresaActual();
   const supabase = await createClient();
-  const anio = new Date().getUTCFullYear();
   const suscripcion = estadoSuscripcion(empresa ?? {});
 
   const [
     { data: histAprend },
-    { data: completadosData },
+    { data: aprobadasData },
     { data: recientesData },
     { count: numCuentas },
+    { data: cuentasData },
+    { count: sinAprobar },
   ] = await Promise.all([
     // Pool de aprendizaje: mismo criterio que el few-shot del backend.
     supabase
@@ -279,20 +290,32 @@ export default async function DashboardPage() {
       .not("resultado", "is", null)
       .order("created_at", { ascending: false })
       .limit(30),
+    // Solo lo APROBADO alimenta las cifras: es la conciliación que rige. Se
+    // traen todos los años para poder ofrecer el selector; el volumen es de
+    // unas pocas decenas de filas por ejercicio.
     supabase
       .from("jobs_conciliacion")
       .select(
         "id, periodo_desde, periodo_hasta, cuenta_id, created_at, resultado, cuentas_bancarias(banco)",
       )
       .eq("estado", "completado")
-      .gte("periodo_desde", `${anio}-01-01`)
-      .lte("periodo_desde", `${anio}-12-31`),
+      .eq("estado_contable", "aprobada"),
     supabase
       .from("jobs_conciliacion")
       .select("id, estado, periodo_desde, periodo_hasta, resultado")
       .order("created_at", { ascending: false })
       .limit(6),
     supabase.from("cuentas_bancarias").select("id", { count: "exact", head: true }),
+    supabase
+      .from("cuentas_bancarias")
+      .select("id, banco, numero_enmascarado")
+      .order("banco"),
+    // Terminadas pero sin aprobar: no cuentan, y hay que decirlo.
+    supabase
+      .from("jobs_conciliacion")
+      .select("id", { count: "exact", head: true })
+      .eq("estado", "completado")
+      .in("estado_contable", ["borrador", "en_proceso", "observada"]),
   ]);
 
   const aprendizaje = resumenAprendizaje(
@@ -301,7 +324,7 @@ export default async function DashboardPage() {
 
   // Normalizar a JobReporte y quedarse con una corrida por período+cuenta.
   const jobs: JobReporte[] = [];
-  for (const j of (completadosData ?? []) as JobRaw[]) {
+  for (const j of (aprobadasData ?? []) as JobRaw[]) {
     const resumen = j.resultado?.resumen;
     if (!resumen) continue;
     const cuenta = Array.isArray(j.cuentas_bancarias)
@@ -321,7 +344,35 @@ export default async function DashboardPage() {
       createdAt: j.created_at,
     });
   }
-  const jobsDef = deduplicarUltimoPorPeriodo(jobs);
+  // Red de seguridad: con el constraint de la 0012 no puede haber dos
+  // aprobadas solapadas, así que aquí ya no debería colapsar nada.
+  const todas = deduplicarUltimoPorPeriodo(jobs);
+
+  const cuentas = (cuentasData ?? []) as {
+    id: string;
+    banco: string;
+    numero_enmascarado: string | null;
+  }[];
+
+  // Opciones y valores del filtro.
+  const aniosSet = new Set(todas.map((j) => j.anio));
+  aniosSet.add(new Date().getUTCFullYear());
+  const anios = [...aniosSet].sort((a, b) => b - a);
+  const bancos = [...new Set(cuentas.map((c) => c.banco))].sort();
+
+  const anio = Number(sp.anio) || anios[0]!;
+  const mes = sp.mes && sp.mes !== "todos" ? Number(sp.mes) : ("todos" as const);
+  const bancoSel = sp.banco ?? "todos";
+  const cuentaSel = sp.cuenta ?? "todos";
+
+  const jobsDef = filtrarMes(
+    filtrarAnual(todas, { anio, banco: bancoSel, cuentaId: cuentaSel }),
+    mes,
+  );
+
+  const hayFiltroFino =
+    mes !== "todos" || bancoSel !== "todos" || cuentaSel !== "todos";
+
   const kpis = calcularKpis(jobsDef);
   const mensual = porMes(jobsDef);
   const totalPartidas =
@@ -379,6 +430,23 @@ export default async function DashboardPage() {
           </h1>
           <p className="mt-1 text-sm text-neutral-600">
             {empresa?.nombre} · ejercicio <span className="tabular-nums">{anio}</span>
+            {hayFiltroFino && (
+              <>
+                {" · "}
+                <span className="font-medium text-neutral-800">
+                  {[
+                    mes !== "todos" ? nombreMes(mes) : null,
+                    bancoSel !== "todos" ? bancoSel : null,
+                    cuentaSel !== "todos"
+                      ? (cuentas.find((c) => c.id === cuentaSel)
+                          ?.numero_enmascarado ?? "cuenta")
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              </>
+            )}
           </p>
           <div className="mt-2">
             <ChipPrueba estado={suscripcion} />
@@ -398,6 +466,23 @@ export default async function DashboardPage() {
       ) : (
         <PruebaPorVencer estado={suscripcion} />
       )}
+
+      {/* Las cifras de abajo solo cuentan lo aprobado. Si hay conciliaciones
+          terminadas sin aprobar, callarlo haría pensar que se perdieron. */}
+      <AvisoSinAprobar cuantas={sinAprobar ?? 0} />
+
+      {/* Elegir qué conciliaciones se están mirando, antes de mirarlas. */}
+      <FiltrosReporte
+        anios={anios}
+        bancos={bancos}
+        cuentas={cuentas}
+        valores={{
+          anio,
+          mes: mes === "todos" ? "todos" : String(mes),
+          banco: bancoSel,
+          cuenta: cuentaSel,
+        }}
+      />
 
       {/* Lo que reclama criterio humano va antes que cualquier métrica. */}
       {porRevisar > 0 && jobConPendientes && (

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { EncabezadoPagina, EstadoVacio, clasesBoton } from "@/components/ui";
 import { FiltrosReporte } from "@/components/reportes/FiltrosReporte";
+import { AvisoSinAprobar } from "@/components/conciliacion/AvisoSinAprobar";
 import { ExportarReporte } from "@/components/reportes/ExportarReporte";
 import { ReporteVista, PanelAprendizaje } from "@/components/reportes/ReporteVista";
 import { resumenAprendizaje } from "@/lib/aprendizaje";
@@ -52,8 +53,12 @@ export default async function ReportesPage({
   const sp = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: cuentasData }, { data: jobsData }, { data: histAprend }] =
-    await Promise.all([
+  const [
+    { data: cuentasData },
+    { data: jobsData },
+    { data: histAprend },
+    { count: sinAprobar },
+  ] = await Promise.all([
       supabase
         .from("cuentas_bancarias")
         .select("id, banco, numero_enmascarado")
@@ -63,7 +68,9 @@ export default async function ReportesPage({
         .select(
           "id, periodo_desde, periodo_hasta, estado, cuenta_id, created_at, resultado, cuentas_bancarias(banco, numero_enmascarado)",
         )
+        // Solo lo APROBADO alimenta el reporte: es la conciliacion que rige.
         .eq("estado", "completado")
+        .eq("estado_contable", "aprobada")
         .order("periodo_desde", { ascending: false }),
       // Pool de aprendizaje: últimos 30 jobs (mismo criterio que usa el backend
       // al armar el few-shot). RLS limita a la empresa del usuario.
@@ -74,6 +81,12 @@ export default async function ReportesPage({
         .not("resultado", "is", null)
         .order("created_at", { ascending: false })
         .limit(30),
+      // Terminadas pero sin aprobar: no cuentan aqui, y hay que decirlo.
+      supabase
+        .from("jobs_conciliacion")
+        .select("id", { count: "exact", head: true })
+        .eq("estado", "completado")
+        .in("estado_contable", ["borrador", "en_proceso", "observada"]),
     ]);
 
   const aprendizaje = resumenAprendizaje(
@@ -194,6 +207,8 @@ export default async function ReportesPage({
       ) : (
         <>
           <PanelAprendizaje ap={aprendizaje} />
+          <AvisoSinAprobar cuantas={sinAprobar ?? 0} />
+
           <FiltrosReporte
             anios={anios}
             bancos={bancos}
