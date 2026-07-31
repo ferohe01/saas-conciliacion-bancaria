@@ -3,6 +3,12 @@ import { ImportadorComprobantes } from "@/components/wizard/ImportadorComprobant
 import { formatearFecha } from "@/lib/parsing/resumen";
 import { montoPEN } from "@/lib/suscripcion";
 import { EncabezadoPagina, EstadoVacio } from "@/components/ui";
+import { FiltrosComprobantes } from "@/components/comprobantes/FiltrosComprobantes";
+import {
+  filtrarComprobantes,
+  filtroDesdeParams,
+  hayFiltroComprobantes,
+} from "@/lib/filtrosComprobantes";
 import { DocumentoIcon } from "@/components/wizard/icons";
 
 /**
@@ -50,7 +56,12 @@ type Fila = {
   razon_social_contraparte: string | null;
 };
 
-export default async function ComprobantesPage() {
+export default async function ComprobantesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
+  const sp = await searchParams;
   const supabase = await createClient(); // RLS: solo la empresa del usuario
   const { data } = await supabase
     .from("comprobantes")
@@ -60,7 +71,14 @@ export default async function ComprobantesPage() {
     .order("fecha", { ascending: false })
     .limit(500);
 
-  const filas = (data ?? []) as Fila[];
+  const todas = (data ?? []) as Fila[];
+
+  const filtro = filtroDesdeParams(sp);
+  const filas = filtrarComprobantes(todas, filtro);
+  const hayFiltro = hayFiltroComprobantes(filtro);
+  const anios = [...new Set(todas.map((c) => Number(String(c.fecha).slice(0, 4))))]
+    .filter((a) => Number.isFinite(a))
+    .sort((a, b) => b - a);
 
   return (
     <div className="space-y-6">
@@ -71,12 +89,21 @@ export default async function ComprobantesPage() {
 
       <ImportadorComprobantes />
 
-      {filas.length === 0 ? (
+      {todas.length > 0 && (
+        <FiltrosComprobantes valores={filtro} anios={anios} />
+      )}
+
+      {todas.length === 0 ? (
         <EstadoVacio
           icono={<DocumentoIcon className="h-6 w-6" />}
           titulo="Todavía no has cargado comprobantes"
           texto="Descarga la plantilla de arriba, llénala con tus cobranzas y pagos, y súbela. Luego podrás conciliar usando estos datos en lugar de un archivo suelto."
         />
+      ) : filas.length === 0 ? (
+        <p className="rounded-2xl border border-neutral-200 bg-white px-5 py-4 text-sm text-neutral-600">
+          Ninguno de tus {todas.length.toLocaleString("es-PE")} comprobantes
+          coincide con este filtro. Prueba a quitar alguno.
+        </p>
       ) : (
         <section
           aria-labelledby="h-lista"
@@ -87,8 +114,10 @@ export default async function ComprobantesPage() {
               Cargados
             </h2>
             <span className="text-sm tabular-nums text-neutral-600">
-              {filas.length} {filas.length === 1 ? "documento" : "documentos"}
-              {filas.length === 500 && " (últimos 500)"}
+              {filas.length.toLocaleString("es-PE")}{" "}
+              {filas.length === 1 ? "documento" : "documentos"}
+              {hayFiltro && ` de ${todas.length.toLocaleString("es-PE")}`}
+              {!hayFiltro && todas.length === 500 && " (últimos 500)"}
             </span>
           </div>
           <div className="overflow-x-auto">

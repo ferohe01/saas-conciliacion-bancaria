@@ -5,13 +5,24 @@ import { buscarModulo } from "@/lib/modulos";
 import { CONTACTO_SUSCRIPCION, montoPEN } from "@/lib/suscripcion";
 import { calcularAging, type ComprobanteCobrar } from "@/lib/aging";
 import { VistaAging } from "@/components/app/VistaAging";
+import { FiltrosSaldo } from "@/components/comprobantes/FiltrosSaldo";
+import {
+  filtrarSaldo,
+  filtroSaldoDesdeParams,
+  hayFiltroSaldo,
+} from "@/lib/filtrosSaldo";
 import { EncabezadoPagina, EstadoVacio, clasesBoton } from "@/components/ui";
 import { DocumentoIcon, CandadoIcon } from "@/components/wizard/icons";
 
 export const COLUMNAS_SALDO =
   "id, fecha, fecha_vencimiento, monto, saldo, tipo, estado, serie_numero, ruc_contraparte, razon_social_contraparte";
 
-export default async function CobranzasPage() {
+export default async function CobranzasPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
+  const sp = await searchParams;
   // El límite se hace cumplir AQUÍ, en el servidor. Ocultar el enlace en la
   // barra lateral orienta, pero no protege: esta ruta se alcanza escribiéndola.
   const permitido = await empresaTieneModulo("cobranzas");
@@ -43,9 +54,21 @@ export default async function CobranzasPage() {
     .select(COLUMNAS_SALDO)
     .order("fecha", { ascending: true });
 
-  const aging = calcularAging((data ?? []) as ComprobanteCobrar[], new Date(), "cobranza");
+  const todas = (data ?? []) as ComprobanteCobrar[];
+  const hoy = new Date();
 
-  if (aging.documentos === 0) {
+  // Se filtra ANTES de agregar: si se filtrara la tabla dejando arriba el total
+  // de todo, la pantalla mostraría dos cifras que no cuadran entre sí.
+  const filtro = filtroSaldoDesdeParams(sp);
+  const aging = calcularAging(filtrarSaldo(todas, filtro, hoy), hoy, "cobranza");
+
+  // Sin filtro, para saber si el vacío es "no te deben nada" o "el filtro no
+  // encuentra nada", que son dos mensajes muy distintos.
+  const agingTotal = hayFiltroSaldo(filtro)
+    ? calcularAging(todas, hoy, "cobranza")
+    : aging;
+
+  if (agingTotal.documentos === 0) {
     return (
       <div className="space-y-6">
         <EncabezadoPagina
@@ -72,6 +95,14 @@ export default async function CobranzasPage() {
         titulo="Cuentas por cobrar"
         descripcion="Quién te debe y desde cuándo. Cada conciliación descuenta lo cobrado."
       />
+      <FiltrosSaldo valores={filtro} etiquetaBusqueda="Cliente, RUC o serie" />
+
+      {aging.documentos === 0 ? (
+        <p className="rounded-2xl border border-neutral-200 bg-white px-5 py-4 text-sm text-neutral-600">
+          Ninguno de los {agingTotal.documentos.toLocaleString("es-PE")}{" "}
+          documentos por cobrar coincide con este filtro. Prueba a quitar alguno.
+        </p>
+      ) : (
       <VistaAging
         aging={aging}
         textos={{
@@ -84,6 +115,7 @@ export default async function CobranzasPage() {
           pie: "Estos saldos se actualizan solos: cada vez que se concilia un depósito con una factura, lo cobrado se descuenta del comprobante.",
         }}
       />
+      )}
     </div>
   );
 }
