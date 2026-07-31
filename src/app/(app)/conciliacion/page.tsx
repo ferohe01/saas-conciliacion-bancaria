@@ -2,10 +2,12 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { formatearFecha } from "@/lib/parsing/resumen";
 import { DocumentoIcon } from "@/components/wizard/icons";
+import type { EstadoContable } from "@/lib/cicloContable";
 import {
   EncabezadoPagina,
   EstadoVacio,
   BadgeEstadoJob,
+  BadgeEstadoContable,
   clasesBoton,
 } from "@/components/ui";
 
@@ -13,6 +15,8 @@ type Cuenta = { banco: string; numero_enmascarado: string | null };
 type JobHistorial = {
   id: string;
   estado: string;
+  estado_contable: EstadoContable | null;
+  version: number | null;
   periodo_desde: string;
   periodo_hasta: string;
   created_at: string;
@@ -32,7 +36,7 @@ export default async function HistorialPage() {
   const { data } = await supabase
     .from("jobs_conciliacion")
     .select(
-      "id, estado, periodo_desde, periodo_hasta, created_at, resultado, cuentas_bancarias(banco, numero_enmascarado)",
+      "id, estado, estado_contable, version, periodo_desde, periodo_hasta, created_at, resultado, cuentas_bancarias(banco, numero_enmascarado)",
     )
     .order("created_at", { ascending: false });
 
@@ -118,7 +122,13 @@ export default async function HistorialPage() {
                       )}
                     </p>
                   </div>
-                  <BadgeEstadoJob estado={job.estado} />
+                  <span className="flex shrink-0 flex-wrap items-center gap-2">
+                    <BadgeEstadoContable
+                      estado={job.estado_contable ?? "borrador"}
+                      version={job.version}
+                    />
+                    <BadgeEstadoJob estado={job.estado} />
+                  </span>
                 </Link>
               </li>
             );

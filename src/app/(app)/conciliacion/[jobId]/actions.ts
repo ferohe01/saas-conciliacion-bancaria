@@ -14,6 +14,14 @@ import {
   type RegistroPayload,
   type MovimientoPayload,
 } from "@/lib/cobranzas";
+import {
+  afectaSaldo,
+  puedeAprobarse,
+  puede,
+  destino,
+  type AccionContable,
+  type EstadoContable,
+} from "@/lib/cicloContable";
 
 /**
  * Acciones de la revisión humana. Persisten CADA decisión dentro de
@@ -63,7 +71,16 @@ async function guardar(jobId: string, resultado: ResultadoConciliacion) {
 }
 
 /**
- * Refleja las decisiones confirmadas en el saldo de los comprobantes.
+ * Refleja en el saldo de los comprobantes las decisiones de la conciliación
+ * APROBADA.
+ *
+ * ⚠️ Solo la aprobada mueve saldo (ver `src/lib/cicloContable.ts`). Antes se
+ * escribían las aplicaciones al confirmar decisiones, sin mirar el estado
+ * contable: dos corridas del mismo período con decisiones confirmadas
+ * descontaban el saldo del mismo comprobante dos veces, porque `job_id` forma
+ * parte de la clave única de `aplicaciones_cobro`. Con el saldo atado a la
+ * aprobación, el constraint de exclusión de la 0012 —que impide dos aprobadas
+ * solapadas— vuelve el doble descuento imposible por construcción.
  *
  * Se REEMPLAZA el conjunto completo de aplicaciones del job en vez de ir
  * añadiendo: así el estado siempre corresponde a las decisiones actuales, y
@@ -84,16 +101,23 @@ async function sincronizarCobranzas(
     const admin = createAdminClient();
     const { data: job } = await admin
       .from("jobs_conciliacion")
-      .select("empresa_id, usuario_id, payload_entrada")
+      .select("empresa_id, usuario_id, estado_contable, payload_entrada")
       .eq("id", jobId)
       .maybeSingle();
+    if (!job) return;
 
-    const payload = job?.payload_entrada as {
+    // Mientras no rija, no mueve un céntimo. Y si dejó de regir, se retira.
+    if (!afectaSaldo(job.estado_contable as EstadoContable)) {
+      await admin.from("aplicaciones_cobro").delete().eq("job_id", jobId);
+      return;
+    }
+
+    const payload = job.payload_entrada as {
       registros_internos?: RegistroPayload[];
       movimientos_bancarios?: MovimientoPayload[];
       config?: { tolerancia_monto_abs?: number; tolerancia_monto_pct?: number };
     } | null;
-    if (!job || !payload?.registros_internos) return;
+    if (!payload?.registros_internos) return;
 
     // Si ningún registro vino de la tabla de comprobantes (fuente Excel), no
     // hay nada que actualizar.
@@ -125,6 +149,106 @@ async function sincronizarCobranzas(
       e,
     );
   }
+}
+
+/* ------------------------------------------------------------------------- *
+ * Ciclo de vida contable
+ * ------------------------------------------------------------------------- */
+
+const AccionContableSchema = z.enum(["aprobar", "observar", "anular", "reabrir"]);
+
+type ResultadoAccion = {
+  ok: boolean;
+  error?: string;
+  reemplazadas?: number;
+};
+
+/**
+ * Aprueba, observa, anula o reabre una conciliación.
+ *
+ * La transición ocurre dentro de una función de la base (`0013`), no aquí:
+ * aprobar implica degradar a `reemplazada` las aprobadas que se solapen y
+ * borrar sus aplicaciones de cobro, y hacerlo con escrituras sueltas dejaría
+ * una ventana en la que el período no tiene conciliación vigente.
+ */
+export async function cambiarEstadoContable(
+  jobId: string,
+  accion: AccionContable,
+): Promise<ResultadoAccion> {
+  const parsed = AccionContableSchema.safeParse(accion);
+  if (!parsed.success) return { ok: false, error: "Acción inválida." };
+
+  const usuario = await getUsuarioActual();
+  if (!usuario) return { ok: false, error: "No autenticado." };
+
+  // Lectura con RLS: garantiza que el job es de su empresa.
+  const supabase = await createClient();
+  const { data: job } = await supabase
+    .from("jobs_conciliacion")
+    .select("id, estado, estado_contable")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (!job) return { ok: false, error: "Conciliación no encontrada." };
+
+  const estadoContable = job.estado_contable as EstadoContable;
+  const admin = createAdminClient();
+
+  if (parsed.data === "aprobar") {
+    const permiso = puedeAprobarse(estadoContable, job.estado as string);
+    if (!permiso.ok) return { ok: false, error: permiso.motivo };
+
+    const { data, error } = await admin.rpc("aprobar_conciliacion", {
+      p_job_id: jobId,
+      p_usuario: usuario.id,
+    });
+    if (error) {
+      console.error(`[ciclo] no se pudo aprobar ${jobId}:`, error);
+      return {
+        ok: false,
+        error:
+          "No se pudo aprobar la conciliación. Revisa que no haya otra aprobada del mismo período.",
+      };
+    }
+
+    // Recién ahora rige, así que recién ahora mueve saldo.
+    const ctx = await cargarContexto(jobId);
+    if (!("error" in ctx)) await sincronizarCobranzas(jobId, ctx.resultado);
+
+    revalidarConciliacion(jobId);
+    return { ok: true, reemplazadas: Array.isArray(data) ? data.length : 0 };
+  }
+
+  if (!puede(estadoContable, parsed.data)) {
+    return {
+      ok: false,
+      error: "Esa acción no es posible con el estado actual de la conciliación.",
+    };
+  }
+
+  const { error } = await admin.rpc("cambiar_estado_contable", {
+    p_job_id: jobId,
+    p_estado: destino(parsed.data),
+    p_usuario: usuario.id,
+  });
+  if (error) {
+    console.error(`[ciclo] no se pudo cambiar el estado de ${jobId}:`, error);
+    return { ok: false, error: "No se pudo cambiar el estado de la conciliación." };
+  }
+
+  revalidarConciliacion(jobId);
+  return { ok: true };
+}
+
+/**
+ * Aprobar o anular cambia el saldo de los comprobantes, así que hay que
+ * refrescar también las pantallas que lo muestran, no solo la del job.
+ */
+function revalidarConciliacion(jobId: string) {
+  revalidatePath(`/conciliacion/${jobId}`);
+  revalidatePath("/conciliacion");
+  revalidatePath("/dashboard");
+  revalidatePath("/cobranzas");
+  revalidatePath("/comprobantes");
 }
 
 const AccionSchema = z.enum(["aceptado", "rechazado", "modificado"]);

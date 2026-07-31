@@ -1,4 +1,5 @@
 import type { MetodoMatch } from "@/lib/contract/enums";
+import { ETIQUETA, type EstadoContable } from "@/lib/cicloContable";
 
 /**
  * Badges del sistema — ver DESIGN.md § Components › Badges de método.
@@ -81,6 +82,62 @@ export function BadgeEstadoJob({ estado }: { estado: string }) {
     >
       <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${e.punto}`} />
       {e.texto}
+    </span>
+  );
+}
+
+/**
+ * Estado CONTABLE de una conciliación: si el documento rige o no. Eje distinto
+ * al de `BadgeEstadoJob`, que dice si terminó de procesarse — un job puede
+ * estar "Completada" y contablemente ser un borrador. Por eso conviven.
+ */
+const ESTADO_CONTABLE: Record<
+  EstadoContable,
+  { clase: string; punto: string }
+> = {
+  borrador: {
+    clase: "bg-neutral-100 text-neutral-700 ring-neutral-200",
+    punto: "bg-neutral-400",
+  },
+  en_proceso: {
+    clase: "bg-neutral-100 text-neutral-700 ring-neutral-200",
+    punto: "bg-neutral-400",
+  },
+  observada: {
+    clase: "bg-amber-50 text-amber-900 ring-amber-200",
+    punto: "bg-amber-500",
+  },
+  aprobada: {
+    clase: "bg-emerald-50 text-emerald-900 ring-emerald-300",
+    punto: "bg-emerald-600",
+  },
+  anulada: {
+    clase: "bg-neutral-100 text-neutral-500 ring-neutral-200",
+    punto: "bg-neutral-300",
+  },
+  reemplazada: {
+    clase: "bg-neutral-100 text-neutral-500 ring-neutral-200",
+    punto: "bg-neutral-300",
+  },
+};
+
+export function BadgeEstadoContable({
+  estado,
+  version,
+}: {
+  estado: EstadoContable;
+  version?: number | null;
+}) {
+  const e = ESTADO_CONTABLE[estado];
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${e.clase}`}
+    >
+      <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${e.punto}`} />
+      {ETIQUETA[estado]}
+      {version != null && version > 1 && (
+        <span className="tabular-nums opacity-70">· v{version}</span>
+      )}
     </span>
   );
 }

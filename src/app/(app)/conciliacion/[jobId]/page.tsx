@@ -9,6 +9,8 @@ import { formatearFecha } from "@/lib/parsing/resumen";
 import { ResultadoConciliacion } from "@/lib/contract/resultado";
 import { PayloadConciliacion } from "@/lib/contract/payload";
 import { EncabezadoPagina, BadgeEstadoJob } from "@/components/ui";
+import { EstadoContablePanel } from "@/components/conciliacion/EstadoContablePanel";
+import type { EstadoContable } from "@/lib/cicloContable";
 
 /**
  * Pantalla de una conciliación:
@@ -25,12 +27,22 @@ export default async function ConciliacionPage({
   const { data } = await supabase
     .from("jobs_conciliacion")
     .select(
-      "id, estado, fase_actual, resultado, error_detalle, periodo_desde, periodo_hasta, payload_entrada",
+      "id, estado, fase_actual, resultado, error_detalle, periodo_desde, periodo_hasta, payload_entrada, estado_contable, version, fecha_aprobacion, cuenta_id",
     )
     .eq("id", jobId)
     .maybeSingle();
 
   if (!data) notFound();
+
+  // ¿Hay otras corridas de este mismo rango? Cambia lo que hay que advertir
+  // antes de aprobar: si las hay, aprobar reemplaza a otra.
+  const { count: corridasDelRango } = await supabase
+    .from("jobs_conciliacion")
+    .select("id", { count: "exact", head: true })
+    .eq("cuenta_id", data.cuenta_id)
+    .eq("periodo_desde", data.periodo_desde)
+    .eq("periodo_hasta", data.periodo_hasta);
+  const hayVersionesPrevias = (corridasDelRango ?? 1) > 1;
 
   const resultadoParsed =
     data.estado === "completado"
@@ -52,6 +64,17 @@ export default async function ConciliacionPage({
         Identificador del proceso:{" "}
         <span className="font-mono text-xs">{data.id}</span>
       </p>
+
+      {/* Va antes que el resultado: si el documento no rige, revisar sus
+          sugerencias es trabajo perdido. */}
+      <EstadoContablePanel
+        jobId={data.id}
+        estadoContable={(data.estado_contable ?? "borrador") as EstadoContable}
+        estadoTecnico={data.estado}
+        version={data.version ?? 1}
+        fechaAprobacion={data.fecha_aprobacion ?? null}
+        hayVersionesPrevias={hayVersionesPrevias}
+      />
 
       {mostrarReview ? (
         <ResultadoReview
