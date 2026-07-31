@@ -174,8 +174,10 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
     [extracto, periodo],
   );
 
+  // Se consulta SIEMPRE, no solo cuando ya se eligió esa fuente: hace falta
+  // saber si hay comprobantes en el período para poder avisar a quien está a
+  // punto de subir un archivo y dejar, sin enterarse, el cobro sin aplicar.
   useEffect(() => {
-    if (fuente !== "comprobantes") return;
     let cancelado = false;
     (async () => {
       const supabase = createClient();
@@ -208,7 +210,7 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
     return () => {
       cancelado = true;
     };
-  }, [fuente, periodo, recargaComprobantes]);
+  }, [periodo, recargaComprobantes]);
 
   /**
    * Un archivo ilegible (corrupto, protegido con contraseña, .xls antiguo) hace
@@ -492,6 +494,35 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
                 );
               })}
             </div>
+
+            {/* Subir un archivo cuando hay comprobantes registrados en el
+                período rompe el bucle de cobranzas sin que nadie se entere: el
+                resultado se ve idéntico en pantalla, pero ningún comprobante
+                queda cobrado y el saldo no se mueve nunca. Es una decisión con
+                consecuencias invisibles, así que se explica antes de tomarla. */}
+            {fuente === "archivo" && (comprobantesResumen?.registros ?? 0) > 0 && (
+              <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+                <p className="text-sm text-blue-900">
+                  Tienes{" "}
+                  <span className="font-semibold tabular-nums">
+                    {comprobantesResumen!.registros.toLocaleString("es-PE")}
+                  </span>{" "}
+                  {comprobantesResumen!.registros === 1
+                    ? "comprobante registrado"
+                    : "comprobantes registrados"}{" "}
+                  en este período. Si los usas como origen, al aprobar la
+                  conciliación se descontará su saldo y sabrás qué te queda por
+                  cobrar. Con un archivo eso no ocurre.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setFuente("comprobantes")}
+                  className="mt-2 min-h-9 rounded-lg px-2 text-sm font-medium text-blue-800 underline underline-offset-2 transition-colors hover:bg-blue-100 hover:text-blue-900"
+                >
+                  Usar mis comprobantes
+                </button>
+              </div>
+            )}
           </fieldset>
 
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
