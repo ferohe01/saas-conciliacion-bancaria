@@ -110,28 +110,38 @@ async function disponiblePorComprobante(
   if (ids.length === 0) return disponible;
 
   const admin = createAdminClient();
-  const [{ data: comps }, { data: otras }] = await Promise.all([
-    admin.from("comprobantes").select("id, monto").in("id", ids as string[]),
-    admin
-      .from("aplicaciones_cobro")
-      .select("comprobante_id, monto_aplicado")
-      .in("comprobante_id", ids as string[])
-      .neq("job_id", jobId),
-  ]);
+  const [{ data: comps }, { data: otras }, { data: revertidas }] =
+    await Promise.all([
+      admin.from("comprobantes").select("id, monto").in("id", ids as string[]),
+      admin
+        .from("aplicaciones_cobro")
+        .select("comprobante_id, monto_aplicado")
+        .in("comprobante_id", ids as string[])
+        .neq("job_id", jobId),
+      // Un cobro que el banco revirtió deja de ocupar sitio: la factura vuelve
+      // a estar disponible y puede cobrarse de nuevo. Sin esto, revertir la
+      // dejaría con saldo pero incobrable.
+      admin
+        .from("reversiones_cobro")
+        .select("comprobante_id, monto_revertido")
+        .in("comprobante_id", ids as string[])
+        .neq("job_id", jobId),
+    ]);
 
-  const aplicadoPorOtros = new Map<string, number>();
+  const netoPorOtros = new Map<string, number>();
   for (const a of otras ?? []) {
     const id = a.comprobante_id as string;
-    aplicadoPorOtros.set(
-      id,
-      (aplicadoPorOtros.get(id) ?? 0) + Number(a.monto_aplicado ?? 0),
-    );
+    netoPorOtros.set(id, (netoPorOtros.get(id) ?? 0) + Number(a.monto_aplicado ?? 0));
+  }
+  for (const r of revertidas ?? []) {
+    const id = r.comprobante_id as string;
+    netoPorOtros.set(id, (netoPorOtros.get(id) ?? 0) - Number(r.monto_revertido ?? 0));
   }
 
   for (const c of comps ?? []) {
     const id = c.id as string;
     const importe = Math.abs(Number(c.monto ?? 0));
-    disponible.set(id, Math.max(0, importe - (aplicadoPorOtros.get(id) ?? 0)));
+    disponible.set(id, Math.max(0, importe - (netoPorOtros.get(id) ?? 0)));
   }
   return disponible;
 }

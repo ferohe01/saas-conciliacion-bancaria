@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ImportadorComprobantes } from "@/components/wizard/ImportadorComprobantes";
 import { formatearFecha } from "@/lib/parsing/resumen";
@@ -145,8 +146,13 @@ export default async function ComprobantesPage({
                       <td className="px-3 py-2.5 tabular-nums whitespace-nowrap text-neutral-600">
                         {f.fecha_vencimiento ? formatearFecha(f.fecha_vencimiento) : "—"}
                       </td>
-                      <td className="px-3 py-2.5 whitespace-nowrap text-neutral-800">
-                        {f.serie_numero ?? "—"}
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <Link
+                          href={`/comprobantes/${f.id}`}
+                          className="rounded font-medium text-blue-700 transition-colors hover:text-blue-800 hover:underline"
+                        >
+                          {f.serie_numero ?? "Ver"}
+                        </Link>
                       </td>
                       {/* Con la palabra, no solo con el signo y el color: la
                           tabla mezcla lo que te deben con lo que debes. */}
