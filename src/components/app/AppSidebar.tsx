@@ -69,6 +69,13 @@ const IconoConfig = (p: IconProps) => (
   />
 );
 
+const IconoConexion = (p: IconProps) => (
+  <Ico
+    {...p}
+    d={["M9 15l-2 2a3.5 3.5 0 0 1-5-5l2-2", "M15 9l2-2a3.5 3.5 0 0 1 5 5l-2 2", "M9.5 14.5l5-5"]}
+  />
+);
+
 const IconoDocumento = (p: IconProps) => (
   <Ico {...p} d={["M6 3h8l4 4v14H6z", "M14 3v4h4", "M9 12h6", "M9 16h6"]} />
 );
@@ -100,6 +107,7 @@ const ENLACES: Enlace[] = [
   { href: "/pagos", label: "Por pagar", Icono: IconoPagar, modulo: "cobranzas" },
   { href: "/reportes", label: "Reportes", Icono: IconoReportes },
   { href: "/cuentas", label: "Cuentas", Icono: IconoCuentas },
+  { href: "/conexiones", label: "Conectar sistema", Icono: IconoConexion },
   { href: "/configuracion", label: "Configuración", Icono: IconoConfig },
 ];
 

@@ -125,6 +125,8 @@ supabase/
                              añade check (saldo >= 0).
     0016_reversiones_cobro.sql       Anular un cobro suelto sin tumbar la
                              conciliación.
+    0017_conexiones_erp.sql          Ficha del sistema de facturación del
+                             cliente ("Conectar sistema"). SIN credenciales.
 tests/                     Vitest (unit).
 ```
 
@@ -345,6 +347,42 @@ conciliación. Tres decisiones que no son obvias:
 - **No se borra la aplicación**: se conservan las dos caras. El saldo pasa a ser
   `importe − (aplicado − revertido)`.
 
+## Conectar sistema (la pantalla existe antes que el motor)
+
+`/conexiones` recoge qué sistema de facturación usa la empresa. **La
+sincronización NO está construida**: no hay integrador, ni cron, ni llamada
+saliente a ningún ERP. La pantalla se publicó igualmente porque hace dos cosas
+reales —saber qué sistemas usan los clientes, que es lo que decidirá por dónde
+integrar, y validar el flujo con usuarios— y porque el "próximamente" del wizard
+era un cartel sin puerta detrás.
+
+- **No se guardan credenciales.** Ni API key, ni contraseña, ni token. Sin motor
+  que las use no aportan nada y sí crean un pasivo: quedarían en claro en
+  Postgres, en los `pg_dumpall` diarios y en los snapshots del VPS, legibles por
+  cualquier miembro de la empresa vía RLS. El formulario lo dice en voz alta,
+  para que nadie pegue su clave en el campo de notas.
+- **`estado` no lo escribe el usuario** (`registrada | en_preparacion | activa |
+  pausada`). Mismo cierre que `plan` en `0005` y los módulos en `0009`: RLS
+  autoriza por fila, no por columna, así que `0017` revoca el UPDATE amplio y lo
+  reconcede solo sobre lo que el cliente declara. Sin eso, un `update ... set
+  estado='activa'` con la key `anon` haría que la interfaz anunciara una
+  sincronización inexistente.
+- **Una fila por empresa** (`empresa_id` es la PK): una PyME factura en un
+  sistema, no en tres. Guardar es un insert o un update explícito, **no un
+  `upsert`** — su `ON CONFLICT DO UPDATE` tocaría `empresa_id` y
+  `solicitado_por`, que no están en el GRANT de UPDATE.
+- **El botón "Probar conexión" no miente:** dice que la prueba real no existe
+  todavía y revisa solo lo que sí depende del usuario (qué sistema, con quién
+  coordinar, dónde vive la API). Un tilde verde falso ahí vale una llamada de
+  soporte por cliente.
+- El catálogo de sistemas vive en `src/lib/conexiones.ts`, **no en la BD**:
+  cambia con el mercado, no con el esquema (por eso la columna `sistema` no
+  lleva check de valores). El zod está aparte en `conexiones-schema.ts` para no
+  arrastrarlo al bundle del formulario.
+- En el wizard, "Conectar sistema" **sigue deshabilitada**: no puede producir
+  registros. Lo que se añadió es el enlace a `/conexiones` y, si ya hay ficha,
+  qué sistema se registró y en qué estado.
+
 ## Fuera de alcance del MVP
 
 Equipos/roles/invitaciones/SSO · facturación y pagos (cobro, planes, pasarela —
@@ -471,9 +509,12 @@ quedó huérfana (no se lee ni se escribe; el merge conserva lo antiguo).
   (obsoleto: la fuente "Subir archivo" se retiró después). Las tres capas contra
   el doble cobro (`0015`). Reversión de un cobro suelto con ficha del
   comprobante en `/comprobantes/[id]` (`0016`). 178 tests.
-- [x] **Fase 11 — Un solo origen de registros internos:** retirada la fuente
-  "Subir archivo" del wizard (quedan "Usar mis comprobantes" y "Conectar
-  sistema"), con el Paso 2 mapeando ya solo el extracto.
+- [x] **Fase 11 — Un solo origen de registros internos + Conectar sistema:**
+  retirada la fuente "Subir archivo" del wizard (quedan "Usar mis comprobantes"
+  y "Conectar sistema"), con el Paso 2 mapeando ya solo el extracto. Nueva
+  pantalla `/conexiones` + migración `0017`: ficha del sistema de facturación
+  del cliente, sin credenciales y sin motor de sincronización todavía (ver
+  "Conectar sistema"). 198 tests.
 
 ### Módulos adicionales (post-MVP)
 

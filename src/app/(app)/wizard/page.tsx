@@ -2,6 +2,8 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getEmpresaActual } from "@/lib/auth";
 import { estadoSuscripcion } from "@/lib/suscripcion";
+import { getConexionErp } from "@/lib/conexiones-servidor";
+import { nombreSistema, estadoConexion } from "@/lib/conexiones";
 import { PruebaVencida } from "@/components/app/AvisoPrueba";
 import { clasesBoton } from "@/components/ui";
 import {
@@ -56,12 +58,24 @@ export default async function WizardPage() {
     );
   }
 
-  const { data } = await supabase
-    .from("cuentas_bancarias")
-    .select("id, banco, numero_enmascarado, moneda, mapeo_columnas")
-    .order("created_at", { ascending: true });
+  const [{ data }, conexion] = await Promise.all([
+    supabase
+      .from("cuentas_bancarias")
+      .select("id, banco, numero_enmascarado, moneda, mapeo_columnas")
+      .order("created_at", { ascending: true }),
+    getConexionErp(),
+  ]);
 
   const cuentas = (data ?? []) as CuentaOpcion[];
+
+  // El wizard solo necesita saber qué contar bajo la opción "Conectar sistema";
+  // los datos de la conexión se administran en /conexiones.
+  const resumenConexion = conexion
+    ? {
+        sistema: nombreSistema(conexion),
+        estadoLabel: estadoConexion(conexion.estado).label,
+      }
+    : null;
 
   return (
     <div className="space-y-6">
@@ -76,7 +90,7 @@ export default async function WizardPage() {
         </p>
       </div>
       <div className="flex justify-center">
-        <WizardContainer cuentas={cuentas} />
+        <WizardContainer cuentas={cuentas} conexion={resumenConexion} />
       </div>
     </div>
   );

@@ -117,7 +117,16 @@ function resumenParaZona(p: ArchivoProcesado, moneda: string): ArchivoResumen {
   };
 }
 
-export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
+/** Lo mínimo que el wizard necesita saber de la conexión (se edita en /conexiones). */
+export type ResumenConexion = { sistema: string; estadoLabel: string };
+
+export function WizardContainer({
+  cuentas,
+  conexion = null,
+}: {
+  cuentas: CuentaOpcion[];
+  conexion?: ResumenConexion | null;
+}) {
   const router = useRouter();
   const [paso, setPaso] = useState<PasoWizard>(1);
 
@@ -472,6 +481,37 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
                 );
               })}
             </div>
+
+            {/* La opción sigue deshabilitada porque todavía no puede producir
+                registros; lo que sí existe es la pantalla donde dejar los datos
+                del sistema. Sin este enlace, "próximamente" es un cartel sin
+                puerta detrás. */}
+            <p className="mt-2 text-sm text-neutral-600">
+              {conexion ? (
+                <>
+                  Registraste <span className="font-medium">{conexion.sistema}</span>{" "}
+                  ({conexion.estadoLabel.toLowerCase()}). Te avisaremos cuando
+                  puedas conciliar desde ahí.{" "}
+                  <Link
+                    href="/conexiones"
+                    className="rounded font-medium text-blue-700 underline underline-offset-2 transition-colors hover:text-blue-800"
+                  >
+                    Ver la conexión
+                  </Link>
+                </>
+              ) : (
+                <>
+                  ¿Emites tus comprobantes en otro sistema?{" "}
+                  <Link
+                    href="/conexiones"
+                    className="rounded font-medium text-blue-700 underline underline-offset-2 transition-colors hover:text-blue-800"
+                  >
+                    Cuéntanos cuál
+                  </Link>{" "}
+                  y preparamos la conexión.
+                </>
+              )}
+            </p>
           </fieldset>
 
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
