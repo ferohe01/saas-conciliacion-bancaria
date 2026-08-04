@@ -100,6 +100,9 @@ src/
   lib/
     aprendizaje.ts         Few-shot dinámico: decisiones humanas → ejemplos.
     reportes.ts            Agregaciones de reportes (KPIs, métodos, tipos).
+    cicloContable.ts       Estados contables, transiciones y qué mueve saldo.
+    filtrosComprobantes.ts Filtros de comprobantes (tipo/estado/período/busca).
+    filtrosSaldo.ts        Filtros de las vistas de saldo (tramo, vencido).
 n8n/                       ⭐ Motor de conciliación: nodos Code (fuente única)
                            + workflows importables (build_*.mjs).
 supabase/
@@ -113,6 +116,15 @@ supabase/
     0006_datos_registro.sql  Ficha de empresa (region, provincia, direccion,
                              telefono) y del administrador (nombre_completo,
                              telefono en usuarios_empresa).
+    0012_versiones_conciliacion.sql  estado_contable, version, aprobación +
+                             constraint de exclusión (una sola aprobada por
+                             cuenta y rango solapado).
+    0013_aprobar_conciliacion.sql    Aprobar/anular como funciones atómicas.
+    0014_guardas_estados_terminales.sql  Cierra dos huecos de la 0013.
+    0015_saldo_no_negativo.sql       Quita el clamp del trigger de saldo y
+                             añade check (saldo >= 0).
+    0016_reversiones_cobro.sql       Anular un cobro suelto sin tumbar la
+                             conciliación.
 tests/                     Vitest (unit).
 ```
 
@@ -270,6 +282,69 @@ portada. Desde la migración `0005` es real:
 - ⚠️ `CONTACTO_SUSCRIPCION` en `suscripcion.ts` es un **placeholder**: hay que
   cambiarlo por el canal comercial real.
 
+## Ciclo de vida contable de una conciliación
+
+`jobs_conciliacion` lleva **dos ejes de estado, ortogonales a propósito**:
+
+- **`estado`** — el procesamiento en n8n: `pendiente | procesando | completado
+  | error`.
+- **`estado_contable`** — el documento: `borrador | en_proceso | observada |
+  aprobada | anulada | reemplazada`.
+
+Un job puede estar `completado` y contablemente ser `borrador`, o estar
+`aprobada` mientras se reprocesa una corrección. En una sola columna esos
+estados serían inexpresables. Reglas en `src/lib/cicloContable.ts` (puro, con
+tests); `anulada` y `reemplazada` son **terminales**.
+
+**La regla central la impone la base, no la aplicación:** un `EXCLUDE USING
+gist` impide dos conciliaciones **aprobadas** cuyos rangos se solapen en la
+misma cuenta. Los cortes consecutivos (1-10, 11-20, 21-31) conviven porque no se
+solapan; varias corridas del mismo rango también, pero solo una rige. Vale para
+cualquier escritura, venga de la app, de n8n o de un `psql`.
+
+Aprobar y anular son **funciones de la base** (`0013`, endurecidas en `0014`),
+no dos UPDATE sueltos desde la app: aprobar implica degradar a `reemplazada` las
+aprobadas solapadas y borrar sus aplicaciones de cobro, y hacerlo por partes
+dejaría una ventana sin conciliación vigente. Solo `service_role` puede
+ejecutarlas.
+
+⚠️ **Solo la conciliación APROBADA cuenta**: mueve el saldo de los
+comprobantes, y es la única que suman el panel y los reportes. Un borrador con
+decisiones confirmadas no mueve un céntimo. El panel avisa cuando hay
+conciliaciones terminadas sin aprobar, porque si no parecería que se perdieron.
+
+## Que una factura no se cobre dos veces
+
+Dos cuentas bancarias con el mismo período pueden estar ambas aprobadas —son
+extractos distintos— pero los comprobantes **no pertenecen a ninguna cuenta**,
+así que la misma factura entraba en las dos y se descontaba su importe completo
+dos veces. Tres capas, y ninguna sobra:
+
+1. **El wizard** no ofrece comprobantes `cobrado` ni `anulado` como registros
+   internos, y dice cuántos dejó fuera.
+2. **`calcularAplicaciones`** topa lo aplicado al saldo que le queda al
+   comprobante, descontando lo que aplicaron **otros** jobs (no los propios: sus
+   aplicaciones se borran y se rehacen al resincronizar).
+3. **`0015`** aborta la escritura si aun así algo se pasara.
+
+⚠️ La 0015 tuvo que **quitar el `greatest(..., 0)`** del trigger de la 0008.
+Ese clamp no protegía de nada: dejaba el saldo en 0 y el comprobante figurando
+como cobrado, con el doble de aplicaciones detrás. Escondía el error justo donde
+se habría visto.
+
+## Reversión de un cobro (banco que devuelve)
+
+`reversiones_cobro` (`0016`) permite anular **un cobro concreto** sin tumbar la
+conciliación. Tres decisiones que no son obvias:
+
+- **Por aplicación, no por match**: un movimiento puede cubrir varias facturas
+  (agrupación 1:N), y rechazar el match revertiría todas.
+- **Tabla aparte, no un campo en `aplicaciones_cobro`**: `sincronizarCobranzas`
+  borra y rehace las aplicaciones del job en cada cambio de decisión, así que
+  una marca ahí dentro se perdería y el cobro revertido volvería solo.
+- **No se borra la aplicación**: se conservan las dos caras. El saldo pasa a ser
+  `importe − (aplicado − revertido)`.
+
 ## Fuera de alcance del MVP
 
 Equipos/roles/invitaciones/SSO · facturación y pagos (cobro, planes, pasarela —
@@ -304,6 +379,18 @@ disparar). Ya es el flujo real con SheetJS (import dinámico), normalización
 canónica al contrato y `POST /api/conciliacion/iniciar`. El mockup original
 (`interfaz.jpg`) sigue siendo la referencia de diseño.
 
+**Origen de los registros internos: dos opciones, no tres.** "Subir archivo"
+existió como prueba de concepto y **se retiró**. Conciliaba igual y se veía
+idéntico en pantalla, pero los registros no tenían `comprobante_id`, así que
+ningún comprobante quedaba cobrado y el saldo no se movía nunca: el error
+silencioso más caro del producto (por eso hubo que poner un aviso en azul para
+disuadir de usarlo — mejor no ofrecerlo). Quedan **"Usar mis comprobantes"**
+(única fuente activa, la que cierra el bucle de cobranzas) y **"Conectar
+sistema"** (próximamente). El **extracto bancario se sigue subiendo como
+archivo** (Excel/CSV/PDF): eso no cambió y es otra cosa. En consecuencia, el
+Paso 2 solo mapea el extracto y `cuentas_bancarias.mapeo_columnas.internos`
+quedó huérfana (no se lee ni se escribe; el merge conserva lo antiguo).
+
 ## Estado por fases
 
 - [x] **Fase 1 — Fundaciones:** Next.js + TS estricto + Tailwind, clientes
@@ -319,7 +406,8 @@ canónica al contrato y `POST /api/conciliacion/iniciar`. El mockup original
   heurística de columnas, resúmenes (registros/suma/rango de fechas), aviso de
   coherencia de período, plantilla Excel descargable + importación a
   `comprobantes` (server action + RLS), fuente de internos (archivo /
-  comprobantes / sistema[próximamente]). Wizard movido al área protegida.
+  comprobantes / sistema[próximamente] — la de archivo se retiró después, ver
+  "Wizard de conciliación"). Wizard movido al área protegida.
   Funciones puras con tests (normalización fechas/montos, detección,
   coherencia). **Nota Fase 7:** cargar SheetJS con `dynamic import` (el wizard
   pesa ~147 kB) y revisar el aviso de seguridad de `xlsx@0.18.5`.
@@ -367,6 +455,25 @@ canónica al contrato y `POST /api/conciliacion/iniciar`. El mockup original
   quedan como **fuente única** del motor. La agrupación 1:N exige **coincidencia
   de nombre** (≥1 palabra) además de suma exacta. Tests restantes (52) +
   typecheck en verde.
+- [x] **Fase 9 — Ciclo de vida contable (post-MVP):** (A) migración `0012` con
+  `estado_contable`, `version`, `conciliacion_origen_id` y el constraint de
+  exclusión; arreglado de paso un bug latente de los reportes, que deduplicaban
+  por `cuenta|año|mes` y descartaban en silencio los cortes parciales de un mes.
+  (B) aprobar/observar/anular en la UI, con las transiciones como funciones
+  atómicas de la base (`0013`, `0014`) y el saldo atado a la **aprobación** en
+  vez de a las decisiones. (C) panel y reportes solo sobre lo aprobado, con
+  filtros de ejercicio/mes/banco/cuenta y aviso de lo terminado sin aprobar.
+- [x] **Fase 10 — Cobranzas endurecidas:** filtros propios en Comprobantes
+  (tipo/estado/período/buscador) y en Por cobrar / Por pagar (tramo de
+  antigüedad, solo vencido, buscador) — deliberadamente **no** los del panel,
+  porque un comprobante no pertenece a ninguna cuenta bancaria. Aviso en el
+  wizard cuando hay comprobantes del período y se va a subir un archivo
+  (obsoleto: la fuente "Subir archivo" se retiró después). Las tres capas contra
+  el doble cobro (`0015`). Reversión de un cobro suelto con ficha del
+  comprobante en `/comprobantes/[id]` (`0016`). 178 tests.
+- [x] **Fase 11 — Un solo origen de registros internos:** retirada la fuente
+  "Subir archivo" del wizard (quedan "Usar mis comprobantes" y "Conectar
+  sistema"), con el Paso 2 mapeando ya solo el extracto.
 
 ### Módulos adicionales (post-MVP)
 

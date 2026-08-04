@@ -72,12 +72,14 @@ export async function importarComprobantes(
 
 /**
  * Memoria de formatos: guarda el mapeo de columnas confirmado en
- * `cuentas_bancarias.mapeo_columnas` bajo las claves `extracto` e `internos`,
- * para autoaplicarlo la próxima vez con los mismos encabezados.
+ * `cuentas_bancarias.mapeo_columnas` bajo la clave `extracto`, para
+ * autoaplicarlo la próxima vez con los mismos encabezados. (La clave `internos`
+ * quedó huérfana al retirarse la fuente "Subir archivo"; el merge conserva lo
+ * que hubiera guardado antes, simplemente ya no se lee ni se escribe.)
  */
 export async function guardarMapeoCuenta(
   cuentaId: string,
-  mapeos: { internos?: MapeoColumnas; extracto?: MapeoColumnas },
+  mapeos: { extracto?: MapeoColumnas },
 ): Promise<{ ok: boolean }> {
   const supabase = await createClient();
   // Merge con lo existente (RLS asegura que la cuenta sea de la empresa).
@@ -90,7 +92,6 @@ export async function guardarMapeoCuenta(
   const previo = (actual?.mapeo_columnas ?? {}) as Record<string, unknown>;
   const nuevo = {
     ...previo,
-    ...(mapeos.internos ? { internos: mapeos.internos } : {}),
     ...(mapeos.extracto ? { extracto: mapeos.extracto } : {}),
   };
 

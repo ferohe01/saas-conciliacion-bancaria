@@ -16,10 +16,7 @@ import { validarCoherencia } from "@/lib/parsing/coherencia";
 import { formatearPEN, formatearFecha } from "@/lib/parsing/resumen";
 import { normalizarMonto } from "@/lib/normalizacion/monto";
 import type { MapeoColumnas } from "@/lib/parsing/deteccion";
-import {
-  normalizarInternos,
-  normalizarBancarios,
-} from "@/lib/normalizacion/canonico";
+import { normalizarBancarios } from "@/lib/normalizacion/canonico";
 import {
   guardarMapeoCuenta,
   getComprobantesCanonicos,
@@ -36,12 +33,18 @@ export type CuentaOpcion = {
   numero_enmascarado: string | null;
   moneda: string;
   mapeo_columnas: {
-    internos?: MapeoColumnas;
     extracto?: MapeoColumnas;
   } | null;
 };
 
-type Fuente = "archivo" | "comprobantes" | "sistema";
+/**
+ * Origen de los registros internos. "Subir archivo" existió durante la prueba
+ * de concepto y se retiró: conciliaba igual, pero ningún comprobante quedaba
+ * cobrado y el saldo no se movía nunca —el error silencioso más caro del
+ * producto—. Los registros internos salen de la tabla de comprobantes; el
+ * extracto del banco se sigue subiendo como archivo, eso no cambia.
+ */
+type Fuente = "comprobantes" | "sistema";
 
 const OPCIONES_MES = mesesRecientes(12);
 
@@ -122,11 +125,9 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
     OPCIONES_MES[1]?.valor ?? OPCIONES_MES[0]!.valor,
   );
   const [cuentaId, setCuentaId] = useState(cuentas[0]?.id ?? "");
-  const [fuente, setFuente] = useState<Fuente>("archivo");
+  const [fuente, setFuente] = useState<Fuente>("comprobantes");
 
-  const [internos, setInternos] = useState<ArchivoProcesado | null>(null);
   const [extracto, setExtracto] = useState<ArchivoProcesado | null>(null);
-  const [mapeoInternos, setMapeoInternos] = useState<MapeoColumnas>({});
   const [mapeoExtracto, setMapeoExtracto] = useState<MapeoColumnas>({});
 
   const [comprobantesResumen, setComprobantesResumen] = useState<{
@@ -151,7 +152,7 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
 
   const [aviso, setAviso] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [cargando, setCargando] = useState<"internos" | "extracto" | null>(null);
+  const [cargando, setCargando] = useState(false);
   const [procesando, startTransition] = useTransition();
 
   const periodo = useMemo(
@@ -161,13 +162,6 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
   const cuenta = cuentas.find((c) => c.id === cuentaId);
   const moneda = cuenta?.moneda ?? "PEN";
 
-  const coherenciaInternos = useMemo(
-    () =>
-      internos?.resumen
-        ? validarCoherencia(internos.resumen.fechasISO, periodo)
-        : null,
-    [internos, periodo],
-  );
   const coherenciaExtracto = useMemo(
     () =>
       extracto?.resumen
@@ -176,9 +170,9 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
     [extracto, periodo],
   );
 
-  // Se consulta SIEMPRE, no solo cuando ya se eligió esa fuente: hace falta
-  // saber si hay comprobantes en el período para poder avisar a quien está a
-  // punto de subir un archivo y dejar, sin enterarse, el cobro sin aplicar.
+  // Los comprobantes del período son la única fuente de registros internos, así
+  // que su resumen se consulta siempre: es lo que dice si hay materia que
+  // conciliar antes de dejar continuar.
   useEffect(() => {
     let cancelado = false;
     (async () => {
@@ -233,28 +227,9 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
    * dueño y la pantalla se quedaba idéntica: el usuario no sabía si su archivo
    * había entrado o no.
    */
-  async function cargarInternos(file: File) {
-    setError(null);
-    setCargando("internos");
-    try {
-      const proc = await procesarArchivo(file, periodo);
-      setInternos(proc);
-      setMapeoInternos(
-        elegirMapeo(proc.mapeo, cuenta?.mapeo_columnas?.internos, proc.headers),
-      );
-    } catch {
-      setInternos(null);
-      setError(
-        `No pudimos leer "${file.name}". Revisa que sea un Excel o CSV sin contraseña y vuelve a intentarlo.`,
-      );
-    } finally {
-      setCargando(null);
-    }
-  }
-
   async function cargarExtracto(file: File) {
     setError(null);
-    setCargando("extracto");
+    setCargando(true);
     try {
       const proc = await procesarArchivo(file, periodo);
       setExtracto(proc);
@@ -272,37 +247,29 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
         `No pudimos leer "${file.name}". Si es el extracto de tu banco, descárgalo en Excel, CSV o PDF y vuelve a subirlo.`,
       );
     } finally {
-      setCargando(null);
+      setCargando(false);
     }
   }
 
-  const usaArchivoInternos = fuente === "archivo";
-  const internosListo = usaArchivoInternos
-    ? internos != null
-    : fuente === "comprobantes"
-      ? (comprobantesResumen?.registros ?? 0) > 0
-      : false;
+  const internosListo =
+    fuente === "comprobantes" && (comprobantesResumen?.registros ?? 0) > 0;
   const extractoListo = extracto != null;
 
   // Un botón deshabilitado sin explicación es un callejón sin salida: la lista
   // dice exactamente qué falta.
   const faltaPaso1 = [
     !cuentaId && "elegir una cuenta bancaria",
-    !internosListo &&
-      (fuente === "comprobantes"
-        ? "tener comprobantes en el período"
-        : "subir tus registros internos"),
+    !internosListo && "tener comprobantes en el período",
     !extractoListo && "subir el extracto del banco",
     saldoLibros.trim() === "" && "ingresar el saldo según libros",
   ].filter((x): x is string => Boolean(x));
 
   const puedeContinuarPaso1 = faltaPaso1.length === 0;
 
-  // Paso 2: validar que los mapeos aplicables tengan fecha + monto.
+  // Paso 2: validar que el mapeo del extracto tenga fecha + monto (los
+  // comprobantes ya vienen estructurados y no se mapean).
   const extractoEsExcel = extracto?.formato === "excel";
-  const mapeoInternosOk = !usaArchivoInternos || tieneFechaYMonto(mapeoInternos);
-  const mapeoExtractoOk = !extractoEsExcel || tieneFechaYMonto(mapeoExtracto);
-  const puedeContinuarPaso2 = mapeoInternosOk && mapeoExtractoOk;
+  const puedeContinuarPaso2 = !extractoEsExcel || tieneFechaYMonto(mapeoExtracto);
 
   function irAPaso2() {
     setAviso(null);
@@ -315,9 +282,7 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
     startTransition(async () => {
       // Registros internos canónicos.
       let internosOut: RegistroInterno[] = [];
-      if (usaArchivoInternos && internos) {
-        internosOut = normalizarInternos(internos.filas, mapeoInternos).filas;
-      } else if (fuente === "comprobantes") {
+      if (fuente === "comprobantes") {
         internosOut = await getComprobantesCanonicos(
           periodo.desde,
           periodo.hasta,
@@ -338,7 +303,6 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
       // Guardar memoria de mapeos en la cuenta.
       if (cuentaId) {
         await guardarMapeoCuenta(cuentaId, {
-          internos: usaArchivoInternos ? mapeoInternos : undefined,
           extracto: extractoEsExcel ? mapeoExtracto : undefined,
         });
       }
@@ -471,7 +435,6 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
             <div className="flex flex-wrap gap-2">
               {(
                 [
-                  { v: "archivo", label: "Subir archivo" },
                   { v: "comprobantes", label: "Usar mis comprobantes" },
                   { v: "sistema", label: "Conectar sistema" },
                 ] as { v: Fuente; label: string }[]
@@ -509,49 +472,10 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
                 );
               })}
             </div>
-
-            {/* Subir un archivo cuando hay comprobantes registrados en el
-                período rompe el bucle de cobranzas sin que nadie se entere: el
-                resultado se ve idéntico en pantalla, pero ningún comprobante
-                queda cobrado y el saldo no se mueve nunca. Es una decisión con
-                consecuencias invisibles, así que se explica antes de tomarla. */}
-            {fuente === "archivo" && (comprobantesResumen?.registros ?? 0) > 0 && (
-              <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
-                <p className="text-sm text-blue-900">
-                  Tienes{" "}
-                  <span className="font-semibold tabular-nums">
-                    {comprobantesResumen!.registros.toLocaleString("es-PE")}
-                  </span>{" "}
-                  {comprobantesResumen!.registros === 1
-                    ? "comprobante registrado"
-                    : "comprobantes registrados"}{" "}
-                  en este período. Si los usas como origen, al aprobar la
-                  conciliación se descontará su saldo y sabrás qué te queda por
-                  cobrar. Con un archivo eso no ocurre.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setFuente("comprobantes")}
-                  className="mt-2 min-h-9 rounded-lg px-2 text-sm font-medium text-blue-800 underline underline-offset-2 transition-colors hover:bg-blue-100 hover:text-blue-900"
-                >
-                  Usar mis comprobantes
-                </button>
-              </div>
-            )}
           </fieldset>
 
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div>
-              {usaArchivoInternos && (
-                <UploadZone
-                  titulo="Registros internos"
-                  icono="documento"
-                  formatos="Excel o CSV"
-                  accept=".xlsx,.xls,.csv"
-                  resumen={internos ? resumenParaZona(internos, moneda) : null}
-                  onArchivo={cargarInternos}
-                />
-              )}
               {fuente === "comprobantes" && (
                 <div className="rounded-2xl border border-neutral-200 bg-white p-5">
                   <p className="font-semibold text-neutral-900">
@@ -604,11 +528,6 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
                     </p>
                   )}
                 </div>
-              )}
-              {coherenciaInternos?.advertir && usaArchivoInternos && (
-                <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                  ⚠️ {coherenciaInternos.mensaje}
-                </p>
               )}
             </div>
 
@@ -705,7 +624,7 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
             </span>
             <Boton
               tamano="lg"
-              disabled={!puedeContinuarPaso1 || cargando !== null}
+              disabled={!puedeContinuarPaso1 || cargando}
               onClick={irAPaso2}
             >
               {cargando ? "Leyendo el archivo…" : "Continuar"}
@@ -718,18 +637,6 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
       {paso === 2 && (
         <>
           <div className="mt-8 space-y-4">
-            {usaArchivoInternos && internos && (
-              <MapeoDataset
-                titulo="Registros internos"
-                variante="internos"
-                headers={internos.headers}
-                filas={internos.filas}
-                mapeo={mapeoInternos}
-                moneda={moneda}
-                onChange={setMapeoInternos}
-              />
-            )}
-
             {fuente === "comprobantes" && (
               <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm text-neutral-600">
                 Tus comprobantes registrados ya están estructurados, no
@@ -767,7 +674,7 @@ export function WizardContainer({ cuentas }: { cuentas: CuentaOpcion[] }) {
           {!puedeContinuarPaso2 && !error && (
             <p className="mt-4 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
               Marca al menos la columna de <strong>fecha</strong> y la de{" "}
-              <strong>monto</strong> en cada archivo para poder continuar.
+              <strong>monto</strong> del extracto para poder continuar.
             </p>
           )}
 
