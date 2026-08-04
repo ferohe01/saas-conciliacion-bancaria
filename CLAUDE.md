@@ -127,6 +127,8 @@ supabase/
                              conciliación.
     0017_conexiones_erp.sql          Ficha del sistema de facturación del
                              cliente ("Conectar sistema"). SIN credenciales.
+    0018_comprobantes_sin_duplicados.sql  Índice único por serie + lote de
+                             importación (deshacer una carga).
 tests/                     Vitest (unit).
 ```
 
@@ -257,6 +259,39 @@ humano en cada match exacto vaciaría de sentido el producto. Una sugerencia
 ⚠️ Esta lista se lee del enum `EstadoRevision` y de los nodos de n8n, nunca se
 deduce de los nombres: la primera versión omitió `auto` y dejó 29 de 33 pares
 conciliados sin descontar saldo. `manual` es un **método**, no un estado.
+
+## Cargar la plantilla dos veces
+
+`importarComprobantes` insertaba a secas: subir el mismo archivo otra vez creaba
+un juego entero de facturas duplicadas. El daño no era estético — cada copia
+lleva su propio `saldo`, así que Por cobrar mostraba el doble de deuda y el
+wizard ofrecía dos veces la misma factura.
+
+- **La identidad de un comprobante es `(empresa_id, tipo, serie_numero)`**, no
+  el monto. Deduplicar por (fecha, monto, contraparte) fusionaría dos boletas
+  legítimas del mismo cliente por el mismo importe el mismo día. `tipo` entra en
+  la clave porque una cobranza y un pago pueden compartir numeración: son
+  documentos de emisores distintos.
+- **El índice de `0018` es parcial**: `serie_numero` es opcional (ventas al
+  contado sin documento) y sin número no hay identidad que comparar. Esas filas
+  se insertan siempre; inventarles una clave descartaría ventas reales.
+- **Lo que ya existe se omite, no se actualiza.** Un comprobante puede tener
+  cobros aplicados y su `saldo` se calcula desde `monto`: reescribirlo desde una
+  plantilla dejaría el saldo mintiendo. La app informa "20 ya estaban cargados".
+- Tres filtros en cadena: repetidas dentro del archivo → serie ya en la base →
+  índice único como red final. Los dos primeros existen para poder explicarlo;
+  el que manda es el tercero. Lógica pura en `src/lib/importacion.ts` (con
+  tests).
+- ⚠️ **El mensaje de "0 importados" es funcional, no cosmético**: sin decir "ya
+  estaban todos", parece que la carga falló y se reintenta — que es exactamente
+  como se llega a la tabla duplicada.
+
+**Limpiar lo cargado.** Cada carga marca sus filas con `lote_importacion`, así
+que se puede *deshacer esa importación* sin tocar las demás; y `/comprobantes`
+tiene un "Empezar de cero" que exige escribir la palabra. Ninguna de las dos
+borra un comprobante **con cobros aplicados**: eso se iría en cascada y dejaría
+un agujero en una conciliación aprobada, que seguiría diciendo que esa factura
+se cobró. Lo conciliado no se limpia, se **anula** (ver `0016`).
 
 ## Período de prueba (30 días)
 

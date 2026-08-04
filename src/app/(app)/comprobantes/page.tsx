@@ -5,6 +5,7 @@ import { formatearFecha } from "@/lib/parsing/resumen";
 import { montoPEN } from "@/lib/suscripcion";
 import { EncabezadoPagina, EstadoVacio } from "@/components/ui";
 import { FiltrosComprobantes } from "@/components/comprobantes/FiltrosComprobantes";
+import { VaciarComprobantes } from "@/components/comprobantes/VaciarComprobantes";
 import {
   filtrarComprobantes,
   filtroDesdeParams,
@@ -206,6 +207,8 @@ export default async function ComprobantesPage({
           </div>
         </section>
       )}
+
+      <VaciarComprobantes total={todas.length} />
     </div>
   );
 }

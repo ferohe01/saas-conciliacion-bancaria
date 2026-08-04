@@ -6,7 +6,10 @@ import { leerArchivo } from "@/lib/parsing/leerArchivo";
 import { normalizarFecha } from "@/lib/normalizacion/fecha";
 import { normalizarMonto } from "@/lib/normalizacion/monto";
 import { formatearFecha, formatearPEN } from "@/lib/parsing/resumen";
-import { importarComprobantes } from "@/app/(app)/wizard/actions";
+import {
+  importarComprobantes,
+  deshacerImportacion,
+} from "@/app/(app)/wizard/actions";
 
 type FilaImport = {
   fecha: string;
@@ -70,6 +73,8 @@ export function ImportadorComprobantes({
   const [nombre, setNombre] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
+  /** Lote recién importado: mientras exista, se ofrece deshacerlo. */
+  const [ultimoLote, setUltimoLote] = useState<string | null>(null);
   const [pendiente, startTransition] = useTransition();
 
   async function onArchivo(file: File) {
@@ -95,14 +100,37 @@ export function ImportadorComprobantes({
     if (!filas || filas.length === 0) return;
     setError(null);
     startTransition(async () => {
-      const res = await importarComprobantes(filas);
+      // Las descartadas por datos incompletos se cuentan aquí, en el cliente,
+      // porque nunca llegan al servidor: sin decirlo, la suma no cuadra con las
+      // filas del Excel y parece que se perdieron.
+      const res = await importarComprobantes(filas, invalidas);
       if (!res.ok) {
         setError(res.error ?? "No se pudo importar.");
         return;
       }
-      setOkMsg(`Se importaron ${res.insertados} comprobantes.`);
+      setOkMsg(res.mensaje ?? `Se importaron ${res.insertados} comprobantes.`);
+      setUltimoLote(res.lote ?? null);
       setFilas(null);
       setNombre("");
+      onImportado?.();
+    });
+  }
+
+  function deshacer() {
+    if (!ultimoLote) return;
+    setError(null);
+    startTransition(async () => {
+      const res = await deshacerImportacion(ultimoLote);
+      if (!res.ok) {
+        setError(res.error ?? "No se pudo deshacer.");
+        return;
+      }
+      setOkMsg(
+        res.protegidos
+          ? `Se quitaron ${res.borrados} comprobantes. ${res.protegidos} se conservaron porque ya tienen cobros aplicados.`
+          : `Se quitaron ${res.borrados} comprobantes de esa carga.`,
+      );
+      setUltimoLote(null);
       onImportado?.();
     });
   }
@@ -204,9 +232,21 @@ export function ImportadorComprobantes({
         </p>
       )}
       {okMsg && (
-        <p className="mt-3 rounded-lg bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
-          {okMsg}
-        </p>
+        <div className="mt-3 rounded-lg bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
+          <p>{okMsg}</p>
+          {/* Deshacer vive junto al mensaje de éxito, que es el momento en que
+              uno se da cuenta de que subió el archivo equivocado. */}
+          {ultimoLote && (
+            <button
+              type="button"
+              onClick={deshacer}
+              disabled={pendiente}
+              className="mt-1.5 min-h-9 rounded-lg px-2 text-sm font-medium text-emerald-900 underline underline-offset-2 transition-colors hover:bg-emerald-100 disabled:opacity-60"
+            >
+              {pendiente ? "Deshaciendo…" : "Deshacer esta importación"}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
