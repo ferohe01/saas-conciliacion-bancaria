@@ -1,6 +1,7 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { resumenAprendizaje, type ResumenAprendizaje } from "@/lib/aprendizaje";
+import { normalizarCriterios } from "@/lib/criteriosIniciales";
 import {
   metricasAprendizaje,
   type MetricasAprendizaje,
@@ -29,6 +30,8 @@ const JOBS_METRICAS = 100;
 export type DatosAprendizaje = {
   resumen: ResumenAprendizaje;
   metricas: MetricasAprendizaje;
+  /** Criterio declarado por la empresa (arranque en frío). */
+  criterios: string[];
 };
 
 export async function getDatosAprendizaje(): Promise<DatosAprendizaje> {
@@ -43,7 +46,13 @@ export async function getDatosAprendizaje(): Promise<DatosAprendizaje> {
 
   const jobs = (data ?? []) as JobMetrica[];
 
+  const { data: filaEmpresa } = await supabase
+    .from("empresas")
+    .select("criterios_conciliacion")
+    .maybeSingle(); // RLS: solo la empresa del usuario
+
   return {
+    criterios: normalizarCriterios(filaEmpresa?.criterios_conciliacion),
     resumen: resumenAprendizaje(
       jobs.slice(0, JOBS_POOL) as Parameters<typeof resumenAprendizaje>[0],
     ),

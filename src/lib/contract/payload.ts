@@ -121,6 +121,13 @@ export const PayloadConciliacion = z
     registros_internos: z.array(RegistroInterno).min(1),
     movimientos_bancarios: z.array(MovimientoBancario).min(1),
     ejemplos_aprendizaje: z.array(EjemploAprendizaje).max(20).optional(),
+    /**
+     * Criterio que la empresa DECLARA sobre su operación (arranque en frío).
+     * Frases, no códigos: el prompt las usa tal cual. Van aparte de
+     * `ejemplos_aprendizaje` porque no son lo mismo — aquello es lo que la
+     * empresa hizo; esto es lo que dice que hace.
+     */
+    criterios_declarados: z.array(z.string().min(1)).max(10).optional(),
   })
   .superRefine((p, ctx) => {
     if (!idsUnicos(p.registros_internos, (r) => r.id_interno)) {

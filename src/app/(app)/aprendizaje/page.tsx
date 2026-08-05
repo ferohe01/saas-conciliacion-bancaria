@@ -3,6 +3,7 @@ import { getDatosAprendizaje } from "@/lib/aprendizaje-servidor";
 import { PanelAprendizaje } from "@/components/aprendizaje/PanelAprendizaje";
 import { CurvaAprendizaje } from "@/components/aprendizaje/CurvaAprendizaje";
 import { MotivosRechazo } from "@/components/aprendizaje/MotivosRechazo";
+import { CriteriosIniciales } from "@/components/aprendizaje/CriteriosIniciales";
 import { EncabezadoPagina, Tarjeta } from "@/components/ui";
 
 /**
@@ -22,7 +23,7 @@ import { EncabezadoPagina, Tarjeta } from "@/components/ui";
  * calcularlo: hoy ese dato no existe en ninguna parte.
  */
 export default async function AprendizajePage() {
-  const { resumen, metricas } = await getDatosAprendizaje();
+  const { resumen, metricas, criterios } = await getDatosAprendizaje();
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -35,6 +36,13 @@ export default async function AprendizajePage() {
           del que decide si paga. El tamaño del pool responde "¿con qué está
           aprendiendo?", que interesa después. */}
       <CurvaAprendizaje m={metricas} />
+
+      {/* Va arriba del todo cuando aún no hay historial: durante la prueba es
+          lo único que la empresa puede hacer para que la IA sepa algo de ella. */}
+      <CriteriosIniciales
+        seleccionados={criterios}
+        decisiones={metricas.revisadas}
+      />
 
       <MotivosRechazo motivos={metricas.motivosRechazo} />
 

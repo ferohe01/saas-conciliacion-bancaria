@@ -7,6 +7,7 @@ import { getConfigEmpresa } from "@/lib/config";
 import { generarJobId } from "@/lib/jobs";
 import { enviarAN8n } from "@/lib/n8n/cliente";
 import { construirEjemplos, type JobHistorico } from "@/lib/aprendizaje";
+import { criteriosParaIa } from "@/lib/criteriosIniciales";
 import { estadoSuscripcion } from "@/lib/suscripcion";
 import {
   PayloadConciliacion,
@@ -140,6 +141,18 @@ export async function POST(request: Request) {
     .limit(30);
   const ejemplos = construirEjemplos((historicos ?? []) as JobHistorico[]);
 
+  // Arranque en frío: el criterio que la empresa declaró. Va SIEMPRE, no solo
+  // cuando faltan ejemplos — el prompt le dice al modelo que las decisiones
+  // reales mandan sobre lo declarado, así que sumar no resta.
+  const { data: filaEmpresa } = await admin
+    .from("empresas")
+    .select("criterios_conciliacion")
+    .eq("id", empresa.empresa_id)
+    .maybeSingle();
+  const criterios = criteriosParaIa(
+    (filaEmpresa?.criterios_conciliacion as string[] | null) ?? [],
+  );
+
   const payload = {
     job_id: jobId,
     metadata: {
@@ -158,6 +171,7 @@ export async function POST(request: Request) {
     registros_internos: req.registros_internos,
     movimientos_bancarios: req.movimientos_bancarios,
     ...(ejemplos.length ? { ejemplos_aprendizaje: ejemplos } : {}),
+    ...(criterios.length ? { criterios_declarados: criterios } : {}),
   };
 
   const validado = PayloadConciliacion.safeParse(payload);

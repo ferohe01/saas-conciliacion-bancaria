@@ -762,13 +762,38 @@ antes de esto no lo traen, y validar contra una lista cerrada haría que retirar
 un código en el futuro **impidiera leer resultados antiguos**. Añadir códigos es
 barato; renombrarlos o borrarlos rompe la lectura del histórico.
 
-**Pendiente (resto del paso 2):**
+### Arranque en frío
 
-1. **Curar**, no configurar con perillas: poder descartar un ejemplo que enseña
-   mal. Preguntarle a una PyME cuántos ejemplos few-shot quiere es pedirle que
-   configure algo que no puede entender.
-2. **Arranque en frío.** Una empresa nueva tiene cero decisiones justo durante
-   los 30 días en que decide si paga.
+**El peor problema comercial del módulo**: el aprendizaje se alimenta de
+decisiones humanas, y una empresa nueva tiene **cero** justo durante los 30 días
+de prueba en que decide si paga. El diferenciador está vacío exactamente cuando
+se evalúa el producto.
+
+La salida es que la empresa **declare** su criterio en vez de esperar a que se
+deduzca (`src/lib/criteriosIniciales.ts`, migración `0019`):
+
+- **Afirmaciones, no perillas.** "¿Tus clientes suelen pagar varias facturas
+  juntas?" la responde cualquiera que lleve el negocio; "¿cuántos ejemplos
+  few-shot quieres?" no la responde nadie.
+- **Viajan al prompt en su PROPIA sección** (`CRITERIO DECLARADO POR LA
+  EMPRESA`), nunca mezcladas con `ejemplos_aprendizaje`: aquello es lo que la
+  empresa **hizo**, esto es lo que **dice que hace**. El propio prompt indica
+  que las decisiones reales mandan sobre lo declarado.
+- **Fase visible.** Hasta `DECISIONES_PARA_CALIBRAR` (10) decisiones revisadas,
+  la pantalla dice "fase de entrenamiento" con barra de progreso. No es adorno:
+  convierte una espera opaca en una meta con final, y explica por qué conviene
+  revisar en vez de despachar en lote. Diez está elegido para ser alcanzable en
+  la primera o segunda conciliación — una fase que durase meses dejaría de
+  motivar y sería una excusa permanente.
+- **Columna aparte de `config_conciliacion`**: aquello son números con forma
+  cerrada que consume el motor; esto son frases que acaban en un prompt.
+- ⚠️ **La `0019` incluye un `GRANT update (criterios_conciliacion)`.** La `0005`
+  revocó el UPDATE amplio sobre `empresas` y lo reconcede columna a columna, así
+  que **toda columna nueva nace sin permiso de escritura** y la pantalla fallaría
+  al guardar sin explicar por qué (RLS deja pasar la fila; lo para el GRANT).
+
+**Pendiente:** **curar** los ejemplos —poder descartar uno que enseña mal—, que
+es lo único que queda del paso 2.
 
 ## Nota de arquitectura: aprendizaje de la IA (few-shot dinámico)
 

@@ -13,6 +13,7 @@ const cfg = prev.config ?? {};
 // y viajan en el payload original del Webhook).
 const wh = $('Webhook').first().json;
 const ejemplos = ((wh.body ?? wh).ejemplos_aprendizaje) ?? [];
+const criterios = ((wh.body ?? wh).criterios_declarados) ?? [];
 const tolIa = Number(cfg.tolerancia_ia_monto ?? 10);
 const K = Number(cfg.top_k_candidatos ?? 3);
 const ventana = Number(cfg.ventana_ia_dias ?? 30); // ventana de fecha amplia para IA
@@ -153,7 +154,21 @@ const fewShot = ejemplos.length
       "copies a ciegas: aplícalos solo cuando el caso sea análogo.",
     ].join("\n")
   : "";
-const systemFinal = system + fewShot;
+// Criterio DECLARADO por la empresa. Va en su propia seccion y con otro peso:
+// es lo que dicen que hacen, no lo que hicieron. Cuando ya hay decisiones
+// reales, mandan las decisiones — y el texto se lo dice al modelo.
+const declarado = criterios.length
+  ? [
+      "",
+      "CRITERIO DECLARADO POR LA EMPRESA (lo que dicen de su operacion; util",
+      "cuando aun hay pocas decisiones previas, pero SI hay decisiones previas",
+      "esas mandan sobre esto):",
+      ...criterios.map((c) => `- ${c}`),
+    ].join("
+")
+  : "";
+
+const systemFinal = system + declarado + fewShot;
 
 const user = `Tolerancias: ${JSON.stringify(cfg)}\n\nCandidatos por registro interno:\n${JSON.stringify(shortlists)}`;
 
@@ -203,6 +218,7 @@ return [{
     pendientes_bancarios: bancarios,
     shortlists, // para validar la respuesta del LLM
     ejemplos_aprendizaje: ejemplos, // trazabilidad del few-shot usado
+    criterios_declarados: criterios, // trazabilidad de la semilla en frio
     ia_body, // nodo HTTP Request (alternativa)
     ia_system: systemFinal, // nodo AI Agent (systemMessage)
     ia_user: user, // nodo AI Agent (prompt)
