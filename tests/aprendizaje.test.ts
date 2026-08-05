@@ -168,3 +168,53 @@ describe("construirEjemplos", () => {
     expect(ej[0]!.categoria).toBe("agrupacion_1aN");
   });
 });
+
+// ── Curación: quitar un ejemplo que enseña mal ──────────────────────────────
+import { ejemplosActivos } from "@/lib/aprendizaje";
+
+describe("curación de ejemplos", () => {
+  const jobCon = (excluido: boolean) => ({
+    id: "job-1",
+    payload_entrada: {
+      registros_internos: [
+        { id_interno: "REG-1", fecha: "2026-03-01", monto: 100, contraparte: "ACME" },
+      ],
+      movimientos_bancarios: [
+        { id_movimiento: "MOV-1", fecha: "2026-03-01", monto: 100, glosa: "ACME" },
+      ],
+    },
+    resultado: {
+      matches: [
+        {
+          ids_internos: ["REG-1"],
+          ids_movimientos: ["MOV-1"],
+          metodo: "ia",
+          estado_revision: "aceptado",
+          decisiones: [{ accion: "aceptado", timestamp: "2026-03-02T10:00:00Z" }],
+          ...(excluido ? { excluido_aprendizaje: true } : {}),
+        },
+      ],
+    },
+  });
+
+  it("un ejemplo excluido deja de enseñar", () => {
+    expect(construirEjemplos([jobCon(false)])).toHaveLength(1);
+    expect(construirEjemplos([jobCon(true)])).toHaveLength(0);
+  });
+
+  it("también sale del recuento del pool", () => {
+    // Si siguiera contando, la pantalla diria que la IA usa N ejemplos cuando
+    // en realidad usa N-1.
+    expect(resumenAprendizaje([jobCon(true)]).total).toBe(0);
+  });
+
+  it("ejemplosActivos devuelve lo mismo que construirEjemplos, con su origen", () => {
+    // Comparten implementacion a proposito: si la pantalla de curacion listara
+    // otra cosa, se curarian ejemplos que la IA no lee.
+    const jobs = [jobCon(false)];
+    const conOrigen = ejemplosActivos(jobs);
+    expect(conOrigen.map((x) => x.ejemplo)).toEqual(construirEjemplos(jobs));
+    expect(conOrigen[0]!.jobId).toBe("job-1");
+    expect(conOrigen[0]!.matchIndex).toBe(0);
+  });
+});

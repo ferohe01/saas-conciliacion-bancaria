@@ -57,6 +57,15 @@ export const Match = z.object({
   estado_revision: EstadoRevision,
   // Historial de decisiones humanas (añadido por el backend en cada revisión).
   decisiones: z.array(DecisionHumana).optional(),
+  /**
+   * Marcado como "no aprendas de aquí". Se guarda junto al match y no en una
+   * tabla aparte porque el `resultado` completo se reescribe entero en cada
+   * decisión: la marca viaja con el dato al que se refiere y sobrevive igual.
+   *
+   * NO borra la decisión ni cambia la conciliación: solo lo saca del pool de
+   * ejemplos. Lo que se decidió, decidido está.
+   */
+  excluido_aprendizaje: z.boolean().optional(),
 });
 export type Match = z.infer<typeof Match>;
 

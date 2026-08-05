@@ -4,6 +4,7 @@ import { PanelAprendizaje } from "@/components/aprendizaje/PanelAprendizaje";
 import { CurvaAprendizaje } from "@/components/aprendizaje/CurvaAprendizaje";
 import { MotivosRechazo } from "@/components/aprendizaje/MotivosRechazo";
 import { CriteriosIniciales } from "@/components/aprendizaje/CriteriosIniciales";
+import { CuracionEjemplos } from "@/components/aprendizaje/CuracionEjemplos";
 import { EncabezadoPagina, Tarjeta } from "@/components/ui";
 
 /**
@@ -23,7 +24,8 @@ import { EncabezadoPagina, Tarjeta } from "@/components/ui";
  * calcularlo: hoy ese dato no existe en ninguna parte.
  */
 export default async function AprendizajePage() {
-  const { resumen, metricas, criterios } = await getDatosAprendizaje();
+  const { resumen, metricas, criterios, ejemplos } =
+    await getDatosAprendizaje();
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -47,6 +49,8 @@ export default async function AprendizajePage() {
       <MotivosRechazo motivos={metricas.motivosRechazo} />
 
       <PanelAprendizaje ap={resumen} />
+
+      <CuracionEjemplos ejemplos={ejemplos} />
 
       <Tarjeta>
         <h2 className="font-semibold text-neutral-900">Cómo aprende</h2>

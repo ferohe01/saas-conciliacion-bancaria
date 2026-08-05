@@ -792,8 +792,31 @@ deduzca (`src/lib/criteriosIniciales.ts`, migración `0019`):
   que **toda columna nueva nace sin permiso de escritura** y la pantalla fallaría
   al guardar sin explicar por qué (RLS deja pasar la fila; lo para el GRANT).
 
-**Pendiente:** **curar** los ejemplos —poder descartar uno que enseña mal—, que
-es lo único que queda del paso 2.
+### Curar los ejemplos
+
+El aprendizaje se degrada por ejemplos malos: una aceptación hecha de trámite
+enseña a aceptar de trámite. Eso **no se arregla ajustando cuántos ejemplos se
+mandan** —la perilla que un usuario pediría— sino quitando el que está mal. Por
+eso la "configuración" de este módulo es curación.
+
+`/aprendizaje` lista **los ejemplos exactos que se le envían a la IA** y permite
+sacar uno del pool.
+
+- **`ejemplosActivos` comparte implementación con `construirEjemplos`.** Si la
+  pantalla listara los ejemplos con otro criterio, el usuario descartaría cosas
+  que la IA no está leyendo — y no habría forma de notarlo. Hay un test que
+  compara ambas salidas.
+- **La marca vive en el propio match** (`Match.excluido_aprendizaje`), no en una
+  tabla aparte: el `resultado` completo se reescribe entero en cada decisión, así
+  que la marca viaja con el dato al que se refiere. (Distinto del caso de
+  `reversiones_cobro`, donde sí hacía falta tabla porque `sincronizarCobranzas`
+  borra y rehace las aplicaciones.)
+- ⚠️ **Quitar un ejemplo NO deshace la decisión ni toca la conciliación**: el
+  match sigue aceptado o rechazado, con su historial intacto. La pantalla lo dice
+  con todas las letras — confundirlo con "revertir un cobro" sería un error caro
+  y perfectamente posible.
+- Un ejemplo excluido sale también del **recuento del pool**: si siguiera
+  contando, la pantalla diría que la IA usa N ejemplos cuando usa N−1.
 
 ## Nota de arquitectura: aprendizaje de la IA (few-shot dinámico)
 

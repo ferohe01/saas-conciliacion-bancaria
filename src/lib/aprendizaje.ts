@@ -34,9 +34,12 @@ type MatchLite = {
   categoria_diferencia?: string | null;
   estado_revision?: string;
   decisiones?: DecisionLite[];
+  excluido_aprendizaje?: boolean;
 };
 
 export type JobHistorico = {
+  /** Necesario solo para curar: identifica de dónde salió cada ejemplo. */
+  id?: string;
   payload_entrada?: {
     registros_internos?: RegLite[];
     movimientos_bancarios?: MovLite[];
@@ -99,15 +102,43 @@ const resumenBanco = (m: MovLite): string =>
  * jobs vengan del más reciente al más antiguo (así los ejemplos recientes tienen
  * prioridad). Devuelve como máximo `maxTotal`, balanceando ambas clases.
  */
+/** Un ejemplo con su procedencia, para poder descartarlo desde la interfaz. */
+export type EjemploConOrigen = {
+  ejemplo: EjemploAprendizaje;
+  jobId: string;
+  matchIndex: number;
+};
+
 export function construirEjemplos(
   jobs: JobHistorico[],
   opts: OpcionesEjemplos = {},
 ): EjemploAprendizaje[] {
+  return recolectar(jobs, opts).map((x) => x.ejemplo);
+}
+
+/**
+ * Los mismos ejemplos que se le mandan a la IA, con su origen.
+ *
+ * Comparte implementación con `construirEjemplos` a propósito: si la pantalla
+ * de curación listara los ejemplos con otro criterio, el usuario descartaría
+ * cosas que no son las que la IA está leyendo — y no habría forma de notarlo.
+ */
+export function ejemplosActivos(
+  jobs: JobHistorico[],
+  opts: OpcionesEjemplos = {},
+): EjemploConOrigen[] {
+  return recolectar(jobs, opts);
+}
+
+function recolectar(
+  jobs: JobHistorico[],
+  opts: OpcionesEjemplos = {},
+): EjemploConOrigen[] {
   const maxPorClase = opts.maxPorClase ?? MAX_POR_CLASE;
   const maxTotal = opts.maxTotal ?? MAX_TOTAL;
 
-  const positivos: EjemploAprendizaje[] = [];
-  const negativos: EjemploAprendizaje[] = [];
+  const positivos: EjemploConOrigen[] = [];
+  const negativos: EjemploConOrigen[] = [];
   const vistos = new Set<string>();
 
   for (const job of jobs) {
@@ -119,7 +150,10 @@ export function construirEjemplos(
     const regPorId = new Map(regs.map((r) => [r.id_interno, r]));
     const movPorId = new Map(movs.map((m) => [m.id_movimiento, m]));
 
-    for (const m of matches) {
+    for (let i = 0; i < matches.length; i++) {
+      const m = matches[i]!;
+      // Descartado a mano: la decisión sigue ahí, pero deja de enseñar.
+      if (m.excluido_aprendizaje) continue;
       const clase = claseDeMatch(m);
       if (!clase) continue;
 
@@ -151,14 +185,16 @@ export function construirEjemplos(
         ...(clase === "rechazado" ? { motivo: motivoParaIa(m) } : {}),
       };
       const balde = clase === "aceptado" ? positivos : negativos;
-      if (balde.length < maxPorClase) balde.push(ejemplo);
+      if (balde.length < maxPorClase) {
+        balde.push({ ejemplo, jobId: job.id ?? "", matchIndex: i });
+      }
     }
 
     if (positivos.length >= maxPorClase && negativos.length >= maxPorClase) break;
   }
 
   // Intercala clases para que el prompt no quede sesgado por orden.
-  const salida: EjemploAprendizaje[] = [];
+  const salida: EjemploConOrigen[] = [];
   const n = Math.max(positivos.length, negativos.length);
   for (let i = 0; i < n && salida.length < maxTotal; i++) {
     if (i < positivos.length && salida.length < maxTotal) salida.push(positivos[i]!);
@@ -182,6 +218,7 @@ export function resumenAprendizaje(
   let negativos = 0;
   for (const job of jobs) {
     for (const m of job.resultado?.matches ?? []) {
+      if (m.excluido_aprendizaje) continue;
       const idsInt = m.ids_internos ?? [];
       const idsMov = m.ids_movimientos ?? [];
       if (!idsInt.length || !idsMov.length) continue;

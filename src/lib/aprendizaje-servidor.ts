@@ -1,6 +1,12 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
-import { resumenAprendizaje, type ResumenAprendizaje } from "@/lib/aprendizaje";
+import {
+  resumenAprendizaje,
+  ejemplosActivos,
+  type ResumenAprendizaje,
+  type EjemploConOrigen,
+  type JobHistorico,
+} from "@/lib/aprendizaje";
 import { normalizarCriterios } from "@/lib/criteriosIniciales";
 import {
   metricasAprendizaje,
@@ -32,13 +38,15 @@ export type DatosAprendizaje = {
   metricas: MetricasAprendizaje;
   /** Criterio declarado por la empresa (arranque en frío). */
   criterios: string[];
+  /** Los ejemplos exactos que se le envían a la IA, para poder curarlos. */
+  ejemplos: EjemploConOrigen[];
 };
 
 export async function getDatosAprendizaje(): Promise<DatosAprendizaje> {
   const supabase = await createClient(); // RLS: solo la empresa del usuario
   const { data } = await supabase
     .from("jobs_conciliacion")
-    .select("id, created_at, resultado")
+    .select("id, created_at, payload_entrada, resultado")
     .eq("estado", "completado")
     .not("resultado", "is", null)
     .order("created_at", { ascending: false })
@@ -53,6 +61,11 @@ export async function getDatosAprendizaje(): Promise<DatosAprendizaje> {
 
   return {
     criterios: normalizarCriterios(filaEmpresa?.criterios_conciliacion),
+    // Mismos jobs y mismo criterio que el backend al armar el prompt: si la
+    // pantalla listara otra cosa, se curarían ejemplos que la IA no lee.
+    ejemplos: ejemplosActivos(
+      jobs.slice(0, JOBS_POOL) as unknown as JobHistorico[],
+    ),
     resumen: resumenAprendizaje(
       jobs.slice(0, JOBS_POOL) as Parameters<typeof resumenAprendizaje>[0],
     ),
