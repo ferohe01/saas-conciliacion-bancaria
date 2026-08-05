@@ -51,23 +51,31 @@ export function PanelAprendizaje({ ap }: { ap: ResumenAprendizaje }) {
           </div>
 
           <div>
+            {/* Los tonos anteriores (emerald-500 / rose-400) quedaban a ΔE 3.9
+                en deuteranopía: para un daltónico rojo-verde la barra era un
+                bloque único. Con emerald-700 / rose-600 sube a 7.3 —dentro de
+                la banda mínima, legal porque hay etiquetas de texto debajo— y
+                el hueco de 2px (gap-0.5) separa los segmentos sin depender del
+                color. Validado con el script del skill dataviz. */}
             <div
-              className="flex h-3 w-full overflow-hidden rounded-full bg-neutral-100"
+              className="flex h-3 w-full gap-0.5 overflow-hidden rounded-full bg-neutral-100"
               role="img"
               aria-label={`${ap.positivos} aceptados y ${ap.negativos} rechazados`}
             >
               {ap.positivos > 0 && (
                 <div
-                  className="h-3 bg-emerald-500"
+                  className="h-3 rounded-full bg-emerald-700"
                   style={{ width: `${pctPos}%` }}
                 />
               )}
-              {ap.negativos > 0 && <div className="h-3 flex-1 bg-rose-400" />}
+              {ap.negativos > 0 && (
+                <div className="h-3 flex-1 rounded-full bg-rose-600" />
+              )}
             </div>
             <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs">
               <span className="flex items-center gap-1.5 text-neutral-700">
                 <span
-                  className="h-2.5 w-2.5 rounded-sm bg-emerald-500"
+                  className="h-2.5 w-2.5 rounded-sm bg-emerald-700"
                   aria-hidden
                 />
                 Aceptados (la IA acertó):{" "}
@@ -77,7 +85,7 @@ export function PanelAprendizaje({ ap }: { ap: ResumenAprendizaje }) {
               </span>
               <span className="flex items-center gap-1.5 text-neutral-700">
                 <span
-                  className="h-2.5 w-2.5 rounded-sm bg-rose-400"
+                  className="h-2.5 w-2.5 rounded-sm bg-rose-600"
                   aria-hidden
                 />
                 Rechazados (corregidos):{" "}

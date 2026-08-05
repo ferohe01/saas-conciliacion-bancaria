@@ -679,13 +679,37 @@ hospedados dentro de `ReporteVista.tsx`— y tiene su propia ruta.
   del backend: lo que la pantalla enseña tiene que ser exactamente lo que
   alimenta el prompt, no una aproximación.
 
-**Pendiente (paso 2).** Lo que hay hoy es la mudanza y la estructura. Lo que de
-verdad sostiene la propuesta de valor todavía no existe y hay que **calcularlo**:
+### La métrica: ¿de verdad está aprendiendo?
 
-1. **Medir.** No hay ninguna métrica que demuestre que el few-shot mejora algo.
-   Sin una curva (% automatizado, sugerencias aceptadas sin modificar) se está
-   vendiendo una afirmación sin verificar.
-2. **Mostrar el precedente en el momento de la revisión** — «porque en marzo
+`src/lib/aprendizajeMetricas.ts` (puro, con tests) calcula la **tasa de acierto
+de las sugerencias de IA**. Antes solo se enseñaba el tamaño del pool, que es
+una métrica de *entrada* —cuánto se le da de comer—, no de resultado.
+
+Cuatro decisiones que hacen que la cifra sea creíble, y que es donde está el
+valor de este módulo:
+
+- **Solo `metodo === "ia"`.** La conciliación exacta no mejora con el
+  aprendizaje: incluirla haría subir el número por tener datos más limpios, no
+  por aprender, y diluiría la señal hasta volverla inútil.
+- **`modificado` cuenta como fallo.** La propuesta sirvió de punto de partida,
+  pero alguien tuvo que corregirla: para el usuario fue trabajo, no ahorro. Se
+  reporta aparte, porque no es lo mismo que un rechazo.
+- **⚠️ Los `auto` quedan FUERA de la tasa.** Nadie los revisó, así que no son
+  evidencia de acierto; incluirlos dispararía la cifra sin que significara nada.
+  Se cuentan aparte y la pantalla dice qué son.
+- **No se anuncia tendencia sin datos que la sostengan** (mínimo 4 corridas
+  revisadas y 10 decisiones por mitad). Con tres sugerencias, pasar de 2/3 a 3/3
+  es un salto de 33 puntos que no significa nada; anunciarlo como mejora
+  destruiría la credibilidad de la cifra en la primera reunión. Cuando no llega,
+  se explica por qué en vez de callar. Y **un empeoramiento se muestra igual de
+  claro que una mejora**: si el número solo pudiera subir sería propaganda.
+
+`tasa` es `null` —no `0`— cuando nadie ha revisado nada: cero significaría "la
+IA falló siempre"; null significa "todavía no sabemos".
+
+**Pendiente (resto del paso 2):**
+
+1. **Mostrar el precedente en el momento de la revisión** — «porque en marzo
    aceptaste una comisión de S/12 con este mismo cliente». Convierte un score
    opaco en un recuerdo reconocible; es donde UX y aprendizaje son lo mismo.
 3. **Capturar el porqué del rechazo.** Hoy se tira la señal más informativa que

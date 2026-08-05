@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { getResumenAprendizaje } from "@/lib/aprendizaje-servidor";
+import { getDatosAprendizaje } from "@/lib/aprendizaje-servidor";
 import { PanelAprendizaje } from "@/components/aprendizaje/PanelAprendizaje";
+import { CurvaAprendizaje } from "@/components/aprendizaje/CurvaAprendizaje";
 import { EncabezadoPagina, Tarjeta } from "@/components/ui";
 
 /**
@@ -20,7 +21,7 @@ import { EncabezadoPagina, Tarjeta } from "@/components/ui";
  * calcularlo: hoy ese dato no existe en ninguna parte.
  */
 export default async function AprendizajePage() {
-  const aprendizaje = await getResumenAprendizaje();
+  const { resumen, metricas } = await getDatosAprendizaje();
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -29,7 +30,12 @@ export default async function AprendizajePage() {
         descripcion="El sistema aprende cómo concilia tu empresa. No es un modelo genérico: se calibra con las decisiones que tomas tú."
       />
 
-      <PanelAprendizaje ap={aprendizaje} />
+      {/* La curva va PRIMERO: responde "¿esto funciona?", que es la pregunta
+          del que decide si paga. El tamaño del pool responde "¿con qué está
+          aprendiendo?", que interesa después. */}
+      <CurvaAprendizaje m={metricas} />
+
+      <PanelAprendizaje ap={resumen} />
 
       <Tarjeta>
         <h2 className="font-semibold text-neutral-900">Cómo aprende</h2>
