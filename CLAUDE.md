@@ -212,6 +212,29 @@ importable. Dos variantes:
 - `workflow_conciliacion_ia.json` (IA real): igual, pero la capa IA es
   `Candidatos IA → AI Agent (+ modelo por `ai_languageModel`) → Parsear IA`.
 
+#### El flujo que está conectado a este sistema
+
+> **`Conciliación Bancaria con IA`** — ese es el nombre exacto en n8n, y es el
+> único que existe: el heurístico se borró (05/08/2026). El path del webhook
+> sigue siendo `conciliaciones`.
+
+Topología en producción, verificada contra el lienzo de n8n:
+
+```
+Webhook → Responder aceptado → Exacta → Difusa → Agrupacion → Candidatos IA
+        → AI Agent → Parsear IA → Ensamblar resultado → Actualizar Supabase
+                ↑
+       OpenAI Chat Model  (sub-nodo por ai_languageModel)
+```
+
+⚠️ **El modelo en producción es `OpenAI Chat Model`, pero el generador emite
+`Anthropic Chat Model`** (`lmChatAnthropic`, `claude-opus-4-8`). Es una
+divergencia deliberada del despliegue, no un error del repo — pero significa que
+**reimportar el JSON generado sustituye el nodo del modelo**: habría que volver a
+poner OpenAI y seleccionar su credencial. Antes de regenerar, decidir cuál de los
+dos manda; si OpenAI se vuelve definitivo, cambiarlo en `build_workflow_ia.mjs`
+para que el repo deje de mentir.
+
 Regenerar: `node n8n/build_workflow.mjs && node n8n/build_workflow_ia.mjs`. Tras
 reimportar, hay que **reseleccionar la credencial del modelo** (no viaja en el
 JSON), pegar el `service_role` en el nodo "Actualizar Supabase" y **seleccionar
@@ -257,15 +280,17 @@ NO deja el webhook abierto** — devuelve 500 a todo. Abierto queda solo si algu
 pone `authentication: None`, que es justo lo que se hace al diagnosticar y lo que
 hay que acordarse de deshacer.
 
-**Los dos workflows registran el mismo path `conciliaciones`**, así que solo uno
-puede estar activo. Antes de dar por bueno cualquier arreglo, comprobar en cuál
-de los dos se está editando: arreglar el que no está activo no cambia nada, y el
-error observado es idéntico.
+**Los dos workflows que genera el repo registran el mismo path `conciliaciones`**,
+así que solo uno puede estar activo. Hoy no aplica —en n8n solo queda
+`Conciliación Bancaria con IA`—, pero vuelve a aplicar en cuanto se importe el
+heurístico: arreglar el que no está activo no cambia nada, y el error observado
+es idéntico. Comprobar siempre en cuál se está editando antes de dar por bueno
+un arreglo.
 
 El grafo también acota dónde puede fallar: `Responder aceptado` es el **segundo**
 nodo y responde antes de que se ejecute nada más. Por tanto un `500` en el POST
 solo puede venir del Webhook; si lo que falta es la credencial del modelo
-(Anthropic), la respuesta es **200** y el trabajo muere después, por dentro —el
+(OpenAI Chat Model), la respuesta es **200** y el trabajo muere después, por dentro —el
 job se queda en `procesando` para siempre—. Son dos averías distintas con
 síntomas opuestos.
 
