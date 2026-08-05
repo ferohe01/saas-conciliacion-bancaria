@@ -56,7 +56,7 @@ const nodes = [
   code("Candidatos IA", "ia_llm_01_candidatos.js", 620, 300),
   {
     // Nodo AI Agent: usa el system + prompt que arma "Preparar IA". El modelo
-    // se conecta como sub-nodo (Anthropic Chat Model) por ai_languageModel.
+    // se conecta como sub-nodo (OpenAI Chat Model) por ai_languageModel.
     parameters: {
       promptType: "define",
       text: "={{ $json.ia_user }}",
@@ -69,17 +69,26 @@ const nodes = [
     position: [700, 300],
   },
   {
-    // Sub-nodo de modelo. Tras importar: selecciona tu credencial de Anthropic
-    // y confirma el modelo (claude-opus-4-8). Se enlaza al AI Agent por
-    // ai_languageModel (no por main).
+    // Sub-nodo de modelo. Se enlaza al AI Agent por ai_languageModel (no por
+    // main), y es el que da la "*" de entrada obligatoria en el lienzo.
+    //
+    // OpenAI porque es lo que corre en producción (ver CLAUDE.md → "El flujo
+    // que está conectado a este sistema"). El generador emitía Anthropic y el
+    // despliegue usaba OpenAI: reimportar sustituía el nodo sin avisar.
+    //
+    // ⚠️ Tras importar hay DOS cosas que confirmar, porque no viajan en el JSON
+    // ni se pueden adivinar desde aquí: la **credencial de OpenAI** y el
+    // **modelo**. `gpt-4o-mini` es un punto de partida barato y suficiente para
+    // adjudicar sobre una shortlist ya acotada; si el criterio se queda corto,
+    // subir a uno mayor es cambiar este valor.
     parameters: {
-      model: { __rl: true, mode: "id", value: "claude-opus-4-8" },
-      options: { maxTokensToSample: 8000 },
+      model: { __rl: true, mode: "list", value: "gpt-4o-mini" },
+      options: {},
     },
     id: randomUUID(),
-    name: "Anthropic Chat Model",
-    type: "@n8n/n8n-nodes-langchain.lmChatAnthropic",
-    typeVersion: 1.3,
+    name: "OpenAI Chat Model",
+    type: "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+    typeVersion: 1.2,
     position: [660, 500],
   },
   code("Parsear IA", "ia_llm_02_parsear.js", 920, 300),
@@ -124,7 +133,7 @@ const connections = {
   ...conn("Parsear IA", "Ensamblar resultado"),
   ...conn("Ensamblar resultado", "Actualizar Supabase"),
   // El modelo se conecta al Agent por el enlace especial ai_languageModel.
-  "Anthropic Chat Model": {
+  "OpenAI Chat Model": {
     ai_languageModel: [
       [{ node: "AI Agent", type: "ai_languageModel", index: 0 }],
     ],
@@ -132,7 +141,10 @@ const connections = {
 };
 
 const workflow = {
-  name: "Conciliación Bancaria (IA real)",
+  // Mismo nombre que el flujo vivo en n8n, para que repo y producción hablen de
+  // la misma cosa. Ojo: importar siempre CREA un workflow nuevo, no actualiza el
+  // existente — quedarían dos con el mismo nombre y hay que borrar el viejo.
+  name: "Conciliación Bancaria con IA",
   nodes,
   connections,
   settings: { executionOrder: "v1" },

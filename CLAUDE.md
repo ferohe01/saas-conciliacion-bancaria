@@ -227,13 +227,18 @@ Webhook → Responder aceptado → Exacta → Difusa → Agrupacion → Candidat
        OpenAI Chat Model  (sub-nodo por ai_languageModel)
 ```
 
-⚠️ **El modelo en producción es `OpenAI Chat Model`, pero el generador emite
-`Anthropic Chat Model`** (`lmChatAnthropic`, `claude-opus-4-8`). Es una
-divergencia deliberada del despliegue, no un error del repo — pero significa que
-**reimportar el JSON generado sustituye el nodo del modelo**: habría que volver a
-poner OpenAI y seleccionar su credencial. Antes de regenerar, decidir cuál de los
-dos manda; si OpenAI se vuelve definitivo, cambiarlo en `build_workflow_ia.mjs`
-para que el repo deje de mentir.
+**El modelo es OpenAI y el generador también lo emite** (`lmChatOpenAi`, por
+defecto `gpt-4o-mini`). Hubo una divergencia —el generador emitía Anthropic
+mientras producción usaba OpenAI, así que reimportar sustituía el nodo sin
+avisar— y se cerró alineando el repo con el despliegue. `ia_llm_02_parsear.js`
+entiende las dos formas de respuesta, así que cambiar de proveedor no rompe el
+parseo.
+
+Tras importar siguen sin viajar en el JSON, y hay que ponerlos a mano: la
+**credencial de OpenAI**, el **modelo** (confirmar que `gpt-4o-mini` sirve), el
+`service_role` del nodo "Actualizar Supabase" y la **credencial Header Auth** del
+Webhook. Importar además **crea un workflow nuevo**, no actualiza el existente:
+quedarían dos con el mismo nombre y hay que borrar el viejo.
 
 Regenerar: `node n8n/build_workflow.mjs && node n8n/build_workflow_ia.mjs`. Tras
 reimportar, hay que **reseleccionar la credencial del modelo** (no viaja en el
