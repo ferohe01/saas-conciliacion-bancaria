@@ -6,99 +6,11 @@ import {
   type FilaBanco,
   type FilaTipo,
 } from "@/lib/reportes";
-import type { ResumenAprendizaje } from "@/lib/aprendizaje";
 import { formatearFecha } from "@/lib/parsing/resumen";
 
 /** Vista del reporte (server component, sin interacción salvo hover nativo). */
 
 const NUM = (n: number) => n.toLocaleString("es-PE");
-
-// ── Panel de aprendizaje de la IA (few-shot dinámico) ───────────────────────
-// Muestra el pool de decisiones humanas y cuántas alimentan cada corrida. Es
-// GLOBAL (todo el historial), no depende del filtro de período.
-export function PanelAprendizaje({ ap }: { ap: ResumenAprendizaje }) {
-  const totalBalance = ap.positivos + ap.negativos || 1;
-  const pctPos = Math.round((ap.positivos / totalBalance) * 100);
-  return (
-    <div className="rounded-2xl border border-violet-200 bg-violet-50/40 p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="font-semibold text-neutral-900">Aprendizaje de la IA</h2>
-          <p className="text-xs text-neutral-600">
-            La IA se calibra con tus decisiones de conciliaciones anteriores.
-          </p>
-        </div>
-        <span className="shrink-0 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-800">
-          Few-shot dinámico
-        </span>
-      </div>
-
-      {ap.total === 0 ? (
-        <p className="mt-4 rounded-xl border border-dashed border-violet-200 bg-white/60 px-4 py-3 text-sm text-neutral-700">
-          Aún no hay decisiones registradas. A medida que aceptes o rechaces
-          sugerencias, la IA aprenderá el criterio de tu empresa y afinará las
-          próximas conciliaciones.
-        </p>
-      ) : (
-        <div className="mt-4 grid gap-5 sm:grid-cols-[auto_1fr] sm:items-center">
-          <div className="flex items-baseline gap-2">
-            <span className="text-4xl font-bold tabular-nums text-violet-800">
-              {NUM(ap.activos)}
-            </span>
-            <span className="text-sm text-neutral-600">
-              ejemplos activos
-              <br />
-              por conciliación
-            </span>
-          </div>
-
-          <div>
-            <div
-              className="flex h-3 w-full overflow-hidden rounded-full bg-neutral-100"
-              role="img"
-              aria-label={`${ap.positivos} aceptados y ${ap.negativos} rechazados`}
-            >
-              {ap.positivos > 0 && (
-                <div
-                  className="h-3 bg-emerald-500"
-                  style={{ width: `${pctPos}%` }}
-                />
-              )}
-              {ap.negativos > 0 && <div className="h-3 flex-1 bg-rose-400" />}
-            </div>
-            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs">
-              <span className="flex items-center gap-1.5 text-neutral-700">
-                <span
-                  className="h-2.5 w-2.5 rounded-sm bg-emerald-500"
-                  aria-hidden
-                />
-                Aceptados (la IA acertó):{" "}
-                <span className="font-medium tabular-nums text-neutral-900">
-                  {NUM(ap.positivos)}
-                </span>
-              </span>
-              <span className="flex items-center gap-1.5 text-neutral-700">
-                <span
-                  className="h-2.5 w-2.5 rounded-sm bg-rose-400"
-                  aria-hidden
-                />
-                Rechazados (corregidos):{" "}
-                <span className="font-medium tabular-nums text-neutral-900">
-                  {NUM(ap.negativos)}
-                </span>
-              </span>
-            </div>
-            <p className="mt-2 text-xs text-neutral-600">
-              {ap.total > ap.activos
-                ? `De ${NUM(ap.total)} decisiones acumuladas, las más recientes y balanceadas alimentan cada corrida.`
-                : "Estas decisiones se envían como ejemplos en cada nueva conciliación."}
-            </p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 export function ReporteVista({
   kpis,
@@ -136,47 +48,6 @@ export function ReporteVista({
 
       {recientes.length > 0 && <TablaRecientes recientes={recientes} />}
     </div>
-  );
-}
-
-// ── Versión compacta para el dashboard (enlace a /reportes) ─────────────────
-export function PanelAprendizajeCompacto({ ap }: { ap: ResumenAprendizaje }) {
-  if (ap.total === 0) return null;
-  return (
-    <Link
-      href="/reportes"
-      className="block rounded-2xl border border-violet-200 bg-violet-50/40 p-6 shadow-asiento transition-colors hover:border-violet-400"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-neutral-900">
-          Aprendizaje de la IA
-        </h2>
-        <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-800">
-          Few-shot dinámico
-        </span>
-      </div>
-      <div className="mt-3 flex items-baseline gap-2">
-        <span className="text-3xl font-bold tabular-nums text-violet-800">
-          {NUM(ap.activos)}
-        </span>
-        <span className="text-sm text-neutral-600">
-          ejemplos activos por conciliación
-        </span>
-      </div>
-      <p className="mt-2 text-sm text-neutral-700">
-        <span className="font-medium tabular-nums text-emerald-800">
-          {NUM(ap.positivos)}
-        </span>{" "}
-        aceptados ·{" "}
-        <span className="font-medium tabular-nums text-rose-700">
-          {NUM(ap.negativos)}
-        </span>{" "}
-        rechazados de {NUM(ap.total)} decisiones acumuladas.
-      </p>
-      <span className="mt-4 inline-block text-sm font-medium text-blue-700">
-        Ver reportes →
-      </span>
-    </Link>
   );
 }
 

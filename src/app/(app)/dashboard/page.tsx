@@ -17,8 +17,8 @@
 import Link from "next/link";
 import { getEmpresaActual } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { resumenAprendizaje } from "@/lib/aprendizaje";
-import { PanelAprendizajeCompacto } from "@/components/reportes/ReporteVista";
+import { getResumenAprendizaje } from "@/lib/aprendizaje-servidor";
+import { GanchoAprendizaje } from "@/components/aprendizaje/GanchoAprendizaje";
 import { formatearFecha } from "@/lib/parsing/resumen";
 import { BancoIcon } from "@/components/wizard/icons";
 import { EstadoVacio, BadgeEstadoJob, Tarjeta, clasesBoton } from "@/components/ui";
@@ -278,21 +278,12 @@ export default async function DashboardPage({
   const suscripcion = estadoSuscripcion(empresa ?? {});
 
   const [
-    { data: histAprend },
     { data: aprobadasData },
     { data: recientesData },
     { count: numCuentas },
     { data: cuentasData },
     { count: sinAprobar },
   ] = await Promise.all([
-    // Pool de aprendizaje: mismo criterio que el few-shot del backend.
-    supabase
-      .from("jobs_conciliacion")
-      .select("resultado")
-      .eq("estado", "completado")
-      .not("resultado", "is", null)
-      .order("created_at", { ascending: false })
-      .limit(30),
     // Solo lo APROBADO alimenta las cifras: es la conciliación que rige. Se
     // traen todos los años para poder ofrecer el selector; el volumen es de
     // unas pocas decenas de filas por ejercicio.
@@ -329,9 +320,7 @@ export default async function DashboardPage({
       .in("estado_contable", ["borrador", "en_proceso", "observada"]),
   ]);
 
-  const aprendizaje = resumenAprendizaje(
-    (histAprend ?? []) as Parameters<typeof resumenAprendizaje>[0],
-  );
+  const aprendizaje = await getResumenAprendizaje();
 
   // Normalizar a JobReporte y quedarse con una corrida por período+cuenta.
   const jobs: JobReporte[] = [];
@@ -635,7 +624,7 @@ export default async function DashboardPage({
         </section>
       )}
 
-      <PanelAprendizajeCompacto ap={aprendizaje} />
+      <GanchoAprendizaje ap={aprendizaje} />
     </div>
   );
 }

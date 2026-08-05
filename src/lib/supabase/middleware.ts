@@ -12,6 +12,7 @@ const RUTAS_PROTEGIDAS = [
   "/reportes",
   "/configuracion",
   "/conexiones",
+  "/aprendizaje",
 ];
 
 /** Rutas públicas de autenticación (no redirigir si ya no hay sesión). */

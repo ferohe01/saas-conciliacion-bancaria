@@ -657,6 +657,45 @@ quedó huérfana (no se lee ni se escribe; el merge conserva lo antiguo).
     conciliación y el balance aceptados/rechazados del pool. Versión compacta y
     enlazable también en `/dashboard`. Ver nota de arquitectura abajo.
 
+## Aprendizaje IA: sección propia y de núcleo
+
+`/aprendizaje` es el **diferenciador comercial** del producto: no concilia mejor
+que otro sistema en abstracto, concilia como **esta** empresa. Por eso dejó de
+vivir repartido —un panel en `/reportes`, una tarjeta en `/dashboard`, ambos
+hospedados dentro de `ReporteVista.tsx`— y tiene su propia ruta.
+
+- **Es núcleo, NO un módulo contratable.** No pasa por `suscripciones_modulo` ni
+  se puede desactivar: poner detrás de una puerta la razón por la que alguien
+  compra el sistema debilita el argumento principal. (Contrástese con
+  `cobranzas`, que sí es un añadido.)
+- **En el panel de control queda un gancho de una línea**, no el detalle.
+  Borrarlo del todo habría vuelto el aprendizaje *menos* visible —el panel se
+  mira a diario, la sección dos veces al mes—, justo lo contrario del objetivo.
+  A diferencia de la tarjeta anterior, el gancho **no desaparece cuando no hay
+  decisiones**: durante la prueba gratuita es cuando más falta hace explicar qué
+  se gana quedándose.
+- La consulta del pool (últimos 30 jobs) estaba **copiada en dos pantallas** y
+  ahora vive en `lib/aprendizaje-servidor.ts`. ⚠️ Su `LIMITE_JOBS` debe seguir al
+  del backend: lo que la pantalla enseña tiene que ser exactamente lo que
+  alimenta el prompt, no una aproximación.
+
+**Pendiente (paso 2).** Lo que hay hoy es la mudanza y la estructura. Lo que de
+verdad sostiene la propuesta de valor todavía no existe y hay que **calcularlo**:
+
+1. **Medir.** No hay ninguna métrica que demuestre que el few-shot mejora algo.
+   Sin una curva (% automatizado, sugerencias aceptadas sin modificar) se está
+   vendiendo una afirmación sin verificar.
+2. **Mostrar el precedente en el momento de la revisión** — «porque en marzo
+   aceptaste una comisión de S/12 con este mismo cliente». Convierte un score
+   opaco en un recuerdo reconocible; es donde UX y aprendizaje son lo mismo.
+3. **Capturar el porqué del rechazo.** Hoy se tira la señal más informativa que
+   existe: *por qué* estaba mal.
+4. **Curar**, no configurar con perillas: poder descartar un ejemplo que enseña
+   mal. Preguntarle a una PyME cuántos ejemplos few-shot quiere es pedirle que
+   configure algo que no puede entender.
+5. **Arranque en frío.** Una empresa nueva tiene cero decisiones justo durante
+   los 30 días en que decide si paga.
+
 ## Nota de arquitectura: aprendizaje de la IA (few-shot dinámico)
 
 **El aprendizaje NO usa base de datos vectorial ni reentrena/fine-tunea ningún

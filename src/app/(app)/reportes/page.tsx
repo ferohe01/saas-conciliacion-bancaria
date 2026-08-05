@@ -4,8 +4,7 @@ import { EncabezadoPagina, EstadoVacio, clasesBoton } from "@/components/ui";
 import { FiltrosReporte } from "@/components/reportes/FiltrosReporte";
 import { AvisoSinAprobar } from "@/components/conciliacion/AvisoSinAprobar";
 import { ExportarReporte } from "@/components/reportes/ExportarReporte";
-import { ReporteVista, PanelAprendizaje } from "@/components/reportes/ReporteVista";
-import { resumenAprendizaje } from "@/lib/aprendizaje";
+import { ReporteVista } from "@/components/reportes/ReporteVista";
 import { nombreMes } from "@/lib/periodo";
 import {
   filtrarAnual,
@@ -56,7 +55,6 @@ export default async function ReportesPage({
   const [
     { data: cuentasData },
     { data: jobsData },
-    { data: histAprend },
     { count: sinAprobar },
   ] = await Promise.all([
       supabase
@@ -72,15 +70,6 @@ export default async function ReportesPage({
         .eq("estado", "completado")
         .eq("estado_contable", "aprobada")
         .order("periodo_desde", { ascending: false }),
-      // Pool de aprendizaje: últimos 30 jobs (mismo criterio que usa el backend
-      // al armar el few-shot). RLS limita a la empresa del usuario.
-      supabase
-        .from("jobs_conciliacion")
-        .select("resultado")
-        .eq("estado", "completado")
-        .not("resultado", "is", null)
-        .order("created_at", { ascending: false })
-        .limit(30),
       // Terminadas pero sin aprobar: no cuentan aqui, y hay que decirlo.
       supabase
         .from("jobs_conciliacion")
@@ -88,10 +77,6 @@ export default async function ReportesPage({
         .eq("estado", "completado")
         .in("estado_contable", ["borrador", "en_proceso", "observada"]),
     ]);
-
-  const aprendizaje = resumenAprendizaje(
-    (histAprend ?? []) as Parameters<typeof resumenAprendizaje>[0],
-  );
 
   const cuentas = (cuentasData ?? []) as {
     id: string;
@@ -206,7 +191,6 @@ export default async function ReportesPage({
         />
       ) : (
         <>
-          <PanelAprendizaje ap={aprendizaje} />
           <AvisoSinAprobar cuantas={sinAprobar ?? 0} />
 
           <FiltrosReporte

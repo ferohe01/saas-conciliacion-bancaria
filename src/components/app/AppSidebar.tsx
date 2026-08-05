@@ -69,6 +69,14 @@ const IconoConfig = (p: IconProps) => (
   />
 );
 
+/** Chispa: lo que el sistema añade por su cuenta, no un cerebro ni un robot. */
+const IconoAprendizaje = (p: IconProps) => (
+  <Ico
+    {...p}
+    d={["M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z", "M18 15l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z"]}
+  />
+);
+
 const IconoConexion = (p: IconProps) => (
   <Ico
     {...p}
@@ -106,6 +114,9 @@ const ENLACES: Enlace[] = [
   { href: "/cobranzas", label: "Por cobrar", Icono: IconoCobranzas, modulo: "cobranzas" },
   { href: "/pagos", label: "Por pagar", Icono: IconoPagar, modulo: "cobranzas" },
   { href: "/reportes", label: "Reportes", Icono: IconoReportes },
+  // Núcleo, no módulo contratable: es el diferenciador del producto y no debe
+  // vivir detrás de una puerta.
+  { href: "/aprendizaje", label: "Aprendizaje IA", Icono: IconoAprendizaje },
   { href: "/cuentas", label: "Cuentas", Icono: IconoCuentas },
   { href: "/conexiones", label: "Conectar sistema", Icono: IconoConexion },
   { href: "/configuracion", label: "Configuración", Icono: IconoConfig },
