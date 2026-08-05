@@ -217,13 +217,57 @@ reimportar, hay que **reseleccionar la credencial del modelo** (no viaja en el
 JSON), pegar el `service_role` en el nodo "Actualizar Supabase" y **seleccionar
 la credencial Header Auth del nodo Webhook** (`x-n8n-token` = `N8N_WEBHOOK_TOKEN`;
 el nodo declara `authentication: "headerAuth"`, pero la credencial tampoco viaja
-en el JSON — sin seleccionarla el webhook queda **abierto a cualquiera**). El backend
+en el JSON). El backend
 **siempre** dispara n8n real (no hay simulador local). Los nodos `n8n/*.js` son la
 **fuente única** del motor: no hay implementación paralela en la app. Todo cambio
 de lógica de conciliación se hace ahí y se verifica **end-to-end** en n8n (los
 nodos Code no se testean unitariamente en el repo). Regla al editar: mantener la
 forma de salida de cada nodo (`job_id`, `metadata`, `config`, `matches`,
 `pendientes_*`) para no romper el nodo siguiente.
+
+#### ⚠️ n8n no re-registra el webhook al guardar: hay que reiniciar el contenedor
+
+Costó una tarde entera de depuración, así que queda escrito.
+
+Editar el nodo, guardar el workflow, desactivarlo y volver a activarlo **no basta**:
+los cambios se guardan en la base de n8n, pero la ruta viva sigue sirviendo la
+definición con la que se registró el webhook al arrancar. El síntoma es
+desconcertante porque **todo lo que haces en el editor parece no existir** — y
+lleva a repetir el mismo arreglo cinco veces creyendo que se hace mal.
+
+**El arreglo es reiniciar el servicio de n8n en Dokploy** (*Redeploy* / *Restart*).
+Al arrancar vuelve a leer los workflows activos y registra sus webhooks desde
+cero. Guarda primero el flujo como quieras que quede; el reinicio es lo que lo
+hace efectivo. (Si el servicio tuviera más de una réplica el problema sería
+permanente: una instancia registra y otra atiende. Debe estar en 1.)
+
+#### Cómo se diagnostica desde fuera, sin entrar a n8n
+
+Un `POST` al webhook distingue los tres fallos por su respuesta, sin tocar nada:
+
+| Respuesta | Qué significa |
+|---|---|
+| `500` · `No authentication data defined on node!` | El nodo Webhook tiene `authentication: headerAuth` **sin credencial asignada**. Rechaza a todo el mundo, con token o sin él. |
+| `403` · `Authorization data is wrong!` | Credencial puesta y comparando. Si la app también recibe 403, es que los dos valores del token no coinciden. |
+| `200` · `{"status":"accepted", …}` **sin enviar token** | El webhook está **abierto a cualquiera** (`authentication: None`). |
+| `404` · `not registered` | El workflow no está activo, o hay otro compitiendo por el mismo path. |
+
+⚠️ Corrección de una creencia anterior de este documento: **un nodo sin credencial
+NO deja el webhook abierto** — devuelve 500 a todo. Abierto queda solo si alguien
+pone `authentication: None`, que es justo lo que se hace al diagnosticar y lo que
+hay que acordarse de deshacer.
+
+**Los dos workflows registran el mismo path `conciliaciones`**, así que solo uno
+puede estar activo. Antes de dar por bueno cualquier arreglo, comprobar en cuál
+de los dos se está editando: arreglar el que no está activo no cambia nada, y el
+error observado es idéntico.
+
+El grafo también acota dónde puede fallar: `Responder aceptado` es el **segundo**
+nodo y responde antes de que se ejecute nada más. Por tanto un `500` en el POST
+solo puede venir del Webhook; si lo que falta es la credencial del modelo
+(Anthropic), la respuesta es **200** y el trabajo muere después, por dentro —el
+job se queda en `procesando` para siempre—. Son dos averías distintas con
+síntomas opuestos.
 
 ## Comprobantes: cuentas por cobrar (Fase A)
 
