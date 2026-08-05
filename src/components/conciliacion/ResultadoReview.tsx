@@ -15,6 +15,8 @@ import type {
   RegistroInterno,
   MovimientoBancario,
 } from "@/lib/contract/payload";
+import { clavePrecedente, type Precedente } from "@/lib/precedentes";
+import { FichaPrecedente } from "./FichaPrecedente";
 import { Boton, Tarjeta, BadgeMetodo, BadgeAgrupacion } from "@/components/ui";
 
 /**
@@ -57,7 +59,8 @@ export function ResultadoReview({
   internos,
   bancarios,
   moneda,
-}: Props) {
+  precedentes = {},
+}: Props & { precedentes?: Record<string, Precedente> }) {
   const router = useRouter();
   const [pendiente, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -283,6 +286,14 @@ export function ResultadoReview({
               {cola.map(({ m, idx }) => (
                 <li key={idx}>
                   <FichaSugerencia
+                    precedente={
+                      precedentes[
+                        clavePrecedente(
+                          m.ids_internos ?? [],
+                          m.ids_movimientos ?? [],
+                        )
+                      ] ?? null
+                    }
                     match={m}
                     moneda={moneda}
                     seleccionada={enLote.has(idx)}
@@ -712,6 +723,7 @@ function BarraLote({
 function FichaSugerencia({
   match,
   moneda,
+  precedente,
   seleccionada,
   pendiente,
   internos,
@@ -722,6 +734,7 @@ function FichaSugerencia({
 }: {
   match: Match;
   moneda: string;
+  precedente: Precedente | null;
   seleccionada: boolean;
   pendiente: boolean;
   internos: ItemLado[];
@@ -797,6 +810,8 @@ function FichaSugerencia({
           {match.justificacion}
         </p>
       )}
+
+      {precedente && <FichaPrecedente p={precedente} moneda={moneda} />}
 
       <div className="mt-4 flex gap-2">
         <Boton

@@ -707,17 +707,40 @@ valor de este módulo:
 `tasa` es `null` —no `0`— cuando nadie ha revisado nada: cero significaría "la
 IA falló siempre"; null significa "todavía no sabemos".
 
+### El precedente en la revisión
+
+Un score de `0.82` no es un argumento y no ayuda a nadie a decidir. Al revisar
+una sugerencia, la ficha muestra ahora **un caso parecido que la propia empresa
+ya resolvió** — «lo aceptaste el 10/03 · Comercial Ñuñez · diferencia de S/12».
+Lógica en `src/lib/precedentes.ts` (pura, con tests).
+
+⚠️ **Lo que se afirma es más modesto de lo que parece, a propósito.** El texto
+NO dice "la IA lo propuso por esto": el modelo nunca informa de qué ejemplo pesó
+en su decisión, así que atribuirle esa causa sería **inventarle un
+razonamiento**. Se afirma lo comprobable: *decidiste algo parecido antes*. La
+búsqueda es determinística y ocurre en la app, no en el LLM.
+
+- **Pesos: contraparte 3, misma diferencia 2, misma categoría 1.** Reflejan qué
+  convence a una persona: "con este cliente ya pasó" cierra la duda; la
+  categoría por sí sola no dice nada (hay cientos de `comision_bancaria` que no
+  se parecen en nada) y por eso no alcanza el mínimo de 3 en solitario.
+- **Devuelve `null` cuando no hay nada parecido de verdad.** Rellenar con
+  parecidos forzados enseña al usuario a ignorar el recuadro.
+- **Una diferencia de cero no cuenta como coincidencia**: si contara, media
+  conciliación sería "precedente" de la otra media.
+- **Solo lo que una persona decidió.** Citar un match auto-conciliado como "tú
+  lo resolviste así" sería falso: nadie lo miró.
+- Se calcula en el servidor (`precedentes-servidor.ts`): el historial de otros
+  jobs no tiene por qué viajar entero al navegador.
+
 **Pendiente (resto del paso 2):**
 
-1. **Mostrar el precedente en el momento de la revisión** — «porque en marzo
-   aceptaste una comisión de S/12 con este mismo cliente». Convierte un score
-   opaco en un recuerdo reconocible; es donde UX y aprendizaje son lo mismo.
-3. **Capturar el porqué del rechazo.** Hoy se tira la señal más informativa que
+1. **Capturar el porqué del rechazo.** Hoy se tira la señal más informativa que
    existe: *por qué* estaba mal.
-4. **Curar**, no configurar con perillas: poder descartar un ejemplo que enseña
+2. **Curar**, no configurar con perillas: poder descartar un ejemplo que enseña
    mal. Preguntarle a una PyME cuántos ejemplos few-shot quiere es pedirle que
    configure algo que no puede entender.
-5. **Arranque en frío.** Una empresa nueva tiene cero decisiones justo durante
+3. **Arranque en frío.** Una empresa nueva tiene cero decisiones justo durante
    los 30 días en que decide si paga.
 
 ## Nota de arquitectura: aprendizaje de la IA (few-shot dinámico)

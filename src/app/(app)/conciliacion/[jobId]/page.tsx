@@ -10,6 +10,7 @@ import { ResultadoConciliacion } from "@/lib/contract/resultado";
 import { PayloadConciliacion } from "@/lib/contract/payload";
 import { EncabezadoPagina, BadgeEstadoJob } from "@/components/ui";
 import { EstadoContablePanel } from "@/components/conciliacion/EstadoContablePanel";
+import { getPrecedentes } from "@/lib/precedentes-servidor";
 import type { EstadoContable } from "@/lib/cicloContable";
 
 /**
@@ -53,6 +54,17 @@ export default async function ConciliacionPage({
   const mostrarReview =
     resultadoParsed?.success && payloadParsed.success;
 
+  // Casos parecidos ya resueltos, para las sugerencias que esperan decisión.
+  // Se calcula en el servidor: el historial de otros jobs no tiene por qué
+  // viajar entero al navegador.
+  const precedentes = mostrarReview
+    ? await getPrecedentes(
+        data.id,
+        resultadoParsed!.data.matches,
+        payloadParsed.data,
+      )
+    : {};
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <EncabezadoPagina
@@ -83,6 +95,7 @@ export default async function ConciliacionPage({
           internos={payloadParsed.data.registros_internos}
           bancarios={payloadParsed.data.movimientos_bancarios}
           moneda={payloadParsed.data.metadata.cuenta.moneda}
+          precedentes={precedentes}
         />
       ) : (
         <ProgresoConciliacion jobInicial={data as unknown as JobRow} />
