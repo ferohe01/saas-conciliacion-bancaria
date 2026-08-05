@@ -228,7 +228,7 @@ Webhook → Responder aceptado → Exacta → Difusa → Agrupacion → Candidat
 ```
 
 **El modelo es OpenAI y el generador también lo emite** (`lmChatOpenAi`, por
-defecto `gpt-4o-mini`). Hubo una divergencia —el generador emitía Anthropic
+defecto `gpt-5.6-luna`). Hubo una divergencia —el generador emitía Anthropic
 mientras producción usaba OpenAI, así que reimportar sustituía el nodo sin
 avisar— y se cerró alineando el repo con el despliegue. `ia_llm_02_parsear.js`
 entiende las dos formas de respuesta, así que cambiar de proveedor no rompe el

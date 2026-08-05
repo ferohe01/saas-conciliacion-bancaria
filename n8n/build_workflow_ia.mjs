@@ -78,11 +78,14 @@ const nodes = [
     //
     // ⚠️ Tras importar hay DOS cosas que confirmar, porque no viajan en el JSON
     // ni se pueden adivinar desde aquí: la **credencial de OpenAI** y el
-    // **modelo**. `gpt-4o-mini` es un punto de partida barato y suficiente para
-    // adjudicar sobre una shortlist ya acotada; si el criterio se queda corto,
-    // subir a uno mayor es cambiar este valor.
+    // **modelo**. El desplegable del nodo lista los modelos que la credencial
+    // puede usar de verdad: si el id de abajo no aparece ahí, es que no existe
+    // para esa cuenta y hay que corregirlo.
+    //
+    // La opción barata de la serie GPT-5.6. Si el criterio se queda corto,
+    // subir de modelo es cambiar este valor.
     parameters: {
-      model: { __rl: true, mode: "list", value: "gpt-4o-mini" },
+      model: { __rl: true, mode: "list", value: "gpt-5.6-luna" },
       options: {},
     },
     id: randomUUID(),
