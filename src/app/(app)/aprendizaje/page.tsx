@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getDatosAprendizaje } from "@/lib/aprendizaje-servidor";
 import { PanelAprendizaje } from "@/components/aprendizaje/PanelAprendizaje";
 import { CurvaAprendizaje } from "@/components/aprendizaje/CurvaAprendizaje";
+import { MotivosRechazo } from "@/components/aprendizaje/MotivosRechazo";
 import { EncabezadoPagina, Tarjeta } from "@/components/ui";
 
 /**
@@ -34,6 +35,8 @@ export default async function AprendizajePage() {
           del que decide si paga. El tamaño del pool responde "¿con qué está
           aprendiendo?", que interesa después. */}
       <CurvaAprendizaje m={metricas} />
+
+      <MotivosRechazo motivos={metricas.motivosRechazo} />
 
       <PanelAprendizaje ap={resumen} />
 

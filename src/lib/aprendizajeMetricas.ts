@@ -31,7 +31,7 @@
 export type MatchMetrica = {
   metodo?: string;
   estado_revision?: string;
-  decisiones?: { accion?: string; timestamp?: string }[];
+  decisiones?: { accion?: string; timestamp?: string; motivo?: string | null }[];
 };
 
 export type JobMetrica = {
@@ -77,6 +77,12 @@ export type MetricasAprendizaje = {
   tendencia: Tendencia | null;
   /** Por qué no hay tendencia todavía, en lenguaje de usuario. */
   motivoSinTendencia: string | null;
+  /**
+   * Códigos de motivo de cada rechazo, en crudo. Responde "¿en qué se equivoca
+   * más?", que es lo accionable: si casi todo es "otro cliente", el problema
+   * está en cómo compara nombres, no en las tolerancias de monto.
+   */
+  motivosRechazo: (string | null)[];
 };
 
 /**
@@ -145,6 +151,17 @@ function tasaDeTramo(puntos: PuntoAprendizaje[]): {
  */
 export function metricasAprendizaje(jobs: JobMetrica[]): MetricasAprendizaje {
   const todos = jobs.map(puntoDeJob);
+
+  const motivosRechazo: (string | null)[] = [];
+  for (const job of jobs) {
+    for (const m of job.resultado?.matches ?? []) {
+      if (m.metodo !== "ia") continue;
+      if (decisionHumana(m) !== "rechazado") continue;
+      motivosRechazo.push(
+        m.decisiones?.[m.decisiones.length - 1]?.motivo ?? null,
+      );
+    }
+  }
   // Solo interesan las corridas donde la IA propuso algo; las demás son ruido
   // en la gráfica y hunden visualmente la línea sin aportar información.
   const puntos = todos.filter((p) => p.revisadas > 0 || p.automaticas > 0);
@@ -192,6 +209,7 @@ export function metricasAprendizaje(jobs: JobMetrica[]): MetricasAprendizaje {
     tasa: revisadas > 0 ? aceptadas / revisadas : null,
     tendencia,
     motivoSinTendencia,
+    motivosRechazo,
   };
 }
 

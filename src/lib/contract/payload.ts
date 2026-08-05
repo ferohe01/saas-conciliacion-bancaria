@@ -94,6 +94,11 @@ export const EjemploAprendizaje = z.object({
   interno: z.string().min(1),
   banco: z.string().min(1),
   categoria: z.string().nullable().optional(),
+  /**
+   * Por qué se rechazó, en una frase corta para el prompt. Un ejemplo negativo
+   * sin motivo enseña que ese par estaba mal; con motivo enseña qué mirar.
+   */
+  motivo: z.string().nullable().optional(),
 });
 export type EjemploAprendizaje = z.infer<typeof EjemploAprendizaje>;
 

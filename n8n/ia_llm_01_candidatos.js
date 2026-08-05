@@ -139,10 +139,14 @@ const fewShot = ejemplos.length
       "",
       "DECISIONES HUMANAS PREVIAS (aprende el criterio de esta empresa; fíjate en el",
       "patrón, no en los nombres puntuales):",
+      // El motivo del rechazo es lo que convierte "este par estaba mal" en
+      // "estaba mal PORQUE el nombre no calzaba": sin él, el ejemplo negativo
+      // solo enseña a evitar ese par concreto, que no se va a repetir nunca.
       ...ejemplos.map(
         (e) =>
           `- [${String(e.decision).toUpperCase()}] interno {${e.interno}} ↔ banco {${e.banco}}` +
-          (e.categoria ? ` (${e.categoria})` : ""),
+          (e.categoria ? ` (${e.categoria})` : "") +
+          (e.motivo ? ` — rechazado porque ${e.motivo}` : ""),
       ),
       "Calibra tu criterio con estos ejemplos (p. ej. si suelen ACEPTAR pese a una",
       "comisión, o RECHAZAR cuando el nombre no calza pese a montos iguales). No los",

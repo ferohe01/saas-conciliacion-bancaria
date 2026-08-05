@@ -1,4 +1,5 @@
 import type { EjemploAprendizaje } from "@/lib/contract/payload";
+import { buscarMotivo } from "@/lib/motivosRechazo";
 
 /**
  * Few-shot dinámico: convierte las decisiones humanas persistidas en jobs
@@ -25,7 +26,7 @@ type MovLite = {
   monto: number;
   glosa?: string | null;
 };
-type DecisionLite = { accion?: string; timestamp?: string };
+type DecisionLite = { accion?: string; timestamp?: string; motivo?: string | null };
 type MatchLite = {
   ids_internos?: string[];
   ids_movimientos?: string[];
@@ -69,6 +70,19 @@ function claseDeMatch(m: MatchLite): "aceptado" | "rechazado" | null {
   // afirmó explícitamente, aunque no tenga historial de decisiones.
   if (m.metodo === "manual") return "aceptado";
   return null;
+}
+
+/**
+ * Motivo del rechazo, traducido a la frase que entiende el prompt.
+ *
+ * Es lo que convierte un ejemplo negativo de "este par estaba mal" en "este par
+ * estaba mal PORQUE no era la misma contraparte" — que es lo único que permite
+ * a la IA no repetir el error en vez de limitarse a evitar ese par concreto.
+ */
+function motivoParaIa(m: MatchLite): string | null {
+  const cod = m.decisiones?.[m.decisiones.length - 1]?.motivo;
+  if (!cod) return null;
+  return buscarMotivo(cod)?.paraIa ?? null;
 }
 
 const recorta = (s: string) =>
@@ -134,6 +148,7 @@ export function construirEjemplos(
         interno,
         banco,
         categoria: m.categoria_diferencia ?? null,
+        ...(clase === "rechazado" ? { motivo: motivoParaIa(m) } : {}),
       };
       const balde = clase === "aceptado" ? positivos : negativos;
       if (balde.length < maxPorClase) balde.push(ejemplo);

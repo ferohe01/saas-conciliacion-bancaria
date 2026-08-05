@@ -321,6 +321,7 @@ export async function registrarDecision(
   matchIndex: number,
   accion: z.infer<typeof AccionSchema>,
   nota?: string,
+  motivo?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!AccionSchema.safeParse(accion).success) {
     return { ok: false, error: "Acción inválida." };
@@ -339,6 +340,9 @@ export async function registrarDecision(
       accion,
       timestamp: new Date().toISOString(),
       nota: nota ?? null,
+      // Solo tiene sentido en un rechazo: "por que aceptaste" no es una
+      // pregunta que nadie se haga al revisar.
+      motivo: accion === "rechazado" ? (motivo ?? null) : null,
     },
   ];
 
@@ -356,6 +360,7 @@ export async function registrarDecisiones(
   jobId: string,
   matchIndices: number[],
   accion: z.infer<typeof AccionSchema>,
+  motivo?: string,
 ): Promise<{ ok: boolean; error?: string; aplicadas?: number }> {
   if (!AccionSchema.safeParse(accion).success) {
     return { ok: false, error: "Acción inválida." };
@@ -374,7 +379,13 @@ export async function registrarDecisiones(
     match.estado_revision = accion;
     match.decisiones = [
       ...(match.decisiones ?? []),
-      { usuario_id: ctx.usuarioId, accion, timestamp, nota: null },
+      {
+        usuario_id: ctx.usuarioId,
+        accion,
+        timestamp,
+        nota: null,
+        motivo: accion === "rechazado" ? (motivo ?? null) : null,
+      },
     ];
     aplicadas++;
   }

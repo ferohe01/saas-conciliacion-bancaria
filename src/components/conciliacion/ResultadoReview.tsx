@@ -17,6 +17,8 @@ import type {
 } from "@/lib/contract/payload";
 import { clavePrecedente, type Precedente } from "@/lib/precedentes";
 import { FichaPrecedente } from "./FichaPrecedente";
+import { SelectorMotivo } from "./SelectorMotivo";
+import type { MotivoRechazo } from "@/lib/motivosRechazo";
 import { Boton, Tarjeta, BadgeMetodo, BadgeAgrupacion } from "@/components/ui";
 
 /**
@@ -68,6 +70,11 @@ export function ResultadoReview({
 
   // Selección para despacho en lote de la cola de revisión.
   const [enLote, setEnLote] = useState<Set<number>>(new Set());
+  // Qué rechazo está esperando motivo: el índice de una sugerencia, "lote", o
+  // nada. Un solo estado porque nunca hay dos preguntas abiertas a la vez.
+  const [pidiendoMotivo, setPidiendoMotivo] = useState<number | "lote" | null>(
+    null,
+  );
   // Selección para conciliación manual.
   const [selInt, setSelInt] = useState<Set<string>>(new Set());
   const [selMov, setSelMov] = useState<Set<string>>(new Set());
@@ -156,12 +163,19 @@ export function ResultadoReview({
     });
   }
 
-  function decidirLote(indices: number[], accion: "aceptado" | "rechazado") {
+  function decidirLote(
+    indices: number[],
+    accion: "aceptado" | "rechazado",
+    motivo?: MotivoRechazo,
+  ) {
     if (indices.length === 0) return;
     ejecutar(
       async () => {
-        const r = await registrarDecisiones(jobId, indices, accion);
-        if (r.ok) setEnLote(new Set());
+        const r = await registrarDecisiones(jobId, indices, accion, motivo);
+        if (r.ok) {
+          setEnLote(new Set());
+          setPidiendoMotivo(null);
+        }
         return r;
       },
       `${indices.length} ${indices.length === 1 ? "sugerencia" : "sugerencias"} ${
@@ -264,6 +278,17 @@ export function ResultadoReview({
           </Tarjeta>
         ) : (
           <div className="space-y-3">
+            {/* Un lote se rechaza por UN motivo comun: si hicieran falta
+                motivos distintos, no era un lote. Preguntarlo una vez por
+                sugerencia aqui destruiria la razon de ser del despacho masivo. */}
+            {pidiendoMotivo === "lote" && (
+              <SelectorMotivo
+                titulo={`¿Por qué rechazas estas ${enLote.size} sugerencias?`}
+                onElegir={(motivo) => decidirLote([...enLote], "rechazado", motivo)}
+                onCancelar={() => setPidiendoMotivo(null)}
+                disabled={pendiente}
+              />
+            )}
             <BarraLote
               cola={cola}
               enLote={enLote}
@@ -273,7 +298,7 @@ export function ResultadoReview({
                 setEnLote(marcar ? new Set(cola.map((x) => x.idx)) : new Set())
               }
               onAceptarSeleccion={() => decidirLote([...enLote], "aceptado")}
-              onRechazarSeleccion={() => decidirLote([...enLote], "rechazado")}
+              onRechazarSeleccion={() => setPidiendoMotivo("lote")}
               onAceptarAltas={() =>
                 decidirLote(
                   altaConfianza.map((x) => x.idx),
@@ -314,9 +339,22 @@ export function ResultadoReview({
                         "Sugerencia aceptada.",
                       )
                     }
-                    onRechazar={() =>
+                    pidiendoMotivo={pidiendoMotivo === idx}
+                    onPedirMotivo={() => setPidiendoMotivo(idx)}
+                    onCancelarMotivo={() => setPidiendoMotivo(null)}
+                    onRechazar={(motivo) =>
                       ejecutar(
-                        () => registrarDecision(jobId, idx, "rechazado"),
+                        async () => {
+                          const r = await registrarDecision(
+                            jobId,
+                            idx,
+                            "rechazado",
+                            undefined,
+                            motivo,
+                          );
+                          if (r.ok) setPidiendoMotivo(null);
+                          return r;
+                        },
                         "Sugerencia rechazada.",
                       )
                     }
@@ -726,10 +764,13 @@ function FichaSugerencia({
   precedente,
   seleccionada,
   pendiente,
+  pidiendoMotivo,
   internos,
   movimientos,
   onToggle,
   onAceptar,
+  onPedirMotivo,
+  onCancelarMotivo,
   onRechazar,
 }: {
   match: Match;
@@ -737,11 +778,14 @@ function FichaSugerencia({
   precedente: Precedente | null;
   seleccionada: boolean;
   pendiente: boolean;
+  pidiendoMotivo: boolean;
   internos: ItemLado[];
   movimientos: ItemLado[];
   onToggle: () => void;
   onAceptar: () => void;
-  onRechazar: () => void;
+  onPedirMotivo: () => void;
+  onCancelarMotivo: () => void;
+  onRechazar: (motivo: MotivoRechazo) => void;
 }) {
   const esGrupo = internos.length > 1 || movimientos.length > 1;
   const dif = match.diferencia_monto ?? 0;
@@ -813,24 +857,35 @@ function FichaSugerencia({
 
       {precedente && <FichaPrecedente p={precedente} moneda={moneda} />}
 
-      <div className="mt-4 flex gap-2">
-        <Boton
-          variante="confirmar"
-          tamano="sm"
+      {/* Rechazar abre la pregunta en vez de ejecutar: el motivo es la senal
+          mas informativa del ciclo y se perdia entera. Aceptar no pregunta
+          nada — "por que aceptaste" no es una duda que nadie tenga. */}
+      {pidiendoMotivo ? (
+        <SelectorMotivo
+          onElegir={onRechazar}
+          onCancelar={onCancelarMotivo}
           disabled={pendiente}
-          onClick={onAceptar}
-        >
-          Aceptar
-        </Boton>
-        <Boton
-          variante="secundario"
-          tamano="sm"
-          disabled={pendiente}
-          onClick={onRechazar}
-        >
-          Rechazar
-        </Boton>
-      </div>
+        />
+      ) : (
+        <div className="mt-4 flex gap-2">
+          <Boton
+            variante="confirmar"
+            tamano="sm"
+            disabled={pendiente}
+            onClick={onAceptar}
+          >
+            Aceptar
+          </Boton>
+          <Boton
+            variante="secundario"
+            tamano="sm"
+            disabled={pendiente}
+            onClick={onPedirMotivo}
+          >
+            Rechazar
+          </Boton>
+        </div>
+      )}
     </div>
   );
 }

@@ -33,6 +33,16 @@ export const DecisionHumana = z.object({
   accion: EstadoRevision, // aceptado | rechazado | modificado | ...
   timestamp: z.string().datetime(),
   nota: z.string().nullable().optional(),
+  /**
+   * Por qué se rechazó (código de `lib/motivosRechazo.ts`). Es la señal más
+   * informativa del ciclo: "rechazado" dice que la IA se equivocó, el motivo
+   * dice EN QUÉ.
+   *
+   * Opcional y sin `enum` a propósito: las decisiones guardadas antes de que
+   * esto existiera no lo traen, y validar contra una lista cerrada haría que
+   * un código retirado en el futuro **impidiera leer resultados antiguos**.
+   */
+  motivo: z.string().nullable().optional(),
 });
 export type DecisionHumana = z.infer<typeof DecisionHumana>;
 

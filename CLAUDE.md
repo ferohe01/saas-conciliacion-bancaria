@@ -733,14 +733,41 @@ búsqueda es determinística y ocurre en la app, no en el LLM.
 - Se calcula en el servidor (`precedentes-servidor.ts`): el historial de otros
   jobs no tiene por qué viajar entero al navegador.
 
+### El porqué del rechazo
+
+Un rechazo era solo `"rechazado"`: se guardaba **qué** decidió la persona y se
+tiraba **por qué**, que es la señal más informativa del ciclo. "Rechazado" le
+dice a la IA que se equivocó; "rechazado porque era otra contraparte" le dice
+**en qué**, que es lo único que permite no repetirlo — un ejemplo negativo sin
+motivo solo enseña a evitar ese par concreto, que no se va a repetir nunca.
+
+- **Códigos, no texto libre** (`src/lib/motivosRechazo.ts`). El texto libre no
+  se puede agregar («¿de qué falla más?») ni resumir en un prompt sin volverse
+  ruido. La nota libre sigue existiendo aparte, para el matiz.
+- **Un clic = un rechazo.** Elegir el motivo ejecuta la acción; pedir "elige y
+  confirma" duplicaría los clics de la tarea más repetitiva de la pantalla y
+  empujaría a la gente al despacho en lote solo para evitarlo.
+- **"Otro motivo" existe a propósito.** Sin escapatoria, quien no sabe qué poner
+  elige cualquiera con tal de seguir, y eso envenena el aprendizaje con datos
+  inventados. Un "otro" honesto vale más que una categoría falsa.
+- **El lote se rechaza por UN motivo común**: si hicieran falta motivos
+  distintos, no era un lote.
+- El motivo viaja al prompt (`ia_llm_01_candidatos.js`: *"— rechazado porque
+  …"*) y se agrega en `/aprendizaje` bajo **"¿En qué se equivoca?"**, que es la
+  mitad accionable del módulo: si la mitad de los fallos son "es otro cliente",
+  el problema está en cómo compara nombres, no en las tolerancias de monto.
+
+⚠️ `DecisionHumana.motivo` es `string` **sin `enum`**: las decisiones guardadas
+antes de esto no lo traen, y validar contra una lista cerrada haría que retirar
+un código en el futuro **impidiera leer resultados antiguos**. Añadir códigos es
+barato; renombrarlos o borrarlos rompe la lectura del histórico.
+
 **Pendiente (resto del paso 2):**
 
-1. **Capturar el porqué del rechazo.** Hoy se tira la señal más informativa que
-   existe: *por qué* estaba mal.
-2. **Curar**, no configurar con perillas: poder descartar un ejemplo que enseña
+1. **Curar**, no configurar con perillas: poder descartar un ejemplo que enseña
    mal. Preguntarle a una PyME cuántos ejemplos few-shot quiere es pedirle que
    configure algo que no puede entender.
-3. **Arranque en frío.** Una empresa nueva tiene cero decisiones justo durante
+2. **Arranque en frío.** Una empresa nueva tiene cero decisiones justo durante
    los 30 días en que decide si paga.
 
 ## Nota de arquitectura: aprendizaje de la IA (few-shot dinámico)
