@@ -152,3 +152,19 @@ describe("referencia_externa no interfiere con la deduplicación", () => {
     expect(r.repetidas).toBe(1);
   });
 });
+
+describe("vista previa de la plantilla", () => {
+  it("la cabecera y el cuerpo tienen el mismo número de columnas", () => {
+    // Tenía 9 títulos y 8 celdas: cada valor aparecía bajo la columna
+    // siguiente. En una pantalla cuyo trabajo es que revises el mapeo, eso no
+    // es cosmético.
+    const fs = require("node:fs") as typeof import("node:fs");
+    const plantilla = fs.readFileSync("src/lib/plantilla.ts", "utf8");
+    const cols = plantilla
+      .slice(plantilla.indexOf("COLUMNAS_PLANTILLA = ["), plantilla.indexOf("] as const"))
+      .match(/"[a-z_]+"/g)!.length;
+    const comp = fs.readFileSync("src/components/wizard/ImportadorComprobantes.tsx", "utf8");
+    const cuerpo = comp.slice(comp.indexOf("filas.slice(0, 5).map"), comp.indexOf("</tbody>"));
+    expect(cuerpo.match(/<td/g)!.length).toBe(cols);
+  });
+});

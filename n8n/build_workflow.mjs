@@ -6,7 +6,9 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (f) => readFileSync(join(here, f), "utf8");
 
-const SUPABASE_URL = "http://supabase-supabase-e53a81-95-111-245-187.sslip.io";
+// HTTPS y el dominio definitivo: el host sslip.io por HTTP funcionaba, pero el
+// service_role —la clave mas privilegiada del sistema— viajaba en claro.
+const SUPABASE_URL = "https://supabase.fernandorh.com";
 const SERVICE_ROLE_PLACEHOLDER = "PEGA_AQUI_TU_SERVICE_ROLE";
 
 const code = (name, jsFile, x, y) => ({

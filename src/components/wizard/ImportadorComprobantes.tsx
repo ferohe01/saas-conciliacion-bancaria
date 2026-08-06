@@ -205,6 +205,13 @@ export function ImportadorComprobantes({
                 {filas.slice(0, 5).map((f, i) => (
                   <tr key={i} className="border-t border-neutral-100">
                     <td className="px-3 py-2">{formatearFecha(f.fecha)}</td>
+                    {/* Faltaba esta celda: la cabecera tenía 9 columnas y el
+                        cuerpo 8, así que la vista previa mostraba cada valor
+                        bajo el título de la columna siguiente. Una previsual
+                        desalineada es peor que ninguna: invita a mapear mal. */}
+                    <td className="px-3 py-2">
+                      {f.fecha_vencimiento ? formatearFecha(f.fecha_vencimiento) : "—"}
+                    </td>
                     <td className="px-3 py-2">{formatearPEN(f.monto)}</td>
                     <td className="px-3 py-2">{f.tipo}</td>
                     <td className="px-3 py-2">{f.referencia ?? "—"}</td>
