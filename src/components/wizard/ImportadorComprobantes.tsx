@@ -17,6 +17,7 @@ type FilaImport = {
   monto: number;
   tipo: "cobranza" | "pago";
   referencia: string | null;
+  referencia_externa: string | null;
   ruc_contraparte: string | null;
   razon_social: string | null;
   descripcion: string | null;
@@ -54,6 +55,7 @@ function normalizarFilas(crudas: Record<string, unknown>[]): {
       monto,
       tipo,
       referencia: texto(f["referencia"]),
+      referencia_externa: texto(f["referencia_externa"]),
       ruc_contraparte: texto(f["ruc_contraparte"]),
       razon_social: texto(f["razon_social"]),
       descripcion: texto(f["descripcion"]),
@@ -206,6 +208,7 @@ export function ImportadorComprobantes({
                     <td className="px-3 py-2">{formatearPEN(f.monto)}</td>
                     <td className="px-3 py-2">{f.tipo}</td>
                     <td className="px-3 py-2">{f.referencia ?? "—"}</td>
+                    <td className="px-3 py-2">{f.referencia_externa ?? "—"}</td>
                     <td className="px-3 py-2">{f.ruc_contraparte ?? "—"}</td>
                     <td className="px-3 py-2">{f.razon_social ?? "—"}</td>
                     <td className="px-3 py-2">{f.descripcion ?? "—"}</td>

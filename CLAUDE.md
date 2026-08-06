@@ -367,6 +367,41 @@ borra un comprobante **con cobros aplicados**: eso se iría en cascada y dejarí
 un agujero en una conciliación aprobada, que seguiría diciendo que esa factura
 se cobró. Lo conciliado no se limpia, se **anula** (ver `0016`).
 
+## El número de documento no es la referencia de emparejamiento
+
+Encontrado con datos reales de una recaudadora de telecom (450k movimientos/mes).
+`serie_numero` hacía **dos trabajos incompatibles**: era la identidad del
+documento —única, con el índice de la `0018` que impide cargar dos veces la
+misma factura— y a la vez lo que el motor usaba para casar contra el extracto
+(`getComprobantesCanonicos` lo mapeaba a `referencia`).
+
+En una cuenta recaudadora esos dos datos **no son el mismo**:
+
+```
+Recibos   SR11-02748951, SR11-03590663  → único por documento
+EFECTIVO  00000001300486                → la operación bancaria, y SE REPITE
+                                          cuando un cliente paga dos recibos
+```
+
+Con un solo campo había que elegir: o el índice único rechazaba el 2,5% de las
+filas, o el motor no podía casar por referencia y todo caía en las capas
+cuadráticas. Y las filas rechazadas eran precisamente los casos de **agrupación
+1:N** que hay que conciliar.
+
+`0020` los separa:
+
+- **`serie_numero`** → identidad del documento. Único.
+- **`referencia_externa`** → con qué casarlo en el banco. **Se repite a
+  propósito**, sin índice único.
+- `getComprobantesCanonicos` usa `referencia_externa ?? serie_numero`: quien
+  factura y cobra 1:1 no nota el cambio.
+
+⚠️ La `0020` reconcede **UPDATE e INSERT por columna**. `comprobantes` arrastra
+el mismo patrón que `empresas` (`revoke` + `grant` acotado, ver `0008`/`0010`),
+así que **toda columna nueva nace sin permiso de escritura**. De paso cubre
+`lote_importacion`, que la `0018` añadió sin tocar permisos y cuyo INSERT no se
+había ejercitado desde entonces.
+
 ## Período de prueba (30 días)
 
 La promesa comercial "tu primer período es gratis" vivía solo como texto en la

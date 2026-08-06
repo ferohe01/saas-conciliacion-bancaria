@@ -28,6 +28,12 @@ const ComprobanteImport = z.object({
   monto: z.number().finite(),
   tipo: z.enum(["cobranza", "pago"]),
   referencia: z.string().trim().optional().nullable(),
+  /**
+   * Con qué casarlo en el extracto, cuando no es el propio número de documento
+   * (código de operación, número de depósito). Se repite a propósito: varios
+   * comprobantes pagados juntos comparten referencia. Ver `0020`.
+   */
+  referencia_externa: z.string().trim().optional().nullable(),
   ruc_contraparte: z.string().trim().optional().nullable(),
   razon_social: z.string().trim().optional().nullable(),
   descripcion: z.string().trim().optional().nullable(),
@@ -115,6 +121,7 @@ export async function importarComprobantes(
     monto: c.monto,
     tipo: c.tipo,
     serie_numero: c.referencia ?? null,
+    referencia_externa: c.referencia_externa ?? null,
     ruc_contraparte: c.ruc_contraparte ?? null,
     razon_social_contraparte: c.razon_social ?? null,
     descripcion: c.descripcion ?? null,
@@ -304,7 +311,7 @@ export async function getComprobantesCanonicos(
   const { data } = await supabase
     .from("comprobantes")
     .select(
-      "id, fecha, monto, saldo, tipo, estado, serie_numero, ruc_contraparte, razon_social_contraparte, descripcion",
+      "id, fecha, monto, saldo, tipo, estado, serie_numero, referencia_externa, ruc_contraparte, razon_social_contraparte, descripcion",
     )
     .gte("fecha", desde)
     .lte("fecha", hasta)
@@ -323,7 +330,10 @@ export async function getComprobantesCanonicos(
       fecha: String(c.fecha),
       monto: tipo === "pago" ? -monto : monto,
       tipo,
-      referencia: c.serie_numero ?? null,
+      // El motor casa por aquí. `referencia_externa` manda cuando existe; si
+      // no, se cae al número de documento, que es lo que hacía antes de la
+      // `0020` y sigue siendo lo correcto para quien factura y cobra 1:1.
+      referencia: c.referencia_externa ?? c.serie_numero ?? null,
       contraparte: c.razon_social_contraparte ?? null,
       descripcion: c.descripcion ?? null,
       comprobante_id: c.id,

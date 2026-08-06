@@ -130,3 +130,25 @@ describe("mensajeImportacion", () => {
     expect(m).toBe("Se agregaron 10 comprobantes.");
   });
 });
+
+// ── referencia_externa: documento vs. referencia de emparejamiento (0020) ────
+describe("referencia_externa no interfiere con la deduplicación", () => {
+  it("la clave de duplicado sigue siendo el número de documento", () => {
+    // Dos recibos DISTINTOS pagados en la misma operacion bancaria comparten
+    // referencia_externa pero son documentos distintos: deben entrar los dos.
+    const r = dedupEnArchivo([
+      { tipo: "cobranza", referencia: "SR11-001", referencia_externa: "EFECTIVO900" },
+      { tipo: "cobranza", referencia: "SR11-002", referencia_externa: "EFECTIVO900" },
+    ]);
+    expect(r.repetidas).toBe(0);
+    expect(r.filas).toHaveLength(2);
+  });
+
+  it("el mismo documento sí se sigue omitiendo", () => {
+    const r = dedupEnArchivo([
+      { tipo: "cobranza", referencia: "SR11-001", referencia_externa: "EFECTIVO900" },
+      { tipo: "cobranza", referencia: "SR11-001", referencia_externa: "EFECTIVO901" },
+    ]);
+    expect(r.repetidas).toBe(1);
+  });
+});
