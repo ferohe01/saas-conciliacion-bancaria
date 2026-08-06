@@ -253,6 +253,23 @@ nodos Code no se testean unitariamente en el repo). Regla al editar: mantener la
 forma de salida de cada nodo (`job_id`, `metadata`, `config`, `matches`,
 `pendientes_*`) para no romper el nodo siguiente.
 
+#### Los nodos `.js` no los revisaba nada — ahora sí (mínimo)
+
+Son la **fuente única** del motor pero viven fuera del typecheck (son `.js`
+sueltos) y no se ejecutan en los tests: se verifican end-to-end en n8n. Resultado
+real: un `].join("` con un **salto de línea crudo dentro del string** quedó
+commiteado sin que nada lo detectara. Reimportar habría dejado el nodo muerto, y
+el fallo habría salido en mitad de una conciliación de 20.000 registros.
+
+`tests/n8nNodos.test.ts` cubre lo mínimo indispensable:
+
+1. **`node --check`** sobre cada `.js`: que sea JavaScript válido.
+2. Que **el JSON generado coincida con los `.js`**: si alguien edita un nodo y
+   olvida regenerar, el importable queda desfasado — y es el JSON lo que se sube.
+
+No prueba la lógica del motor; eso sigue siendo end-to-end en n8n. Prueba que el
+archivo no esté roto, que es justo lo que faltaba.
+
 #### ⚠️ n8n no re-registra el webhook al guardar: hay que reiniciar el contenedor
 
 Costó una tarde entera de depuración, así que queda escrito.

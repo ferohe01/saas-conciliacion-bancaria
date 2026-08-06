@@ -164,47 +164,18 @@ const declarado = criterios.length
       "cuando aun hay pocas decisiones previas, pero SI hay decisiones previas",
       "esas mandan sobre esto):",
       ...criterios.map((c) => `- ${c}`),
-    ].join("
-")
+    ].join("\n")
   : "";
 
 const systemFinal = system + declarado + fewShot;
 
 const user = `Tolerancias: ${JSON.stringify(cfg)}\n\nCandidatos por registro interno:\n${JSON.stringify(shortlists)}`;
 
-const ia_body = {
-  model: "claude-opus-4-8",
-  max_tokens: 8000,
-  system: systemFinal,
-  messages: [{ role: "user", content: user }],
-  output_config: {
-    format: {
-      type: "json_schema",
-      schema: {
-        type: "object",
-        additionalProperties: false,
-        required: ["pares"],
-        properties: {
-          pares: {
-            type: "array",
-            items: {
-              type: "object",
-              additionalProperties: false,
-              required: ["id_interno", "id_movimiento", "confianza", "categoria", "justificacion"],
-              properties: {
-                id_interno: { type: "string" },
-                id_movimiento: { type: "string" },
-                confianza: { type: "number" },
-                categoria: { type: "string" },
-                justificacion: { type: "string" },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-};
+// NOTA: aquí vivía `ia_body`, un cuerpo con forma de la API de Anthropic para
+// un nodo HTTP Request alternativo. Se retiró: ningún nodo lo consumía, tenía
+// cableado un modelo que ya no es el configurado, y su forma no sirve para
+// OpenAI. Dejarlo era invitar a que alguien lo enchufara y se llevara una
+// llamada rota. El flujo usa `ia_system` / `ia_user` con el nodo AI Agent.
 
 return [{
   json: {
@@ -219,7 +190,6 @@ return [{
     shortlists, // para validar la respuesta del LLM
     ejemplos_aprendizaje: ejemplos, // trazabilidad del few-shot usado
     criterios_declarados: criterios, // trazabilidad de la semilla en frio
-    ia_body, // nodo HTTP Request (alternativa)
     ia_system: systemFinal, // nodo AI Agent (systemMessage)
     ia_user: user, // nodo AI Agent (prompt)
   },
