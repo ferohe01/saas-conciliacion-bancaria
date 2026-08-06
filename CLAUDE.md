@@ -476,6 +476,13 @@ acota) y cruza en memoria, y los borrados usan `.eq("lote_importacion", …)` o 
 filtro de toda la tabla cuando no hay nada protegido — **una petición en vez de
 doscientas**.
 
+**Y hay un tercer límite, en el otro extremo: el body de las server actions.**
+Next trae **1 MB** por defecto, y la importación manda hasta 5.000 filas de
+golpe — que ronda justo ese tamaño y falla con una *"server-side exception"* sin
+más pista que un digest. Está subido a 4 MB en `next.config.mjs`. Subirlo
+indefinidamente **no es la solución**: a partir de ahí toca ingesta en servidor
+por lotes.
+
 **Regla al escribir consultas nuevas:** si el número de filas depende de cuántos
 datos tenga la empresa, o paginas o pones un `.limit()` explícito **y lo dices en
 pantalla** (como hace `/comprobantes` con sus «últimos 500»). Un `select` pelado

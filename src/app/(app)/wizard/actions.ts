@@ -101,15 +101,20 @@ export async function importarComprobantes(
     ),
   ];
 
-  let clavesExistentes: string[] = [];
-  if (seriesArchivo.length > 0) {
+  // ⚠️ TROCEADO. Con 5.000 series de ~13 caracteres, un solo `.in()` genera una
+  // URL de ~80.000 caracteres: el proxy la rechaza y `fetch` revienta con una
+  // excepción de servidor, no con un error manejable. 300 por lote deja la URL
+  // en ~5.000 caracteres.
+  const clavesExistentes: string[] = [];
+  for (const lote of enLotes(seriesArchivo, 300)) {
     const { data: yaHay } = await supabase
       .from("comprobantes")
       .select("tipo, serie_numero")
-      .in("serie_numero", seriesArchivo);
-    clavesExistentes = (yaHay ?? [])
-      .map((c) => claveComprobante({ tipo: String(c.tipo), referencia: c.serie_numero }))
-      .filter((k): k is string => k !== null);
+      .in("serie_numero", lote);
+    for (const c of yaHay ?? []) {
+      const k = claveComprobante({ tipo: String(c.tipo), referencia: c.serie_numero });
+      if (k !== null) clavesExistentes.push(k);
+    }
   }
 
   const { nuevas, yaExistian } = separarExistentes(unicas, clavesExistentes);
