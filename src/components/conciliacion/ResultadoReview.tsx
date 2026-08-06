@@ -8,6 +8,7 @@ import { exportarResultadoExcel } from "@/lib/exportar";
 import {
   registrarDecision,
   registrarDecisiones,
+  reabrirDecision,
   conciliarManual,
 } from "@/app/(app)/conciliacion/[jobId]/actions";
 import type { ResultadoConciliacion, Match } from "@/lib/contract/resultado";
@@ -66,7 +67,12 @@ export function ResultadoReview({
   const router = useRouter();
   const [pendiente, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [aviso, setAviso] = useState<string | null>(null);
+  // El aviso lleva su propio "deshacer": el momento en que alguien se da cuenta
+  // del error es el segundo siguiente a cometerlo, no cuando abre otra sección.
+  const [aviso, setAviso] = useState<{
+    texto: string;
+    deshacer?: () => void;
+  } | null>(null);
 
   // Selección para despacho en lote de la cola de revisión.
   const [enLote, setEnLote] = useState<Set<number>>(new Set());
@@ -83,6 +89,9 @@ export function ResultadoReview({
   const [buscaConc, setBuscaConc] = useState("");
   const [topeSin, setTopeSin] = useState(PAGINA);
   const [topeConc, setTopeConc] = useState(PAGINA);
+  // La cola tambien pagina: con 500-2000 movimientos podia pintar cientos de
+  // fichas de golpe, mientras sus dos secciones hermanas si paginaban.
+  const [topeCola, setTopeCola] = useState(PAGINA);
 
   const internoById = useMemo(
     () => new Map(internos.map((r) => [r.id_interno, r])),
@@ -132,6 +141,8 @@ export function ResultadoReview({
     return { cola, conciliados, idsConciliados: ids };
   }, [resultado]);
 
+  const colaVisible = useMemo(() => cola.slice(0, topeCola), [cola, topeCola]);
+
   const sinConciliarInt = useMemo(
     () => internos.filter((r) => !idsConciliados.has(r.id_interno)),
     [internos, idsConciliados],
@@ -150,6 +161,7 @@ export function ResultadoReview({
   function ejecutar(
     fn: () => Promise<{ ok: boolean; error?: string }>,
     exito?: string,
+    deshacer?: () => void,
   ) {
     setError(null);
     setAviso(null);
@@ -157,10 +169,15 @@ export function ResultadoReview({
       const res = await fn();
       if (!res.ok) setError(res.error ?? "No se pudo completar la acción.");
       else {
-        if (exito) setAviso(exito);
+        if (exito) setAviso({ texto: exito, deshacer });
         router.refresh();
       }
     });
+  }
+
+  /** Devuelve un par a la cola. Compartido por el aviso y la tabla de resueltos. */
+  function reabrir(idx: number) {
+    ejecutar(() => reabrirDecision(jobId, idx), "Devuelto a la cola de revisión.");
   }
 
   function decidirLote(
@@ -241,12 +258,22 @@ export function ResultadoReview({
         </p>
       )}
       {aviso && (
-        <p
+        <div
           role="status"
-          className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
         >
-          {aviso}
-        </p>
+          <span>{aviso.texto}</span>
+          {aviso.deshacer && (
+            <button
+              type="button"
+              disabled={pendiente}
+              onClick={aviso.deshacer}
+              className="min-h-9 shrink-0 rounded-lg px-2 font-medium text-emerald-900 underline underline-offset-2 transition-colors hover:bg-emerald-100 disabled:opacity-60"
+            >
+              Deshacer
+            </button>
+          )}
+        </div>
       )}
 
       {/* ── 1. Por revisar ──────────────────────────────────────────────── */}
@@ -290,12 +317,14 @@ export function ResultadoReview({
               />
             )}
             <BarraLote
-              cola={cola}
+              cola={colaVisible}
               enLote={enLote}
               altaConfianza={altaConfianza}
               pendiente={pendiente}
               onToggleTodo={(marcar) =>
-                setEnLote(marcar ? new Set(cola.map((x) => x.idx)) : new Set())
+                // Solo lo VISIBLE: seleccionar en bloque partidas que no caben
+                // en pantalla es pedirle a alguien que decida a ciegas.
+                setEnLote(marcar ? new Set(colaVisible.map((x) => x.idx)) : new Set())
               }
               onAceptarSeleccion={() => decidirLote([...enLote], "aceptado")}
               onRechazarSeleccion={() => setPidiendoMotivo("lote")}
@@ -308,7 +337,7 @@ export function ResultadoReview({
             />
 
             <ul className="space-y-3">
-              {cola.map(({ m, idx }) => (
+              {colaVisible.map(({ m, idx }) => (
                 <li key={idx}>
                   <FichaSugerencia
                     precedente={
@@ -337,6 +366,7 @@ export function ResultadoReview({
                       ejecutar(
                         () => registrarDecision(jobId, idx, "aceptado"),
                         "Sugerencia aceptada.",
+                        () => reabrir(idx),
                       )
                     }
                     pidiendoMotivo={pidiendoMotivo === idx}
@@ -356,12 +386,26 @@ export function ResultadoReview({
                           return r;
                         },
                         "Sugerencia rechazada.",
+                        () => reabrir(idx),
                       )
                     }
                   />
                 </li>
               ))}
             </ul>
+
+            {cola.length > colaVisible.length && (
+              <div className="flex justify-center">
+                <Boton
+                  variante="secundario"
+                  tamano="sm"
+                  onClick={() => setTopeCola((t) => t + PAGINA)}
+                >
+                  Ver {Math.min(PAGINA, cola.length - colaVisible.length)} más
+                  de {cola.length - colaVisible.length} pendientes
+                </Boton>
+              </div>
+            )}
           </div>
         )}
       </section>
@@ -481,6 +525,8 @@ export function ResultadoReview({
               tope={topeConc}
               onMas={() => setTopeConc((t) => t + PAGINA)}
               moneda={moneda}
+              pendiente={pendiente}
+              onReabrir={reabrir}
             />
           </div>
         </details>
@@ -1064,6 +1110,8 @@ function TablaPares({
   tope,
   onMas,
   moneda,
+  pendiente,
+  onReabrir,
 }: {
   pares: { m: Match; idx: number }[];
   itemInterno: (id: string) => ItemLado;
@@ -1072,6 +1120,8 @@ function TablaPares({
   tope: number;
   onMas: () => void;
   moneda: string;
+  pendiente: boolean;
+  onReabrir: (idx: number) => void;
 }) {
   const filtrados = pares.filter(({ m }) => {
     if (!busqueda) return true;
@@ -1114,8 +1164,13 @@ function TablaPares({
               <th scope="col" className="py-2 pr-4 text-right font-medium">
                 Monto
               </th>
-              <th scope="col" className="py-2 font-medium">
+              <th scope="col" className="py-2 pr-4 font-medium">
                 Método
+              </th>
+              {/* Sin esta columna la decision era irreversible desde la
+                  interfaz: el par caia aqui y no habia vuelta. */}
+              <th scope="col" className="py-2 text-right font-medium">
+                <span className="sr-only">Acciones</span>
               </th>
             </tr>
           </thead>
@@ -1143,8 +1198,18 @@ function TablaPares({
                   <td className="py-2 pr-4 text-right whitespace-nowrap tabular-nums">
                     <MontoConSigno monto={monto} moneda={moneda} />
                   </td>
-                  <td className="py-2">
+                  <td className="py-2 pr-4">
                     <BadgeMetodo metodo={m.metodo} confianza={m.confianza} />
+                  </td>
+                  <td className="py-2 text-right whitespace-nowrap">
+                    <button
+                      type="button"
+                      disabled={pendiente}
+                      onClick={() => onReabrir(idx)}
+                      className="min-h-9 rounded-lg px-2 text-xs font-medium text-blue-700 underline underline-offset-2 transition-colors hover:bg-blue-50 hover:text-blue-800 disabled:opacity-50"
+                    >
+                      Volver a revisar
+                    </button>
                   </td>
                 </tr>
               );

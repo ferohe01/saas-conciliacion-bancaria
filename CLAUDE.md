@@ -393,6 +393,29 @@ portada. Desde la migración `0005` es real:
 - ⚠️ `CONTACTO_SUSCRIPCION` en `suscripcion.ts` es un **placeholder**: hay que
   cambiarlo por el canal comercial real.
 
+## Revisión de resultados: deshacer y paginar
+
+Dos arreglos que salieron de una crítica UX de `/conciliacion/[jobId]`:
+
+- **Una decisión ya no es irreversible.** Antes, aceptar o rechazar mandaba el
+  par a una tabla de **solo lectura** y no había vuelta atrás desde la interfaz.
+  Aquí eso pesa más que en otro producto: una decisión aceptada **mueve el saldo**
+  al aprobar y además **le enseña el criterio a la IA**, así que un error de clic
+  se propaga a las siguientes conciliaciones. Ahora cada fila de "Ya conciliado"
+  tiene *Volver a revisar*, y el aviso de éxito trae un *Deshacer* inmediato —el
+  momento en que uno se da cuenta del error es el segundo siguiente, no cuando
+  abre otra sección.
+- **La reapertura se REGISTRA** (`accion: "pendiente"` en `decisiones`) en vez de
+  borrar la decisión anterior: el historial es materia prima del aprendizaje y no
+  se reescribe. Efecto secundario buscado: al ser "pendiente" la última acción,
+  `claseDeMatch` deja de contarlo como ejemplo — un par reabierto no enseña nada
+  hasta que alguien vuelva a decidir.
+- **La cola "Por revisar" pagina** como sus dos secciones hermanas. No lo hacía,
+  y con la restricción de producto de 500–2000+ movimientos podía pintar
+  cientos de fichas ricas de una vez.
+- **"Seleccionar todas" alcanza solo lo visible.** Seleccionar en bloque
+  partidas que no caben en pantalla es pedirle a alguien que decida a ciegas.
+
 ## Ciclo de vida contable de una conciliación
 
 `jobs_conciliacion` lleva **dos ejes de estado, ortogonales a propósito**:

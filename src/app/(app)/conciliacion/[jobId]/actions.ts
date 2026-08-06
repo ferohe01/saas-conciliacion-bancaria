@@ -398,6 +398,50 @@ export async function registrarDecisiones(
   return res.ok ? { ok: true, aplicadas } : res;
 }
 
+/**
+ * Devuelve un match a la cola de revisión.
+ *
+ * Hasta ahora una decisión era IRREVERSIBLE desde la interfaz: aceptada o
+ * rechazada, el par caía en una tabla de solo lectura y no había forma de
+ * corregirse. Y aquí una decisión no es un clic cualquiera — al aprobar mueve
+ * el saldo del comprobante y encima **le enseña el criterio a la IA**, así que
+ * un error de clic se propaga a las siguientes conciliaciones.
+ *
+ * La reapertura QUEDA REGISTRADA como una decisión más (`accion: "pendiente"`)
+ * en vez de borrar la anterior: el historial es materia prima del aprendizaje y
+ * no se reescribe. Efecto secundario deseado: como la última acción pasa a ser
+ * "pendiente", `claseDeMatch` deja de contarla como ejemplo — un par reabierto
+ * no enseña nada hasta que alguien vuelva a decidir.
+ *
+ * `guardar` resincroniza cobranzas, así que el saldo del comprobante vuelve
+ * solo si el par ya no cuenta como confirmado.
+ */
+export async function reabrirDecision(
+  jobId: string,
+  matchIndex: number,
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await cargarContexto(jobId);
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+
+  const match = ctx.resultado.matches[matchIndex];
+  if (!match) return { ok: false, error: "Match no encontrado." };
+  if (match.estado_revision === "pendiente") return { ok: true };
+
+  match.estado_revision = "pendiente";
+  match.decisiones = [
+    ...(match.decisiones ?? []),
+    {
+      usuario_id: ctx.usuarioId,
+      accion: "pendiente",
+      timestamp: new Date().toISOString(),
+      nota: "Devuelto a revisión",
+      motivo: null,
+    },
+  ];
+
+  return guardar(jobId, ctx.resultado);
+}
+
 const ManualSchema = z.object({
   ids_internos: z.array(z.string().min(1)).min(1),
   ids_movimientos: z.array(z.string().min(1)).min(1),
