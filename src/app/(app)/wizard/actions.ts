@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { traerTodo, enLotes } from "@/lib/supabase/paginado";
 import { getEmpresaActual } from "@/lib/auth";
 import {
   claveComprobante,
@@ -181,11 +182,21 @@ async function idsConCobros(
   ids: string[],
 ): Promise<Set<string>> {
   if (ids.length === 0) return new Set();
-  const { data } = await supabase
-    .from("aplicaciones_cobro")
-    .select("comprobante_id")
-    .in("comprobante_id", ids);
-  return new Set((data ?? []).map((a) => String(a.comprobante_id)));
+  // Se trocea el `.in()` (longitud de URL) y se pagina cada lote (tope de
+  // filas). Quedarse corto aquí es peor que un número mal pintado: haría
+  // borrable un comprobante que sí tiene cobros aplicados.
+  const conCobros = new Set<string>();
+  for (const lote of enLotes(ids)) {
+    const filas = await traerTodo<{ comprobante_id: string }>((d, h) =>
+      supabase
+        .from("aplicaciones_cobro")
+        .select("comprobante_id")
+        .in("comprobante_id", lote)
+        .range(d, h),
+    );
+    for (const a of filas) conCobros.add(String(a.comprobante_id));
+  }
+  return conCobros;
 }
 
 /** Deshace una carga de plantilla: borra los comprobantes intactos de ese lote. */
@@ -197,22 +208,18 @@ export async function deshacerImportacion(
   if (!lote) return { ok: false, error: "Falta indicar qué importación deshacer." };
 
   const supabase = await createClient(); // RLS acota a la empresa
-  const { data } = await supabase
-    .from("comprobantes")
-    .select("id")
-    .eq("lote_importacion", lote);
-
-  const ids = (data ?? []).map((c) => String(c.id));
+  const ids = (
+    await traerTodo<{ id: string }>((d, h) =>
+      supabase.from("comprobantes").select("id").eq("lote_importacion", lote).range(d, h),
+    )
+  ).map((c) => String(c.id));
   if (ids.length === 0) return { ok: true, borrados: 0, protegidos: 0 };
 
   const conCobros = await idsConCobros(supabase, ids);
   const borrables = ids.filter((id) => !conCobros.has(id));
 
-  if (borrables.length > 0) {
-    const { error } = await supabase
-      .from("comprobantes")
-      .delete()
-      .in("id", borrables);
+  for (const lote of enLotes(borrables)) {
+    const { error } = await supabase.from("comprobantes").delete().in("id", lote);
     if (error) return { ok: false, error: "No se pudo deshacer la importación." };
   }
 
@@ -241,18 +248,18 @@ export async function vaciarComprobantes(
   if (!empresa) return { ok: false, error: "Sesión no válida." };
 
   const supabase = await createClient(); // RLS acota a la empresa
-  const { data } = await supabase.from("comprobantes").select("id");
-  const ids = (data ?? []).map((c) => String(c.id));
+  const ids = (
+    await traerTodo<{ id: string }>((d, h) =>
+      supabase.from("comprobantes").select("id").range(d, h),
+    )
+  ).map((c) => String(c.id));
   if (ids.length === 0) return { ok: true, borrados: 0, protegidos: 0 };
 
   const conCobros = await idsConCobros(supabase, ids);
   const borrables = ids.filter((id) => !conCobros.has(id));
 
-  if (borrables.length > 0) {
-    const { error } = await supabase
-      .from("comprobantes")
-      .delete()
-      .in("id", borrables);
+  for (const lote of enLotes(borrables)) {
+    const { error } = await supabase.from("comprobantes").delete().in("id", lote);
     if (error) return { ok: false, error: "No se pudieron borrar los comprobantes." };
   }
 
@@ -308,17 +315,26 @@ export async function getComprobantesCanonicos(
   hasta: string,
 ): Promise<RegistroInterno[]> {
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("comprobantes")
-    .select(
-      "id, fecha, monto, saldo, tipo, estado, serie_numero, referencia_externa, ruc_contraparte, razon_social_contraparte, descripcion",
-    )
-    .gte("fecha", desde)
-    .lte("fecha", hasta)
-    .not("estado", "in", "(cobrado,anulado)")
-    .order("fecha", { ascending: true });
-
-  const filas = data ?? [];
+  // ⚠️ PAGINADO OBLIGATORIO. Sin esto PostgREST devolvía 1.000 filas y un 200
+  // OK: con 20.000 comprobantes en el período, el motor recibía el 5% del mes
+  // y nadie se enteraba. Ver `lib/supabase/paginado.ts`.
+  const filas = await traerTodo<{
+    id: string; fecha: string; monto: number; saldo: number | null;
+    tipo: string; estado: string; serie_numero: string | null;
+    referencia_externa: string | null; ruc_contraparte: string | null;
+    razon_social_contraparte: string | null; descripcion: string | null;
+  }>((d, h) =>
+    supabase
+      .from("comprobantes")
+      .select(
+        "id, fecha, monto, saldo, tipo, estado, serie_numero, referencia_externa, ruc_contraparte, razon_social_contraparte, descripcion",
+      )
+      .gte("fecha", desde)
+      .lte("fecha", hasta)
+      .not("estado", "in", "(cobrado,anulado)")
+      .order("fecha", { ascending: true })
+      .range(d, h),
+  );
   return filas.map((c, i) => {
     const tipo = c.tipo === "pago" ? "pago" : "cobranza";
     const monto = Math.abs(Number(c.monto ?? 0));

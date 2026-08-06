@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { traerTodo, enLotes } from "@/lib/supabase/paginado";
 import { getUsuarioActual } from "@/lib/auth";
 import {
   ResultadoConciliacion,
@@ -110,23 +111,43 @@ async function disponiblePorComprobante(
   if (ids.length === 0) return disponible;
 
   const admin = createAdminClient();
-  const [{ data: comps }, { data: otras }, { data: revertidas }] =
-    await Promise.all([
-      admin.from("comprobantes").select("id, monto").in("id", ids as string[]),
-      admin
-        .from("aplicaciones_cobro")
-        .select("comprobante_id, monto_aplicado")
-        .in("comprobante_id", ids as string[])
-        .neq("job_id", jobId),
+
+  // ⚠️ Troceado + paginado. Con una conciliación de 20.000 registros, un
+  // `.in()` con 20.000 ids revienta por longitud de URL, y aunque pasara,
+  // PostgREST devolvería 1.000 filas y un 200 OK. Quedarse corto AQUÍ no es
+  // cosmético: los saldos de los comprobantes se calcularían sobre datos
+  // incompletos y quedarían mal escritos en la base.
+  const comps: { id: string; monto: number }[] = [];
+  const otras: { comprobante_id: string; monto_aplicado: number }[] = [];
+  const revertidas: { comprobante_id: string; monto_revertido: number }[] = [];
+
+  for (const lote of enLotes(ids as string[])) {
+    const [c, o, r] = await Promise.all([
+      traerTodo<{ id: string; monto: number }>((d, h) =>
+        admin.from("comprobantes").select("id, monto").in("id", lote).range(d, h),
+      ),
+      traerTodo<{ comprobante_id: string; monto_aplicado: number }>((d, h) =>
+        admin
+          .from("aplicaciones_cobro")
+          .select("comprobante_id, monto_aplicado")
+          .in("comprobante_id", lote)
+          .neq("job_id", jobId)
+          .range(d, h),
+      ),
       // Un cobro que el banco revirtió deja de ocupar sitio: la factura vuelve
       // a estar disponible y puede cobrarse de nuevo. Sin esto, revertir la
       // dejaría con saldo pero incobrable.
-      admin
-        .from("reversiones_cobro")
-        .select("comprobante_id, monto_revertido")
-        .in("comprobante_id", ids as string[])
-        .neq("job_id", jobId),
+      traerTodo<{ comprobante_id: string; monto_revertido: number }>((d, h) =>
+        admin
+          .from("reversiones_cobro")
+          .select("comprobante_id, monto_revertido")
+          .in("comprobante_id", lote)
+          .neq("job_id", jobId)
+          .range(d, h),
+      ),
     ]);
+    comps.push(...c); otras.push(...o); revertidas.push(...r);
+  }
 
   const netoPorOtros = new Map<string, number>();
   for (const a of otras ?? []) {

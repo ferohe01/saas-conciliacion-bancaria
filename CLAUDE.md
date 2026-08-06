@@ -402,6 +402,38 @@ así que **toda columna nueva nace sin permiso de escritura**. De paso cubre
 `lote_importacion`, que la `0018` añadió sin tocar permisos y cuyo INSERT no se
 había ejercitado desde entonces.
 
+## ⚠️ PostgREST corta en 1.000 filas y no avisa
+
+Un `select` sin rango sobre 20.000 comprobantes devuelve **1.000 filas y un 200
+OK**. No hay error, no hay señal: el código cree que tiene todo.
+
+Mordió de verdad: `getComprobantesCanonicos` mandaba **1.000 de 20.000**
+registros al motor, así que la conciliación cubría el 5% del mes. Se detectó de
+casualidad, porque el Paso 3 mostraba «Tus registros: 1.000» al lado de
+«Movimientos del banco: 20.000» — un número mal pintado destapó una conciliación
+incompleta.
+
+**El tope es configuración del servidor (`db-max-rows`), no del cliente.** No se
+sube desde la app: la única salida es paginar. `lib/supabase/paginado.ts`:
+
+- **`traerTodo(consulta)`** pagina con `.range()` hasta que una página vuelve
+  incompleta.
+- **`enLotes(ids)`** trocea los `.in(...)`, que no fallan por el tope de filas
+  sino por **longitud de URL**: un `.in()` con 20.000 ids da un 414 o —peor— un
+  filtro truncado.
+
+**Regla al escribir consultas nuevas:** si el número de filas depende de cuántos
+datos tenga la empresa, o paginas o pones un `.limit()` explícito **y lo dices en
+pantalla** (como hace `/comprobantes` con sus «últimos 500»). Un `select` pelado
+sobre una tabla que crece es un bug esperando al primer cliente grande.
+
+Sitios corregidos, por gravedad: `getComprobantesCanonicos` (conciliaba el 5%),
+`sincronizarCobranzas` (calculaba **saldos** con datos incompletos y los
+escribía), `idsConCobros` (habría dejado borrar un comprobante con cobros),
+`deshacerImportacion` y `vaciarComprobantes` (borraban de mil en mil),
+`/cobranzas` y `/pagos` (la antigüedad de deuda se calculaba sobre 1.000), y el
+resumen del wizard (ahora usa `count: "exact"`).
+
 ## Período de prueba (30 días)
 
 La promesa comercial "tu primer período es gratis" vivía solo como texto en la

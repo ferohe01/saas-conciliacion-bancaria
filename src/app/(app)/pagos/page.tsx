@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { traerTodo } from "@/lib/supabase/paginado";
 import { empresaTieneModulo } from "@/lib/modulos-servidor";
 import { buscarModulo } from "@/lib/modulos";
 import { CONTACTO_SUSCRIPCION, montoPEN } from "@/lib/suscripcion";
@@ -54,12 +55,16 @@ export default async function PagosPage({
   }
 
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("comprobantes")
-    .select(COLUMNAS_SALDO)
-    .order("fecha", { ascending: true });
-
-  const todas = (data ?? []) as ComprobanteCobrar[];
+  // Paginado: PostgREST corta en 1.000 filas y la antigüedad de deuda se
+  // calcula sobre TODO lo pendiente. Con más comprobantes, los totales de
+  // arriba habrían mentido sin avisar.
+  const todas = (await traerTodo((d, h) =>
+    supabase
+      .from("comprobantes")
+      .select(COLUMNAS_SALDO)
+      .order("fecha", { ascending: true })
+      .range(d, h),
+  )) as unknown as ComprobanteCobrar[];
   const hoy = new Date();
 
   // Se filtra ANTES de agregar: filtrar la tabla dejando arriba el total de

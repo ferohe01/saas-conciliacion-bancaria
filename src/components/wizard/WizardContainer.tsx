@@ -142,6 +142,8 @@ export function WizardContainer({
   const [comprobantesResumen, setComprobantesResumen] = useState<{
     registros: number;
     suma: number;
+    /** La suma solo cubre las filas traídas (PostgREST corta en 1.000). */
+    sumaParcial: boolean;
     /** Total cargado en la empresa, sin filtrar por período. */
     totalCargados: number;
     /** Del período, pero ya saldados: no entran a conciliar. */
@@ -190,13 +192,18 @@ export function WizardContainer({
       // comprobantes y en el período caen 2, decir solo "2 registros" parece
       // que se perdieron los otros. Saber que existen fuera del período evita
       // esa alarma —y también avisa de que quizá eligió el mes equivocado.
-      const [{ data }, { count: total }, { count: yaCobrados }] =
+      const [{ data, count: enPeriodo }, { count: total }, { count: yaCobrados }] =
         await Promise.all([
           // Mismo criterio que `getComprobantesCanonicos`: lo saldado y lo
           // anulado no entra, así que tampoco debe contarse aquí.
+          //
+          // ⚠️ El CONTEO va en `count: "exact"`, no en `data.length`: PostgREST
+          // corta en 1.000 filas y esta pantalla decía "1.000 registros" con
+          // 20.000 en el período. La suma sí sale de las filas traídas, así que
+          // con más de 1.000 es parcial — y el texto lo dice.
           supabase
             .from("comprobantes")
-            .select("monto")
+            .select("monto", { count: "exact" })
             .gte("fecha", periodo.desde)
             .lte("fecha", periodo.hasta)
             .not("estado", "in", "(cobrado,anulado)"),
@@ -219,7 +226,8 @@ export function WizardContainer({
         0,
       );
       setComprobantesResumen({
-        registros: filas.length,
+        registros: enPeriodo ?? filas.length,
+        sumaParcial: (enPeriodo ?? 0) > filas.length,
         suma,
         totalCargados: total ?? filas.length,
         yaCobrados: yaCobrados ?? 0,
@@ -526,6 +534,7 @@ export function WizardContainer({
                       <p className="mt-1 text-sm text-neutral-600">
                         {comprobantesResumen.registros.toLocaleString("es-PE")}{" "}
                         registros ·{" "}
+                        {comprobantesResumen.sumaParcial && "desde "}
                         {formatearPEN(comprobantesResumen.suma, moneda)}
                       </p>
                       {/* Decir cuántos quedan fuera evita la alarma de "se
