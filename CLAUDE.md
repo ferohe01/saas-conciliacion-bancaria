@@ -463,6 +463,19 @@ sube desde la app: la única salida es paginar. `lib/supabase/paginado.ts`:
   sino por **longitud de URL**: un `.in()` con 20.000 ids da un 414 o —peor— un
   filtro truncado.
 
+**El `.in()` tiene un segundo límite, el de la URL.** Los ids son **UUID de 36
+caracteres**: 500 en un filtro son ~19.500 caracteres de query string, muy por
+encima del límite habitual de nginx/kong (8.192). "Empezar de cero" con 20.000
+comprobantes fallaba con un escueto *"No se pudieron borrar los comprobantes"* —
+y antes fallaba en silencio la consulta de protegidos, porque `traerTodo` se
+traga el error. Por eso `enLotes` trocea de **100 en 100**.
+
+**Mejor que trocear es no enumerar.** Donde se pueda, filtrar por un campo en vez
+de por miles de ids: `idsConCobros` pide las aplicaciones de la empresa (RLS
+acota) y cruza en memoria, y los borrados usan `.eq("lote_importacion", …)` o el
+filtro de toda la tabla cuando no hay nada protegido — **una petición en vez de
+doscientas**.
+
 **Regla al escribir consultas nuevas:** si el número de filas depende de cuántos
 datos tenga la empresa, o paginas o pones un `.limit()` explícito **y lo dices en
 pantalla** (como hace `/comprobantes` con sus «últimos 500»). Un `select` pelado

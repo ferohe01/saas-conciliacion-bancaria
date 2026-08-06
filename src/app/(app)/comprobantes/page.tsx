@@ -65,6 +65,14 @@ export default async function ComprobantesPage({
 }) {
   const sp = await searchParams;
   const supabase = await createClient(); // RLS: solo la empresa del usuario
+  // El total EXACTO va aparte: la lista se queda en 500 a propósito, pero
+  // "Empezar de cero" borra todos. Decía "se borrarán 500" con 20.000 en la
+  // base — el mismo error de contar filas traídas en vez de preguntar cuántas
+  // hay.
+  const { count: totalReal } = await supabase
+    .from("comprobantes")
+    .select("id", { count: "exact", head: true });
+
   const { data } = await supabase
     .from("comprobantes")
     .select(
@@ -208,7 +216,7 @@ export default async function ComprobantesPage({
         </section>
       )}
 
-      <VaciarComprobantes total={todas.length} />
+      <VaciarComprobantes total={totalReal ?? todas.length} />
     </div>
   );
 }

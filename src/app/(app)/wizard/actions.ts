@@ -182,19 +182,18 @@ async function idsConCobros(
   ids: string[],
 ): Promise<Set<string>> {
   if (ids.length === 0) return new Set();
-  // Se trocea el `.in()` (longitud de URL) y se pagina cada lote (tope de
-  // filas). Quedarse corto aquí es peor que un número mal pintado: haría
-  // borrable un comprobante que sí tiene cobros aplicados.
+  // Se piden TODAS las aplicaciones de la empresa (RLS acota) y se intersecta
+  // en memoria, en vez de trocear un `.in()` con miles de ids. Con 20.000
+  // comprobantes aquello eran 200 peticiones —y con lotes grandes reventaba la
+  // longitud de la URL—; las aplicaciones son siempre muchas menos.
+  const buscados = new Set(ids);
+  const filas = await traerTodo<{ comprobante_id: string }>((d, h) =>
+    supabase.from("aplicaciones_cobro").select("comprobante_id").range(d, h),
+  );
   const conCobros = new Set<string>();
-  for (const lote of enLotes(ids)) {
-    const filas = await traerTodo<{ comprobante_id: string }>((d, h) =>
-      supabase
-        .from("aplicaciones_cobro")
-        .select("comprobante_id")
-        .in("comprobante_id", lote)
-        .range(d, h),
-    );
-    for (const a of filas) conCobros.add(String(a.comprobante_id));
+  for (const a of filas) {
+    const id = String(a.comprobante_id);
+    if (buscados.has(id)) conCobros.add(id);
   }
   return conCobros;
 }
@@ -218,9 +217,19 @@ export async function deshacerImportacion(
   const conCobros = await idsConCobros(supabase, ids);
   const borrables = ids.filter((id) => !conCobros.has(id));
 
-  for (const lote of enLotes(borrables)) {
-    const { error } = await supabase.from("comprobantes").delete().in("id", lote);
+  // Sin nada que proteger, un DELETE por lote de importación: una petición en
+  // vez de doscientas troceadas por id.
+  if (conCobros.size === 0) {
+    const { error } = await supabase
+      .from("comprobantes")
+      .delete()
+      .eq("lote_importacion", lote);
     if (error) return { ok: false, error: "No se pudo deshacer la importación." };
+  } else {
+    for (const parte of enLotes(borrables)) {
+      const { error } = await supabase.from("comprobantes").delete().in("id", parte);
+      if (error) return { ok: false, error: "No se pudo deshacer la importación." };
+    }
   }
 
   revalidatePath("/comprobantes");
@@ -258,9 +267,19 @@ export async function vaciarComprobantes(
   const conCobros = await idsConCobros(supabase, ids);
   const borrables = ids.filter((id) => !conCobros.has(id));
 
-  for (const lote of enLotes(borrables)) {
-    const { error } = await supabase.from("comprobantes").delete().in("id", lote);
+  // Igual aquí: si nada tiene cobros, se borra todo de una. RLS acota a la
+  // empresa, así que el filtro "todos" no cruza datos de nadie.
+  if (conCobros.size === 0) {
+    const { error } = await supabase
+      .from("comprobantes")
+      .delete()
+      .not("id", "is", null);
     if (error) return { ok: false, error: "No se pudieron borrar los comprobantes." };
+  } else {
+    for (const parte of enLotes(borrables)) {
+      const { error } = await supabase.from("comprobantes").delete().in("id", parte);
+      if (error) return { ok: false, error: "No se pudieron borrar los comprobantes." };
+    }
   }
 
   revalidatePath("/comprobantes");

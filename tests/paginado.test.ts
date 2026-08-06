@@ -66,8 +66,8 @@ describe("traerTodo", () => {
 
 describe("enLotes", () => {
   it("trocea para que el .in() no reviente por longitud de URL", () => {
-    expect(enLotes(Array.from({ length: 1200 }, (_, i) => i)).map((l) => l.length))
-      .toEqual([500, 500, 200]);
+    expect(enLotes(Array.from({ length: 250 }, (_, i) => i)).map((l) => l.length))
+      .toEqual([100, 100, 50]);
   });
 
   it("una lista vacía no genera lotes", () => {
@@ -76,5 +76,21 @@ describe("enLotes", () => {
 
   it("menos que el tamaño de lote va en uno solo", () => {
     expect(enLotes([1, 2, 3])).toEqual([[1, 2, 3]]);
+  });
+
+  it("respeta un tamaño explícito", () => {
+    expect(enLotes([1, 2, 3, 4, 5], 2).map((l) => l.length)).toEqual([2, 2, 1]);
+  });
+});
+
+describe("tamaño de lote y longitud de URL", () => {
+  it("100 UUIDs caben de sobra en una URL; 500 no", () => {
+    // El fallo real: "Empezar de cero" con 20.000 comprobantes troceaba en
+    // lotes de 500 → ~19.500 caracteres de query string, muy por encima del
+    // límite de nginx/kong (8.192), y el borrado fallaba sin explicar por qué.
+    const UUID = 36 + 3; // el id más comillas y coma en el filtro `in.(...)`
+    const lotes = enLotes(Array.from({ length: 20000 }, (_, i) => i));
+    expect(lotes[0]!.length * UUID).toBeLessThan(8192);
+    expect(500 * UUID).toBeGreaterThan(8192);
   });
 });

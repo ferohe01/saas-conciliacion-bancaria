@@ -55,8 +55,13 @@ export async function traerTodo<T>(
  * Un `.in()` con 20.000 ids no falla por el límite de filas sino por la
  * longitud de la URL: PostgREST los recibe como query string y el proxy la
  * corta mucho antes. El síntoma es un 414 o, peor, un filtro truncado.
+ *
+ * ⚠️ El tamaño por defecto es 100 **porque los ids son UUID**: 36 caracteres
+ * cada uno. Con 500 la query string se iba a ~19.500 caracteres, muy por encima
+ * del límite habitual de nginx/kong (8.192), y "Empezar de cero" fallaba con un
+ * escueto "No se pudieron borrar los comprobantes". 100 deja la URL en ~3.900.
  */
-export function enLotes<T>(items: T[], tamano = 500): T[][] {
+export function enLotes<T>(items: T[], tamano = 100): T[][] {
   if (items.length === 0) return [];
   const lotes: T[][] = [];
   for (let i = 0; i < items.length; i += tamano) {
