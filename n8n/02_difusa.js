@@ -43,16 +43,53 @@ const comunesEntre = (a, b) => {
 const bancUsado = new Set();
 const intUsado = new Set();
 
+// ── Precálculo: lo que no depende del par, fuera del bucle ────────────────
+// Antes `comunesEntre` tokenizaba la MISMA glosa una vez por cada registro
+// interno: con 20.000 x 20.000 eso son 400 millones de `normalize` + regex +
+// Set, y el runner de n8n aborta a los 30 segundos ("runner became
+// unresponsive"). Ahora cada glosa se tokeniza UNA vez.
+const bancPrep = bancarios.map((bc) => ({
+  bc,
+  t: Date.parse(bc.fecha),
+  pal: new Set(palabras(bc.glosa)),
+}));
+
+// Índice por monto redondeado a soles. La tolerancia acota la banda, así que
+// solo hay que mirar unos pocos cubos en vez de los 20.000 movimientos.
+const cubos = new Map();
+bancPrep.forEach((b, j) => {
+  const k = Math.round(b.bc.monto);
+  if (!cubos.has(k)) cubos.set(k, []);
+  cubos.get(k).push(j);
+});
+
+const MS_DIA = 86400000;
+
 internos.forEach((it, i) => {
-  for (let j = 0; j < bancarios.length; j++) {
-    if (bancUsado.has(j)) continue;
-    const bc = bancarios[j];
+  const tol = Math.max(tolAbs, Math.abs(it.monto) * (tolPct / 100));
+  const tIt = Date.parse(it.fecha);
+  const palIt = palabras(it.contraparte);
+  if (palIt.length === 0) return; // sin nombre no hay match difuso posible
+
+  // Candidatos por banda de monto. Se ordenan por índice para conservar el
+  // mismo emparejamiento que el recorrido secuencial original: gana el
+  // movimiento más antiguo de la lista, no el del cubo que toque antes.
+  const desde = Math.round(it.monto - tol) - 1;
+  const hasta = Math.round(it.monto + tol) + 1;
+  const candidatos = [];
+  for (let k = desde; k <= hasta; k++) {
+    const lista = cubos.get(k);
+    if (lista) for (const j of lista) if (!bancUsado.has(j)) candidatos.push(j);
+  }
+  candidatos.sort((a, b) => a - b);
+
+  for (const j of candidatos) {
+    const { bc, t, pal } = bancPrep[j];
     if (Math.sign(it.monto) !== Math.sign(bc.monto)) continue;
     const dif = Number((it.monto - bc.monto).toFixed(2));
-    const tol = Math.max(tolAbs, Math.abs(it.monto) * (tolPct / 100));
     if (Math.abs(dif) > tol) continue;
-    if (dias(it.fecha, bc.fecha) > tolDias) continue;
-    const comunes = comunesEntre(it.contraparte, bc.glosa);
+    if (Math.abs((tIt - t) / MS_DIA) > tolDias) continue;
+    const comunes = [...new Set(palIt.filter((w) => pal.has(w)))];
     if (comunes.length === 0) continue; // exige coincidencia de nombre
     matches.push({
       ids_internos: [it.id_interno],

@@ -253,6 +253,30 @@ nodos Code no se testean unitariamente en el repo). Regla al editar: mantener la
 forma de salida de cada nodo (`job_id`, `metadata`, `config`, `matches`,
 `pendientes_*`) para no romper el nodo siguiente.
 
+#### ⚠️ El runner de n8n aborta a los 30 s: nada de trabajo por par
+
+`02_difusa.js` llamaba a `comunesEntre(it.contraparte, bc.glosa)` **dentro del
+bucle interno**: por cada par hacía `normalize("NFD")` + regex + `toUpperCase` +
+`split` + `Set` sobre la MISMA glosa, una vez por cada registro interno. Con
+20.000 × 20.000 pendientes son 400 millones de tokenizaciones y n8n corta con
+*"Task execution aborted because runner became unresponsive"*.
+
+Arreglo, sin cambiar la semántica:
+
+1. **Precalcular lo que no depende del par** — tokens de cada glosa y
+   `Date.parse` de cada fecha, una sola vez.
+2. **Indexar por monto redondeado**: la tolerancia acota la banda, así que se
+   miran unos pocos cubos en vez de los 20.000 movimientos. Los candidatos se
+   ordenan por índice para conservar exactamente el mismo emparejamiento que el
+   recorrido secuencial.
+
+Medido con 20.000 × 20.000: **de abortar a los 30 s a 493 ms.**
+`ia_llm_01_candidatos.js` tenía el mismo defecto y lleva el mismo precálculo.
+
+**Regla para cualquier nodo Code nuevo:** nada que dependa solo de un lado se
+calcula dentro del bucle del otro. A 2.000 partidas no se nota; a 20.000 tumba
+el runner, y el error no dice dónde.
+
 #### Los nodos `.js` no los revisaba nada — ahora sí (mínimo)
 
 Son la **fuente única** del motor pero viven fuera del typecheck (son `.js`

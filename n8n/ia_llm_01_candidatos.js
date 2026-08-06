@@ -59,26 +59,39 @@ const catProb = (d) =>
   d < 0.005 ? "diferencia_temporal" : d <= 10 ? "comision_bancaria" : "requiere_investigacion";
 
 const shortlists = [];
+// Precálculo por movimiento: refs, tokens de la glosa y timestamp. Antes la
+// glosa se re-tokenizaba una vez por cada registro interno (`comunesEntre` y
+// `jaccard` dentro del bucle), lo que a volumen alto tumba el runner de n8n
+// por inactividad. Esto se calcula UNA vez.
 const refsBc = bancarios.map((bc) => refsBanco(bc));
+const palBc = bancarios.map((bc) => new Set(palabras(bc.glosa)));
+const tBc = bancarios.map((bc) => Date.parse(bc.fecha));
+const MS_DIA = 86400000;
 
 for (const it of internos) {
   const refsIt = refsInterno(it);
+  const palIt = palabras(it.contraparte);
+  const setIt = new Set(palIt);
+  const tIt = Date.parse(it.fecha);
   const cands = [];
   for (let bi = 0; bi < bancarios.length; bi++) {
     const bc = bancarios[bi];
     if (Math.sign(it.monto) !== Math.sign(bc.monto)) continue;
-    const d = dias(it.fecha, bc.fecha);
+    const d = Math.abs((tIt - tBc[bi]) / MS_DIA);
     if (d > ventana) continue;
     const difAbs = Math.abs(it.monto - bc.monto);
     const comparteRef = intersecta(refsIt, refsBc[bi]);
-    const comunes = comunesEntre(it.contraparte, bc.glosa);
+    // Tokens ya calculados: solo se intersectan.
+    const comunes = [...new Set(palIt.filter((w) => palBc[bi].has(w)))];
     // Si comparte referencia, es candidato aunque no comparta nombre ni esté en
     // la banda de monto. Si no, exige nombre Y banda de monto.
     if (!comparteRef) {
       if (!comunes.length) continue;
       if (difAbs > tolIa) continue;
     }
-    const sim = jaccard(it.contraparte, bc.glosa);
+    // Jaccard sobre los conjuntos ya construidos.
+    const union = new Set([...setIt, ...palBc[bi]]).size;
+    const sim = union ? comunes.length / union : 0;
     const cercM = 1 - Math.min(difAbs / (tolIa || 1), 1);
     const cercF = 1 - Math.min(d / (ventana || 1), 1);
     const score = Number(Math.min(1, 0.5 * sim + 0.3 * cercM + 0.2 * cercF + (comparteRef ? 0.4 : 0)).toFixed(3));
