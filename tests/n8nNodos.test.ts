@@ -105,3 +105,45 @@ describe("agrupación 1:N — prefiltro de identidad", () => {
     expect(r.matches[0].estado_revision).toBe("pendiente");
   });
 });
+
+describe("capa exacta — el respaldo por monto+fecha", () => {
+  const correr = (entrada: unknown) => {
+    const src = readFileSync(join(DIR, "01_exacta.js"), "utf8").replace(
+      "const src = $('Webhook').first().json;",
+      "const src = $json;",
+    );
+    return new Function("$json", src)({ body: entrada })[0].json;
+  };
+
+  const caso = (refInt: string | null, refBanco: string | null) => ({
+    job_id: "t",
+    metadata: {},
+    config: {},
+    registros_internos: [
+      { id_interno: "REG-1", fecha: "2026-06-01", monto: 99, tipo: "cobranza", referencia: refInt },
+    ],
+    movimientos_bancarios: [
+      { id_movimiento: "BCO-1", fecha: "2026-06-01", monto: 99, tipo: "abono", referencia_banco: refBanco },
+    ],
+  });
+
+  it("NO empareja cuando ambas referencias existen y se contradicen", () => {
+    // A escala esto no es teórico: con cientos de recibos de S/ 99 el mismo día,
+    // el respaldo casó 541 pares con códigos de operación sin relación — y los
+    // marcó `auto`, o sea conciliados sin que nadie los mirara.
+    expect(correr(caso("OP-AAA", "OP-BBB")).matches).toHaveLength(0);
+  });
+
+  it("sí empareja por monto+fecha cuando falta la referencia", () => {
+    // El respaldo existe para eso: ventas al contado, extractos sin referencia.
+    expect(correr(caso(null, null)).matches).toHaveLength(1);
+    expect(correr(caso("OP-AAA", null)).matches).toHaveLength(1);
+    expect(correr(caso(null, "OP-BBB")).matches).toHaveLength(1);
+  });
+
+  it("empareja por referencia idéntica, que es el camino principal", () => {
+    const r = correr(caso("OP-AAA", "OP-AAA"));
+    expect(r.matches).toHaveLength(1);
+    expect(r.matches[0].metodo).toBe("exacta");
+  });
+});

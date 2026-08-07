@@ -29,7 +29,14 @@ backend delgado y el esquema Supabase.
 
 ### Las capas de conciliación (contexto; corren en n8n)
 
-1. Match exacto (monto + ID de pago).
+1. Match exacto (monto + ID de pago). ⚠️ El **respaldo por `monto + fecha`
+   nunca empareja contra una referencia que se contradice**: existe para datos
+   SIN referencia (ventas al contado, extractos que no la traen), y cuando los
+   dos lados la traen y no coinciden son operaciones distintas. A escala esto no
+   es teórico — con cientos de recibos de S/ 99 el mismo día casó **541 pares
+   con códigos de operación sin relación, marcados `auto`**, o sea conciliados
+   sin que nadie los mirara. Y cada match falso se lleva el movimiento que le
+   tocaba al recibo legítimo: el error se propaga e infla el descuadre.
 2. Matching difuso/heurístico con tolerancias (exige ≥1 palabra de nombre en común).
 3. **Agrupación 1:N / N:1** (subset-sum): un depósito bancario que reúne varios
    pagos internos, o un pago reflejado en varios movimientos. Ver nota abajo.
