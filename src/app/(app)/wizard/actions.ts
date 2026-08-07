@@ -175,8 +175,8 @@ export type BorradoResultado = {
 };
 
 /**
- * Cuenta cuántos comprobantes de un conjunto NO se pueden borrar porque una
- * conciliación ya les aplicó un cobro.
+ * Comprobantes de la empresa que NO se pueden borrar porque una conciliación ya
+ * les aplicó un cobro.
  *
  * Borrarlos dejaría un agujero en una conciliación aprobada: la
  * `aplicaciones_cobro` se iría en cascada y el resultado del job seguiría
@@ -184,14 +184,12 @@ export type BorradoResultado = {
  */
 async function idsConCobros(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  ids: string[],
-): Promise<Set<string>> {
-  if (ids.length === 0) return new Set();
-  // Se piden TODAS las aplicaciones de la empresa (RLS acota) y se intersecta
-  // en memoria, en vez de trocear un `.in()` con miles de ids. Con 20.000
-  // comprobantes aquello eran 200 peticiones —y con lotes grandes reventaba la
-  // longitud de la URL—; las aplicaciones son siempre muchas menos.
-  const buscados = new Set(ids);
+): Promise<string[]> {
+  // Se parte de las APLICACIONES, no de los comprobantes: son órdenes de
+  // magnitud menos. Enumerar los comprobantes para preguntar cuáles están
+  // protegidos costaba una petición por cada mil — con 100.000 comprobantes
+  // eran cien viajes antes de borrar una sola fila, y "Deshacer" tardaba
+  // cuatro minutos.
   const filas = await traerTodo<{ comprobante_id: string }>((d, h) =>
     supabase
       .from("aplicaciones_cobro")
@@ -199,13 +197,54 @@ async function idsConCobros(
       .order("id", { ascending: true })
       .range(d, h),
   );
-  const conCobros = new Set<string>();
-  for (const a of filas) {
-    const id = String(a.comprobante_id);
-    if (buscados.has(id)) conCobros.add(id);
-  }
-  return conCobros;
+  return [...new Set(filas.map((a) => String(a.comprobante_id)))];
 }
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * Borra comprobantes que cumplan un filtro, respetando los que ya tienen cobros
+ * aplicados.
+ *
+ * ⚠️ El coste NO depende de cuántos se borren: se cuenta con `count`, se piden
+ * los protegidos (que son pocos) y se lanza UN delete con el filtro. Borrar
+ * 100.000 cuesta lo mismo que borrar 10. La versión anterior enumeraba los ids
+ * de todo lo que iba a borrar —cien peticiones para 100.000— y ni siquiera los
+ * usaba cuando no había nada protegido.
+ */
+async function borrarComprobantes(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  filtrar: (q: any) => any,
+  errorMsg: string,
+): Promise<BorradoResultado> {
+  const { count: total } = await filtrar(
+    supabase.from("comprobantes").select("id", { count: "exact", head: true }),
+  );
+  if (!total) return { ok: true, borrados: 0, protegidos: 0 };
+
+  // ¿Cuáles de los protegidos caen dentro de este filtro? Se pregunta con un
+  // `.in()` sobre los pocos protegidos, nunca sobre los miles a borrar.
+  const protegidosAqui: string[] = [];
+  for (const parte of enLotes(await idsConCobros(supabase))) {
+    const { data } = await filtrar(
+      supabase.from("comprobantes").select("id").in("id", parte),
+    );
+    for (const c of (data ?? []) as { id: string }[]) protegidosAqui.push(String(c.id));
+  }
+
+  let borrado = filtrar(supabase.from("comprobantes").delete());
+  if (protegidosAqui.length > 0) {
+    borrado = borrado.not("id", "in", `(${protegidosAqui.join(",")})`);
+  }
+  const { error } = await borrado;
+  if (error) return { ok: false, error: errorMsg };
+
+  return {
+    ok: true,
+    borrados: total - protegidosAqui.length,
+    protegidos: protegidosAqui.length,
+  };
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 /** Deshace una carga de plantilla: borra los comprobantes intactos de ese lote. */
 export async function deshacerImportacion(
@@ -216,38 +255,13 @@ export async function deshacerImportacion(
   if (!lote) return { ok: false, error: "Falta indicar qué importación deshacer." };
 
   const supabase = await createClient(); // RLS acota a la empresa
-  const ids = (
-    await traerTodo<{ id: string }>((d, h) =>
-      supabase
-        .from("comprobantes")
-        .select("id")
-        .eq("lote_importacion", lote)
-        .order("id", { ascending: true })
-        .range(d, h),
-    )
-  ).map((c) => String(c.id));
-  if (ids.length === 0) return { ok: true, borrados: 0, protegidos: 0 };
-
-  const conCobros = await idsConCobros(supabase, ids);
-  const borrables = ids.filter((id) => !conCobros.has(id));
-
-  // Sin nada que proteger, un DELETE por lote de importación: una petición en
-  // vez de doscientas troceadas por id.
-  if (conCobros.size === 0) {
-    const { error } = await supabase
-      .from("comprobantes")
-      .delete()
-      .eq("lote_importacion", lote);
-    if (error) return { ok: false, error: "No se pudo deshacer la importación." };
-  } else {
-    for (const parte of enLotes(borrables)) {
-      const { error } = await supabase.from("comprobantes").delete().in("id", parte);
-      if (error) return { ok: false, error: "No se pudo deshacer la importación." };
-    }
-  }
-
-  revalidatePath("/comprobantes");
-  return { ok: true, borrados: borrables.length, protegidos: conCobros.size };
+  const res = await borrarComprobantes(
+    supabase,
+    (q) => q.eq("lote_importacion", lote),
+    "No se pudo deshacer la importación.",
+  );
+  if (res.ok) revalidatePath("/comprobantes");
+  return res;
 }
 
 /**
@@ -271,33 +285,15 @@ export async function vaciarComprobantes(
   if (!empresa) return { ok: false, error: "Sesión no válida." };
 
   const supabase = await createClient(); // RLS acota a la empresa
-  const ids = (
-    await traerTodo<{ id: string }>((d, h) =>
-      supabase.from("comprobantes").select("id").order("id", { ascending: true }).range(d, h),
-    )
-  ).map((c) => String(c.id));
-  if (ids.length === 0) return { ok: true, borrados: 0, protegidos: 0 };
-
-  const conCobros = await idsConCobros(supabase, ids);
-  const borrables = ids.filter((id) => !conCobros.has(id));
-
-  // Igual aquí: si nada tiene cobros, se borra todo de una. RLS acota a la
-  // empresa, así que el filtro "todos" no cruza datos de nadie.
-  if (conCobros.size === 0) {
-    const { error } = await supabase
-      .from("comprobantes")
-      .delete()
-      .not("id", "is", null);
-    if (error) return { ok: false, error: "No se pudieron borrar los comprobantes." };
-  } else {
-    for (const parte of enLotes(borrables)) {
-      const { error } = await supabase.from("comprobantes").delete().in("id", parte);
-      if (error) return { ok: false, error: "No se pudieron borrar los comprobantes." };
-    }
-  }
-
-  revalidatePath("/comprobantes");
-  return { ok: true, borrados: borrables.length, protegidos: conCobros.size };
+  const res = await borrarComprobantes(
+    supabase,
+    // "Todos los de la empresa": RLS ya acota, el filtro solo evita un delete
+    // sin condición, que PostgREST rechaza.
+    (q) => q.not("id", "is", null),
+    "No se pudieron borrar los comprobantes.",
+  );
+  if (res.ok) revalidatePath("/comprobantes");
+  return res;
 }
 
 /**

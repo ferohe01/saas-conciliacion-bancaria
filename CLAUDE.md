@@ -487,6 +487,14 @@ comprobantes fallaba con un escueto *"No se pudieron borrar los comprobantes"* �
 y antes fallaba en silencio la consulta de protegidos, porque `traerTodo` se
 traga el error. Por eso `enLotes` trocea de **100 en 100**.
 
+**Y mejor todavía: no contar una por una lo que se va a borrar en bloque.**
+"Deshacer esta importación" con 100.000 comprobantes tardaba **4-5 minutos**
+porque pedía los 100.000 ids —cien peticiones— para al final lanzar un solo
+DELETE por `lote_importacion` que ni los usaba. Ahora `borrarComprobantes()`
+cuenta con `count`, pide los **protegidos** (que son pocos, y salen de
+`aplicaciones_cobro`, no de los comprobantes) y lanza un DELETE con el filtro:
+**borrar 100.000 cuesta lo mismo que borrar 10**.
+
 **Mejor que trocear es no enumerar.** Donde se pueda, filtrar por un campo en vez
 de por miles de ids: `idsConCobros` pide las aplicaciones de la empresa (RLS
 acota) y cruza en memoria, y los borrados usan `.eq("lote_importacion", …)` o el
