@@ -6,10 +6,10 @@ import { leerArchivo } from "@/lib/parsing/leerArchivo";
 import { normalizarFecha } from "@/lib/normalizacion/fecha";
 import { normalizarMonto } from "@/lib/normalizacion/monto";
 import { formatearFecha, formatearPEN } from "@/lib/parsing/resumen";
-import {
-  importarComprobantes,
-  deshacerImportacion,
-} from "@/app/(app)/wizard/actions";
+import { deshacerImportacion } from "@/app/(app)/wizard/actions";
+
+/** Por encima de esto no se previsualiza: el navegador no puede con ello. */
+const MAX_VISTA_PREVIA = 8 * 1024 * 1024;
 
 type FilaImport = {
   fecha: string;
@@ -70,6 +70,7 @@ export function ImportadorComprobantes({
   onImportado?: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [archivo, setArchivo] = useState<File | null>(null);
   const [filas, setFilas] = useState<FilaImport[] | null>(null);
   const [invalidas, setInvalidas] = useState(0);
   const [nombre, setNombre] = useState("");
@@ -79,13 +80,25 @@ export function ImportadorComprobantes({
   const [ultimoLote, setUltimoLote] = useState<string | null>(null);
   const [pendiente, startTransition] = useTransition();
 
+  /**
+   * El archivo SIEMPRE lo procesa el servidor. Aquí solo se lee para enseñar
+   * una vista previa, y únicamente si es pequeño: parsear en el navegador un
+   * archivo de cientos de miles de filas se lleva gigas de memoria y tumba la
+   * pestaña. Por encima del límite se sube a ciegas, que es exactamente lo que
+   * hace posible cargar 450.000 comprobantes.
+   */
   async function onArchivo(file: File) {
     setError(null);
     setOkMsg(null);
+    setArchivo(file);
+    setNombre(file.name);
+    setFilas(null);
+    setInvalidas(0);
+
+    if (file.size > MAX_VISTA_PREVIA) return; // grande: sin previa, al servidor
     try {
       const { filas: crudas } = await leerArchivo(file);
       const { validas, invalidas } = normalizarFilas(crudas);
-      setNombre(file.name);
       setFilas(validas);
       setInvalidas(invalidas);
       if (validas.length === 0) {
@@ -94,27 +107,41 @@ export function ImportadorComprobantes({
         );
       }
     } catch {
-      setError("No se pudo leer el archivo.");
+      // Que falle la previa no impide importar: el servidor vuelve a leerlo.
+      setFilas(null);
     }
   }
 
   function confirmar() {
-    if (!filas || filas.length === 0) return;
+    if (!archivo) return;
     setError(null);
     startTransition(async () => {
-      // Las descartadas por datos incompletos se cuentan aquí, en el cliente,
-      // porque nunca llegan al servidor: sin decirlo, la suma no cuadra con las
-      // filas del Excel y parece que se perdieron.
-      const res = await importarComprobantes(filas, invalidas);
-      if (!res.ok) {
-        setError(res.error ?? "No se pudo importar.");
-        return;
+      const cuerpo = new FormData();
+      cuerpo.append("archivo", archivo);
+      try {
+        const r = await fetch("/api/comprobantes/importar", {
+          method: "POST",
+          body: cuerpo,
+        });
+        const res = (await r.json()) as {
+          ok?: boolean; error?: string; mensaje?: string;
+          insertados?: number; lote?: string;
+        };
+        if (!r.ok || !res.ok) {
+          setError(res.error ?? "No se pudo importar.");
+          return;
+        }
+        setOkMsg(res.mensaje ?? `Se importaron ${res.insertados} comprobantes.`);
+        setUltimoLote(res.lote ?? null);
+        setArchivo(null);
+        setFilas(null);
+        setNombre("");
+        onImportado?.();
+      } catch {
+        setError(
+          "Se cortó la conexión durante la carga. Si el archivo es grande, revisa la lista antes de reintentar: puede que parte ya esté cargada.",
+        );
       }
-      setOkMsg(res.mensaje ?? `Se importaron ${res.insertados} comprobantes.`);
-      setUltimoLote(res.lote ?? null);
-      setFilas(null);
-      setNombre("");
-      onImportado?.();
     });
   }
 
@@ -177,11 +204,11 @@ export function ImportadorComprobantes({
         />
       </div>
 
-      {filas && filas.length > 0 && (
+      {archivo && (
         <div className="mt-4">
           <p className="text-sm text-neutral-700">
-            <span className="font-medium">{nombre}</span> — {filas.length}{" "}
-            comprobantes listos
+            <span className="font-medium">{nombre}</span>
+            {filas ? ` — ${filas.length} comprobantes listos` : ""}
             {invalidas > 0 && (
               <span className="text-amber-600">
                 {" "}
@@ -190,6 +217,16 @@ export function ImportadorComprobantes({
             )}
           </p>
 
+          {!filas && (
+            <p className="mt-2 rounded-lg border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-600">
+              Archivo grande ({(archivo.size / 1048576).toFixed(1)} MB): se
+              procesa en el servidor por lotes, sin vista previa. Si es un Excel
+              de más de 50.000 filas, guárdalo como CSV — ese formato no tiene
+              tope porque se lee por partes.
+            </p>
+          )}
+
+          {filas && (
           <div className="mt-2 overflow-x-auto rounded-lg border border-neutral-200 bg-white">
             <table className="min-w-full text-left text-sm">
               <thead className="bg-neutral-50 text-xs text-neutral-500">
@@ -224,6 +261,7 @@ export function ImportadorComprobantes({
               </tbody>
             </table>
           </div>
+          )}
 
           <button
             type="button"
@@ -231,7 +269,11 @@ export function ImportadorComprobantes({
             disabled={pendiente}
             className="mt-3 rounded-xl bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-neutral-800 disabled:bg-neutral-300"
           >
-            {pendiente ? "Importando…" : `Importar ${filas.length} comprobantes`}
+            {pendiente
+              ? "Importando… (puede tardar en archivos grandes)"
+              : filas
+                ? `Importar ${filas.length} comprobantes`
+                : "Importar este archivo"}
           </button>
         </div>
       )}

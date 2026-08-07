@@ -526,6 +526,34 @@ escribía), `idsConCobros` (habría dejado borrar un comprobante con cobros),
 `/cobranzas` y `/pagos` (la antigüedad de deuda se calculaba sobre 1.000), y el
 resumen del wizard (ahora usa `count: "exact"`).
 
+## Ingesta en servidor por lotes (volumen)
+
+`POST /api/comprobantes/importar` recibe el **archivo** y lo procesa en el
+servidor. Antes el navegador parseaba y mandaba las filas ya normalizadas a una
+server action, y eso topaba tres veces: memoria del navegador (450.000 filas son
+1–3 GB), límite de body de las server actions, y el tope de 5.000 filas.
+
+- **El CSV se lee del stream a trozos** (`lib/parsing/csv.ts`, puro y con tests):
+  se acumulan ~1.000 filas, se insertan y se sueltan. Memoria constante, **sin
+  tope de filas**.
+- ⚠️ **El XLSX no puede leerse a trozos**: hay que descomprimirlo entero antes de
+  ver la primera fila, así que el pico de memoria ocurre **antes** de que exista
+  lote alguno que insertar. Por eso lleva tope (`MAX_FILAS_XLSX = 50.000`) y el
+  error dice que guarden como CSV. No es pereza: insertar por lotes no arregla
+  un formato que exige leerlo entero.
+- El navegador **solo previsualiza archivos < 8 MB**. Por encima sube a ciegas,
+  que es justo lo que permite cargar 450.000. Que falle la previa no impide
+  importar: el servidor vuelve a leer el archivo.
+- Las series ya cargadas se piden **una vez** y se llevan en un `Set`;
+  preguntar por lote serían cientos de viajes.
+
+**Esto NO desbloquea conciliar 450.000**, solo cargarlos. Falta la parte B: el
+payload a n8n son ~180 MB contra un webhook de 16, y el `resultado` sería un
+JSONB de cientos de MB en una fila. La salida es que **n8n lea de Supabase en
+vez de recibir el payload**, y que el resultado vaya a una tabla — lo que
+convierte en obsoleta la nota de "tablas normalizadas fuera de alcance porque el
+JSONB basta": bastaba a 2.000 partidas.
+
 ## Período de prueba (30 días)
 
 La promesa comercial "tu primer período es gratis" vivía solo como texto en la
