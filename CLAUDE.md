@@ -534,6 +534,41 @@ escribía), `idsConCobros` (habría dejado borrar un comprobante con cobros),
 `/cobranzas` y `/pagos` (la antigüedad de deuda se calculaba sobre 1.000), y el
 resumen del wizard (ahora usa `count: "exact"`).
 
+## ⚠️ El middleware trunca los cuerpos de más de 10 MB, en silencio
+
+Hermano del tope de PostgREST, y peor: aquí no se pierde una lectura, se pierde
+lo que el cliente acaba de subir.
+
+Cuando hay middleware, Next **clona** el cuerpo de la petición para pasárselo
+(`getCloneableBody` → `cloneBodyStream`, en `next/dist/server/body-streams.js`).
+El clon tiene un tope de 10 MB (`DEFAULT_BODY_CLONE_SIZE_LIMIT`) y al superarlo
+hace `limitExceeded = true; return`: **deja de reenviar bytes**. No lanza, no
+responde 413. El handler recibe JSON cortado y lo único que se ve es
+`"JSON inválido"` — un mensaje que apunta al sitio equivocado y manda a buscar
+el fallo en el cliente, que es lo único que no puede ser.
+
+**No es configurable.** `serverActions.bodySizeLimit` no alimenta ese
+`sizeLimit`: con 4 MB declarados ahí, 9 MB pasaban y 10 MB no. La única palanca
+es que el middleware **no corra** en esa ruta, y por eso el matcher de
+`src/middleware.ts` lleva exclusiones explícitas.
+
+Cómo se acotó, por si vuelve a pasar con otro límite: se sondea un endpoint
+**público que parsee JSON** (`/api/auth/registro`) con cuerpos válidos de tamaño
+creciente. Si vuelve el error de validación, el cuerpo llegó entero; si vuelve
+"JSON inválido", se cortó — y el tamaño donde cambia es el límite. Repetir la
+sonda **dentro del contenedor** separa la app del proxy: aquí falló igual en
+127.0.0.1:3000, lo que descartó Traefik en un minuto.
+
+⚠️ **Lo caro no era la conciliación de 13,3 MB con que se detectó**, que al menos
+fallaba a la vista. Era `/api/comprobantes/importar`, que recibe el **archivo**:
+un CSV de 30 MB se habría importado a medias **sin un solo error en pantalla**.
+Pérdida de datos silenciosa, en el camino construido justamente para volumen.
+
+**Regla:** toda ruta que reciba un archivo o un payload que crezca con los datos
+del cliente se añade al matcher. `tests/middleware.test.ts` lo vigila: comprueba
+las tres rutas conocidas y **escanea las APIs en busca de `request.formData()`**
+—una subida crece por definición— exigiendo que estén excluidas.
+
 ## El tope de partidas es configurable, y va emparejado con n8n
 
 `MAX_FILAS_CONCILIACION` (por defecto **20.000**) acota las partidas por lado.
