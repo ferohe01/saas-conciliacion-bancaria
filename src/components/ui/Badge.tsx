@@ -1,5 +1,6 @@
-import type { MetodoMatch } from "@/lib/contract/enums";
+import type { MetodoMatch, EstadoJob } from "@/lib/contract/enums";
 import { ETIQUETA, type EstadoContable } from "@/lib/cicloContable";
+import { saludDelJob } from "@/lib/jobsAtascados";
 
 /**
  * Badges del sistema — ver DESIGN.md § Components › Badges de método.
@@ -70,12 +71,35 @@ const ESTADO_JOB: Record<
   },
 };
 
-export function BadgeEstadoJob({ estado }: { estado: string }) {
-  const e = ESTADO_JOB[estado] ?? {
-    texto: estado,
-    clase: "bg-neutral-100 text-neutral-700 ring-neutral-200",
-    punto: "bg-neutral-400",
-  };
+/**
+ * `createdAt` es opcional pero conviene pasarlo: sin él, una conciliación que
+ * n8n aceptó y luego abandonó figura como "Conciliando" en el historial
+ * indefinidamente, y el historial es justo donde se va a mirar qué pasó con
+ * ella. Ver `lib/jobsAtascados.ts`.
+ */
+export function BadgeEstadoJob({
+  estado,
+  createdAt,
+}: {
+  estado: string;
+  createdAt?: string;
+}) {
+  const detenido =
+    createdAt != null &&
+    saludDelJob(estado as EstadoJob, createdAt) === "detenido";
+  const e = detenido
+    ? {
+        // Ámbar y no rojo: nadie ha comprobado que fallara, solo que dejó de
+        // avanzar. El color no debe afirmar más que el texto.
+        texto: "Interrumpida",
+        clase: "bg-amber-50 text-amber-800 ring-amber-200",
+        punto: "bg-amber-500",
+      }
+    : (ESTADO_JOB[estado] ?? {
+        texto: estado,
+        clase: "bg-neutral-100 text-neutral-700 ring-neutral-200",
+        punto: "bg-neutral-400",
+      });
   return (
     <span
       className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${e.clase}`}

@@ -127,7 +127,7 @@ export default async function HistorialPage() {
                       estado={job.estado_contable ?? "borrador"}
                       version={job.version}
                     />
-                    <BadgeEstadoJob estado={job.estado} />
+                    <BadgeEstadoJob estado={job.estado} createdAt={job.created_at} />
                   </span>
                 </Link>
               </li>

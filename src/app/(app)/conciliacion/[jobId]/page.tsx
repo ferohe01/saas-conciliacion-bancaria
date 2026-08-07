@@ -28,7 +28,7 @@ export default async function ConciliacionPage({
   const { data } = await supabase
     .from("jobs_conciliacion")
     .select(
-      "id, estado, fase_actual, resultado, error_detalle, periodo_desde, periodo_hasta, payload_entrada, estado_contable, version, fecha_aprobacion, cuenta_id",
+      "id, estado, fase_actual, resultado, error_detalle, periodo_desde, periodo_hasta, created_at, payload_entrada, estado_contable, version, fecha_aprobacion, cuenta_id",
     )
     .eq("id", jobId)
     .maybeSingle();

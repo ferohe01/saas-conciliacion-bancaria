@@ -9,6 +9,8 @@ import { enviarAN8n } from "@/lib/n8n/cliente";
 import { construirEjemplos, type JobHistorico } from "@/lib/aprendizaje";
 import { criteriosParaIa } from "@/lib/criteriosIniciales";
 import { estadoSuscripcion } from "@/lib/suscripcion";
+import { bloqueaRelanzamiento } from "@/lib/jobsAtascados";
+import type { EstadoJob } from "@/lib/contract/enums";
 import {
   PayloadConciliacion,
   Periodo,
@@ -123,15 +125,25 @@ export async function POST(request: Request) {
   const admin = createAdminClient();
 
   // Idempotencia: no crear dos jobs activos iguales (misma cuenta+período).
-  const { data: activo } = await admin
+  //
+  // ⚠️ Un job en vuelo reserva su período para que dos clics no creen dos
+  // conciliaciones, pero esa reserva CADUCA. n8n responde en su segundo nodo,
+  // así que puede aceptar con 200 y morir en cualquiera de los ocho siguientes;
+  // el job se queda en `procesando` y, sin caducidad, encerraba al usuario en un
+  // período que ya no podía relanzar. Ver `lib/jobsAtascados.ts`.
+  const { data: enVuelo } = await admin
     .from("jobs_conciliacion")
-    .select("id")
+    .select("id, estado, created_at")
     .eq("empresa_id", empresa.empresa_id)
     .eq("cuenta_id", req.cuenta_id)
     .eq("periodo_desde", req.periodo.desde)
     .eq("periodo_hasta", req.periodo.hasta)
     .in("estado", ["pendiente", "procesando"])
-    .maybeSingle();
+    .order("created_at", { ascending: false })
+    .limit(1);
+  const activo = (enVuelo ?? []).find((j) =>
+    bloqueaRelanzamiento(j.estado as EstadoJob, j.created_at),
+  );
   if (activo) {
     return NextResponse.json({ job_id: activo.id, idempotente: true });
   }

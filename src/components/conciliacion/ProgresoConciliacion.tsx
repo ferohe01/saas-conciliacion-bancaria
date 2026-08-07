@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { EstadoJob } from "@/lib/contract/enums";
 import type { ResultadoConciliacion } from "@/lib/contract/resultado";
 import { Boton, Tarjeta, clasesBoton } from "@/components/ui";
+import { saludDelJob, minutosDesde } from "@/lib/jobsAtascados";
 
 export type JobRow = {
   id: string;
@@ -16,6 +17,8 @@ export type JobRow = {
   error_detalle: string | null;
   periodo_desde: string;
   periodo_hasta: string;
+  /** Para detectar que se quedó colgada. Ver `lib/jobsAtascados.ts`. */
+  created_at: string;
 };
 
 /**
@@ -84,7 +87,7 @@ export function ProgresoConciliacion({ jobInicial }: { jobInicial: JobRow }) {
       const { data } = await supabase
         .from("jobs_conciliacion")
         .select(
-          "id, estado, fase_actual, resultado, error_detalle, periodo_desde, periodo_hasta",
+          "id, estado, fase_actual, resultado, error_detalle, periodo_desde, periodo_hasta, created_at",
         )
         .eq("id", jobInicial.id)
         .maybeSingle();
@@ -98,6 +101,19 @@ export function ProgresoConciliacion({ jobInicial }: { jobInicial: JobRow }) {
   useEffect(() => {
     if (job.estado === "completado" || job.estado === "error") router.refresh();
   }, [job.estado, router]);
+
+  // Reloj propio: la salud del job depende del tiempo transcurrido, y sin un
+  // tick la pantalla se quedaría diciendo "va bien" para siempre justo en el
+  // caso en que nadie va a volver a tocarla.
+  const [ahora, setAhora] = useState(() => new Date());
+  useEffect(() => {
+    if (job.estado === "completado" || job.estado === "error") return;
+    const t = setInterval(() => setAhora(new Date()), 30_000);
+    return () => clearInterval(t);
+  }, [job.estado]);
+
+  const salud = saludDelJob(job.estado, job.created_at, ahora);
+  const minutos = Math.floor(minutosDesde(job.created_at, ahora));
 
   const resumen = job.resultado?.resumen;
 
@@ -158,6 +174,36 @@ export function ProgresoConciliacion({ jobInicial }: { jobInicial: JobRow }) {
     );
   }
 
+  // ── Parece detenida ───────────────────────────────────────────────────
+  // n8n responde en su SEGUNDO nodo, así que la aceptación no promete nada
+  // sobre los ocho siguientes: puede aceptar y morir después. Sin esto, la
+  // pantalla giraba indefinidamente y el período quedaba además bloqueado para
+  // relanzarlo. No se afirma que haya fallado —no lo sabemos—, se dice lo que
+  // se observa y se da salida.
+  if (salud === "detenido") {
+    return (
+      <Tarjeta tono="atencion">
+        <h2 className="font-semibold text-amber-900">
+          Esta conciliación lleva {minutos} minutos sin terminar
+        </h2>
+        <p className="mt-1 text-sm text-amber-900">
+          Un período de este tamaño suele resolverse en menos de un minuto, así
+          que lo más probable es que el motor se haya interrumpido. Tus datos
+          están guardados y no se ha modificado ningún saldo: puedes volver a
+          lanzarla sobre el mismo período.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Link href="/wizard" className={clasesBoton("primario", "sm")}>
+            Volver a lanzarla
+          </Link>
+          <Link href="/conciliacion" className={clasesBoton("secundario", "sm")}>
+            Ver el historial
+          </Link>
+        </div>
+      </Tarjeta>
+    );
+  }
+
   // ── En progreso ───────────────────────────────────────────────────────
   const idx = ordenFase(job.fase_actual);
   const enCola = job.estado === "pendiente" || idx === -1;
@@ -180,6 +226,14 @@ export function ProgresoConciliacion({ jobInicial }: { jobInicial: JobRow }) {
             Puede tardar unos minutos según el volumen. Esta pantalla se
             actualiza sola; puedes cerrarla y volver desde el historial.
           </p>
+          {/* Antes de dar nada por perdido, decirlo. Que la espera se alargue
+              sin explicación es lo que hace pensar que el sistema se colgó. */}
+          {salud === "lento" && (
+            <p className="mt-2 text-sm font-medium text-amber-800">
+              Lleva {minutos} minutos: más de lo habitual. Sigue en marcha —
+              esperamos un poco más antes de darla por interrumpida.
+            </p>
+          )}
         </div>
       </div>
 

@@ -699,6 +699,47 @@ comprobantes, y es la única que suman el panel y los reportes. Un borrador con
 decisiones confirmadas no mueve un céntimo. El panel avisa cuando hay
 conciliaciones terminadas sin aprobar, porque si no parecería que se perdieron.
 
+## Cuando n8n acepta y luego se muere
+
+`POST /api/conciliacion/iniciar` ya marcaba `error` en tres casos: n8n
+inalcanzable, respuesta que no es 2xx, y conteos recibidos distintos de los
+enviados. Lo que no cubría —y no puede— es que **n8n acepte con 200 y muera
+después**: el flujo responde en su SEGUNDO nodo, así que la aceptación no
+promete nada sobre los ocho siguientes. Si el runner aborta o el contenedor se
+reinicia, el job se queda en `procesando` y nadie lo saca de ahí.
+
+⚠️ **El daño no es la pantalla girando.** Un job en `pendiente` o `procesando`
+**retiene la clave de idempotencia** (cuenta + período), así que el usuario
+tampoco podía relanzar ese período: quedaba encerrado sin saber por qué.
+
+`src/lib/jobsAtascados.ts` (puro, con tests) clasifica en `normal | lento |
+detenido` por tiempo transcurrido. Umbrales **5 y 30 minutos**, medidos contra
+producción:
+
+    68.571 partidas → 23–34 s
+    39.961 partidas → 14–49 s
+
+O sea que van 50× por encima de lo observado, a propósito: la capa de IA depende
+de un LLM externo y una corrida con miles de adjudicaciones puede tardar minutos
+legítimamente. Un falso "detenida" cuesta más que esperar de más — empuja a
+relanzar algo que iba a terminar.
+
+- **No se marca `error` sola.** Un temporizador no sabe si n8n murió o si va
+  lento; declarar fallida una conciliación que está terminando sería inventarse
+  un hecho. Se describe lo observable ("lleva 34 minutos") y decide quien mira.
+- **Lo que sí se hace sin preguntar es dejar de bloquear el relanzamiento**, que
+  no afirma nada y desencalla al usuario.
+- El badge del historial pasa a **"Interrumpida" en ámbar, no en rojo**: nadie
+  ha comprobado que fallara, solo que dejó de avanzar. El color no debe afirmar
+  más que el texto.
+
+**Por qué no un Error Workflow de n8n:** el payload del Error Trigger solo trae
+metadatos de la ejecución (`execution.id`, `workflow`, el mensaje) — **no el
+`job_id`**, que viajaba en el body del webhook. Marcar el job correcto exigiría
+consultar la API de n8n con otra credencial, y aun así no cubriría el caso de
+que n8n esté caído del todo, que es justo cuando más falta hace. El vigilante
+vive en la app porque solo ahí se sabe qué se esperaba y desde cuándo.
+
 ## El cuadre bancario: los pendientes del banco se RESTAN
 
 El cuadre es el veredicto que el cliente le enseña a su contador, y un error
