@@ -147,3 +147,89 @@ describe("capa exacta — el respaldo por monto+fecha", () => {
     expect(r.matches[0].metodo).toBe("exacta");
   });
 });
+
+/**
+ * Segunda excepción, por el mismo motivo: el cuadre es el VEREDICTO que el
+ * cliente enseña a su contador, y un error aquí no se ve — sale un número
+ * plausible.
+ *
+ * Tenía dos, tapándose entre sí. Los abonos que el banco registró y los libros
+ * no, no se contaban en ningún renglón (24 depósitos de una recaudadora
+ * desaparecidos del informe). Y los cargos se sumaban en vez de restarse, lo
+ * que con una comisión no la corregía sino que la duplicaba con el signo
+ * cambiado. Resultado: el cuadre no podía dar cero aunque toda diferencia
+ * estuviera explicada — que es exactamente lo único que el cuadre demuestra.
+ */
+describe("cuadre bancario", () => {
+  const correr = (entrada: unknown) =>
+    new Function("$json", readFileSync(join(DIR, "04_ensamblar.js"), "utf8"))(
+      entrada,
+    )[0].json.resultado_update.resultado.cuadre;
+
+  /** Un período con los saldos dados y las partidas sueltas que se le pasen. */
+  const caso = (
+    saldos: { extracto: number; libros: number },
+    pendientes: { internos?: number[]; bancarios?: number[] } = {},
+  ) =>
+    correr({
+      job_id: "t",
+      metadata: { saldos: { saldo_extracto_final: saldos.extracto, saldo_libros_final: saldos.libros } },
+      total_internos: 0,
+      total_bancarios: 0,
+      matches: [],
+      pendientes_internos: (pendientes.internos ?? []).map((monto, i) => ({ id_interno: `REG-${i}`, monto })),
+      pendientes_bancarios: (pendientes.bancarios ?? []).map((monto, i) => ({ id_movimiento: `BCO-${i}`, monto })),
+    });
+
+  it("cuadra cuando no hay nada suelto", () => {
+    expect(caso({ extracto: 1000, libros: 1000 }).diferencia).toBe(0);
+  });
+
+  it("cierra con un depósito en tránsito", () => {
+    // El libro ya lo tiene, el extracto todavía no: 900 + 100 = 1000.
+    const c = caso({ extracto: 900, libros: 1000 }, { internos: [100] });
+    expect(c.depositos_en_transito).toBe(100);
+    expect(c.diferencia).toBe(0);
+  });
+
+  it("cierra con un cheque girado y no cobrado", () => {
+    const c = caso({ extracto: 1100, libros: 1000 }, { internos: [-100] });
+    expect(c.cheques_no_cobrados).toBe(-100);
+    expect(c.diferencia).toBe(0);
+  });
+
+  it("cierra con una comisión que el banco cobró y los libros no tienen", () => {
+    // El fallo del signo: el extracto YA descontó los 50, los libros no, así
+    // que libros = extracto + 50. Sumarlos daba −100 en vez de 0.
+    const c = caso({ extracto: 950, libros: 1000 }, { bancarios: [-50] });
+    expect(c.cargos_no_registrados).toBe(-50);
+    expect(c.diferencia).toBe(0);
+  });
+
+  it("cierra con un abono que el banco registró y los libros no", () => {
+    // El renglón que faltaba: sin él la diferencia se quedaba en −50.
+    const c = caso({ extracto: 1050, libros: 1000 }, { bancarios: [50] });
+    expect(c.abonos_no_registrados).toBe(50);
+    expect(c.diferencia).toBe(0);
+  });
+
+  it("cierra con las cuatro partidas a la vez", () => {
+    // extracto 940 + 100 − 30 − 20 + 10 = 1000 = libros.
+    const c = caso(
+      { extracto: 940, libros: 1000 },
+      { internos: [100, -30], bancarios: [20, -10] },
+    );
+    expect(c.saldo_banco_ajustado).toBe(1000);
+    expect(c.diferencia).toBe(0);
+  });
+
+  it("el corte del 30/06: la diferencia es la brecha de saldos más la de partidas", () => {
+    // Caso real reducido: 4.207 recibos cobrados por otro canal (+414.616,52)
+    // y 24 depósitos que el banco trae y los libros no (−2.067,49).
+    const c = caso(
+      { extracto: 660, libros: 0 },
+      { internos: [414_616.52], bancarios: [2_067.49] },
+    );
+    expect(c.diferencia).toBe(413_209.03);
+  });
+});

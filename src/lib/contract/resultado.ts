@@ -77,10 +77,31 @@ export const PartidaNoConciliada = z.object({
 });
 export type PartidaNoConciliada = z.infer<typeof PartidaNoConciliada>;
 
+/**
+ * Cuadre bancario.
+ *
+ * Las cuatro partidas de ajuste llevan el signo de la convención única del
+ * sistema (abonos +, cargos −) y se combinan así:
+ *
+ *     banco ajustado = extracto
+ *                    + (pendientes de LIBROS: depósitos en tránsito + cheques)
+ *                    − (pendientes del BANCO: abonos + cargos no registrados)
+ *
+ * Los pendientes de libros se SUMAN porque el extracto todavía no los refleja;
+ * los del banco se RESTAN porque el extracto ya los incluye y los libros no.
+ * Cuando toda diferencia es una partida conocida, `diferencia` da 0.
+ */
 export const Cuadre = z.object({
   saldo_extracto_final: Monto,
   depositos_en_transito: Monto,
   cheques_no_cobrados: Monto,
+  /**
+   * Abonos que el banco registró y los libros no. `default(0)` y no requerido:
+   * los resultados guardados antes de que existiera este renglón no lo traen, y
+   * exigirlo dejaría ilegible todo el histórico. Cero es además el valor
+   * honesto para ellos — no se recalculan hacia atrás.
+   */
+  abonos_no_registrados: Monto.default(0),
   cargos_no_registrados: Monto,
   saldo_banco_ajustado: Monto,
   saldo_libros_final: Monto,

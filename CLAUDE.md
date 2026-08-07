@@ -699,6 +699,49 @@ comprobantes, y es la única que suman el panel y los reportes. Un borrador con
 decisiones confirmadas no mueve un céntimo. El panel avisa cuando hay
 conciliaciones terminadas sin aprobar, porque si no parecería que se perdieron.
 
+## El cuadre bancario: los pendientes del banco se RESTAN
+
+El cuadre es el veredicto que el cliente le enseña a su contador, y un error
+aquí no se ve: sale un número plausible. Tenía dos, y se tapaban entre sí.
+
+La fórmula, con la convención de signos única (abonos +, cargos −):
+
+```
+banco ajustado = saldo extracto
+               + pendientes de LIBROS  (depósitos en tránsito + cheques)
+               − pendientes del BANCO  (abonos + cargos no registrados)
+```
+
+**Los de libros se suman** porque el extracto todavía no los refleja; **los del
+banco se restan** porque el extracto ya los incluye y los libros no. Cuando toda
+diferencia es una partida conocida, `diferencia` da **0** — y demostrar eso es
+lo único que el cuadre hace.
+
+Lo que estaba mal en `04_ensamblar.js`:
+
+1. **Los abonos del banco no se contaban en ningún renglón.**
+   `cargos_no_registrados` filtraba `monto < 0`, así que un depósito que el
+   banco trae y los libros no desaparecía del informe. En el corte del 30/06 de
+   la recaudadora se evaporaron 24 movimientos (S/ 2.067,49).
+2. **Los cargos se sumaban en vez de restarse.** Con una comisión de −50 que el
+   extracto ya descontó, lo correcto es `libros = extracto + 50`. Sumarla daba
+   `−100`: no la corregía, la duplicaba con el signo cambiado.
+
+Juntos hacían que **el cuadre no pudiera cerrar aunque todo estuviera
+explicado**, que es exactamente el caso en que tiene que cerrar.
+
+- ⚠️ `abonos_no_registrados` es `Monto.default(0)`, **no requerido**: los
+  resultados viven como JSONB en la fila del job y no se migran, así que
+  exigirlo dejaría ilegible todo el histórico. Cero es además lo honesto — no se
+  recalculan hacia atrás, el informe sigue diciendo lo que dijo el día que se
+  emitió. Mismo criterio que `DecisionHumana.motivo`.
+- **Los signos de las etiquetas describen el EFECTO sobre el saldo, no la
+  operación**: las partidas ya vienen firmadas, así que "+ Cheques no cobrados"
+  restaría y confundiría a quien lee el detalle.
+- Hay tests en `tests/n8nNodos.test.ts` — segunda excepción deliberada a "los
+  nodos Code no se testean unitariamente", por el mismo motivo que la agrupación:
+  el fallo produce un resultado **plausible y equivocado**.
+
 ## Que una factura no se cobre dos veces
 
 Dos cuentas bancarias con el mismo período pueden estar ambas aprobadas —son

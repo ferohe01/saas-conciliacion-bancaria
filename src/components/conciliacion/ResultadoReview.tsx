@@ -630,10 +630,14 @@ function CuadreBarra({
           Ver el detalle del cuadre
         </summary>
         <dl className="mt-3 space-y-1.5 rounded-xl bg-white/70 p-4 text-sm">
+          {/* Los signos de las etiquetas describen el EFECTO sobre el saldo,
+              no la operación aritmética: las partidas ya vienen firmadas (un
+              cheque es negativo, así que "+ cheques" restaría y confundiría). */}
           <LineaCuadre label="Saldo extracto final" valor={cuadre.saldo_extracto_final} moneda={moneda} />
           <LineaCuadre label="+ Depósitos en tránsito" valor={cuadre.depositos_en_transito} moneda={moneda} />
           <LineaCuadre label="− Cheques no cobrados" valor={cuadre.cheques_no_cobrados} moneda={moneda} />
-          <LineaCuadre label="± Cargos no registrados" valor={cuadre.cargos_no_registrados} moneda={moneda} />
+          <LineaCuadre label="− Abonos no registrados en libros" valor={cuadre.abonos_no_registrados} moneda={moneda} />
+          <LineaCuadre label="+ Cargos no registrados en libros" valor={cuadre.cargos_no_registrados} moneda={moneda} />
           <div className="my-2 border-t border-neutral-300" />
           <LineaCuadre label="Saldo banco ajustado" valor={cuadre.saldo_banco_ajustado} moneda={moneda} fuerte />
           <LineaCuadre label="Saldo según libros" valor={cuadre.saldo_libros_final} moneda={moneda} fuerte />

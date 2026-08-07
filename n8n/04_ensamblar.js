@@ -30,11 +30,27 @@ const no_conciliados = [
 const saldos = metadata?.saldos ?? {};
 const r2 = (n) => Number(Number(n).toFixed(2));
 const saldoExtractoFinal = Number(saldos.saldo_extracto_final ?? 0);
+// Pendientes de LIBROS: el extracto todavía no los refleja, así que se SUMAN
+// (van con su signo: los cheques son negativos y por tanto restan).
 const depositosEnTransito = pendInt.reduce((a, it) => a + (it.monto > 0 ? it.monto : 0), 0);
 const chequesNoCobrados = pendInt.reduce((a, it) => a + (it.monto < 0 ? it.monto : 0), 0);
+// Pendientes del BANCO: el extracto YA los incluye y los libros no, así que se
+// RESTAN. Los dos signos, no solo uno.
+//
+// ⚠️ Aquí había dos fallos que se tapaban entre sí. Los abonos (`monto > 0`) no
+// se contaban en ningún renglón: 24 depósitos de una recaudadora se evaporaron
+// del informe. Y los cargos se SUMABAN en vez de restarse, que con una comisión
+// de −50 no la corregía sino que la duplicaba con el signo cambiado (−100).
+// El efecto conjunto: el cuadre no podía cerrar aunque toda diferencia
+// estuviera explicada, que es justo lo que el cuadre existe para demostrar.
+const abonosNoRegistrados = pendBanc.reduce((a, bc) => a + (bc.monto > 0 ? bc.monto : 0), 0);
 const cargosNoRegistrados = pendBanc.reduce((a, bc) => a + (bc.monto < 0 ? bc.monto : 0), 0);
 const saldoBancoAjustado =
-  saldoExtractoFinal + depositosEnTransito + chequesNoCobrados + cargosNoRegistrados;
+  saldoExtractoFinal +
+  depositosEnTransito +
+  chequesNoCobrados -
+  abonosNoRegistrados -
+  cargosNoRegistrados;
 const saldoLibros = Number(saldos.saldo_libros_final ?? 0);
 
 const resultado = {
@@ -53,6 +69,7 @@ const resultado = {
     saldo_extracto_final: r2(saldoExtractoFinal),
     depositos_en_transito: r2(depositosEnTransito),
     cheques_no_cobrados: r2(chequesNoCobrados),
+    abonos_no_registrados: r2(abonosNoRegistrados),
     cargos_no_registrados: r2(cargosNoRegistrados),
     saldo_banco_ajustado: r2(saldoBancoAjustado),
     saldo_libros_final: r2(saldoLibros),

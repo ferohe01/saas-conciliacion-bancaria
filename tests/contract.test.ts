@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   PayloadConciliacion,
   CONFIG_CONCILIACION_DEFAULT,
+  Cuadre,
   type PayloadConciliacion as PayloadType,
 } from "@/lib/contract";
 
@@ -97,5 +98,31 @@ describe("PayloadConciliacion", () => {
     p.registros_internos = [];
     const res = PayloadConciliacion.safeParse(p);
     expect(res.success).toBe(false);
+  });
+});
+
+describe("Cuadre — compatibilidad con resultados ya guardados", () => {
+  /** El cuadre tal como lo escribía n8n antes de que existiera el renglón. */
+  const antiguo = {
+    saldo_extracto_final: 1000,
+    depositos_en_transito: 0,
+    cheques_no_cobrados: 0,
+    cargos_no_registrados: 0,
+    saldo_banco_ajustado: 1000,
+    saldo_libros_final: 1000,
+    diferencia: 0,
+  };
+
+  it("un cuadre sin `abonos_no_registrados` sigue siendo legible", () => {
+    // Si el campo fuera obligatorio, TODO el histórico dejaría de abrirse: los
+    // resultados viven como JSONB en la fila del job y no se migran.
+    const r = Cuadre.safeParse(antiguo);
+    expect(r.success).toBe(true);
+  });
+
+  it("y se rellena con 0, que es lo que valía entonces", () => {
+    // Cero y no recalculado: los resultados antiguos no se reescriben hacia
+    // atrás, así que el informe sigue diciendo lo que dijo el día que se emitió.
+    expect(Cuadre.parse(antiguo).abonos_no_registrados).toBe(0);
   });
 });
