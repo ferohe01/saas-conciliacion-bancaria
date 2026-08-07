@@ -170,10 +170,13 @@ async function disponiblePorComprobante(
   return disponible;
 }
 
+/** Qué pudo aplicarse de verdad. `ok:false` = el saldo NO refleja el resultado. */
+type SincronizacionCobros = { ok: boolean; aplicadas: number };
+
 async function sincronizarCobranzas(
   jobId: string,
   resultado: ResultadoConciliacion,
-) {
+): Promise<SincronizacionCobros> {
   try {
     const admin = createAdminClient();
     const { data: job } = await admin
@@ -181,12 +184,24 @@ async function sincronizarCobranzas(
       .select("empresa_id, usuario_id, estado_contable, payload_entrada")
       .eq("id", jobId)
       .maybeSingle();
-    if (!job) return;
+    if (!job) return { ok: false, aplicadas: 0 };
 
     // Mientras no rija, no mueve un céntimo. Y si dejó de regir, se retira.
     if (!afectaSaldo(job.estado_contable as EstadoContable)) {
-      await admin.from("aplicaciones_cobro").delete().eq("job_id", jobId);
-      return;
+      const { error } = await admin
+        .from("aplicaciones_cobro")
+        .delete()
+        .eq("job_id", jobId);
+      // Si el borrado falla, un documento que YA no rige se queda descontando
+      // saldo. Callarlo dejaría comprobantes cobrados por una conciliación
+      // anulada, que es justo lo que este camino existe para impedir.
+      if (error) {
+        console.error(`[cobranzas] no se pudo retirar el saldo de ${jobId}:`, error);
+        return { ok: false, aplicadas: 0 };
+      }
+      // Retirar el saldo cuando el documento deja de regir ES el resultado
+      // correcto, no un fallo: cero aplicaciones es exactamente lo que toca.
+      return { ok: true, aplicadas: 0 };
     }
 
     const payload = job.payload_entrada as {
@@ -194,11 +209,13 @@ async function sincronizarCobranzas(
       movimientos_bancarios?: MovimientoPayload[];
       config?: { tolerancia_monto_abs?: number; tolerancia_monto_pct?: number };
     } | null;
-    if (!payload?.registros_internos) return;
+    if (!payload?.registros_internos) return { ok: false, aplicadas: 0 };
 
     // Si ningún registro vino de la tabla de comprobantes (fuente Excel), no
     // hay nada que actualizar.
-    if (!payload.registros_internos.some((r) => r.comprobante_id)) return;
+    if (!payload.registros_internos.some((r) => r.comprobante_id)) {
+      return { ok: true, aplicadas: 0 };
+    }
 
     // Cuánto le queda por cobrar a cada comprobante, SIN contar lo que aplicó
     // este mismo job: sus aplicaciones se borran y se rehacen unas líneas más
@@ -218,22 +235,62 @@ async function sincronizarCobranzas(
       disponible,
     );
 
-    await admin.from("aplicaciones_cobro").delete().eq("job_id", jobId);
-    if (aplicaciones.length > 0) {
-      await admin.from("aplicaciones_cobro").insert(
-        aplicaciones.map((a) => ({
+    const { error: errBorrado } = await admin
+      .from("aplicaciones_cobro")
+      .delete()
+      .eq("job_id", jobId);
+    if (errBorrado) {
+      console.error(`[cobranzas] no se pudieron borrar las aplicaciones de ${jobId}:`, errBorrado);
+      return { ok: false, aplicadas: 0 };
+    }
+
+    // ⚠️ POR LOTES, y comprobando el error de cada uno.
+    //
+    // Aquí había dos fallos que se tapaban entre sí. El INSERT iba en UNA sola
+    // llamada con todas las aplicaciones —32.170 filas con el corte de 36.377
+    // partidas— y Postgres lo canceló:
+    //
+    //     {"code":"57014","message":"canceling statement due to statement timeout"}
+    //     POST /aplicaciones_cobro ... 500
+    //
+    // El rol `authenticator`, con el que se conecta PostgREST, lleva
+    // **`statement_timeout=8s`**. Cada fila dispara además el trigger que
+    // recalcula el saldo del comprobante (0008), así que el coste crece con las
+    // filas y 32.170 no caben ni de lejos en 8 segundos.
+    //
+    // Y el resultado del insert **no se miraba**: supabase-js DEVUELVE el error,
+    // no lo lanza, así que el `catch` no se enteraba. La aprobación seguía y la
+    // pantalla anunciaba "ya descuenta el saldo de tus comprobantes" con cero
+    // filas escritas — el peor desenlace posible aquí: una conciliación
+    // aprobada que dice haber cobrado y no cobró nada, sin un error a la vista.
+    //
+    // 500 por lote: al ritmo medido son décimas de segundo, muy por debajo de
+    // los 8 s. Subirlo acerca al límite; bajarlo multiplica los viajes.
+    let aplicadas = 0;
+    for (const lote of enLotes(aplicaciones, 500)) {
+      const { error } = await admin.from("aplicaciones_cobro").insert(
+        lote.map((a) => ({
           ...a,
           job_id: jobId,
           empresa_id: job.empresa_id,
           usuario_id: job.usuario_id,
         })),
       );
+      if (error) {
+        console.error(`[cobranzas] fallo al aplicar cobros de ${jobId}:`, error);
+        // Se devuelve lo que sí entró: el saldo queda a medias, y quien llama
+        // tiene que poder decirlo en vez de dar el cobro por hecho.
+        return { ok: false, aplicadas };
+      }
+      aplicadas += lote.length;
     }
+    return { ok: true, aplicadas };
   } catch (e) {
     console.error(
       `[cobranzas] no se pudo sincronizar el saldo de comprobantes del job ${jobId}:`,
       e,
     );
+    return { ok: false, aplicadas: 0 };
   }
 }
 
@@ -247,6 +304,10 @@ type ResultadoAccion = {
   ok: boolean;
   error?: string;
   reemplazadas?: number;
+  /** Cobros que llegaron a escribirse al aprobar. */
+  cobrosAplicados?: number;
+  /** El saldo NO refleja el resultado: hay que decirlo, no dar por hecho el cobro. */
+  cobrosIncompletos?: boolean;
 };
 
 /**
@@ -298,10 +359,23 @@ export async function cambiarEstadoContable(
 
     // Recién ahora rige, así que recién ahora mueve saldo.
     const ctx = await cargarContexto(jobId);
-    if (!("error" in ctx)) await sincronizarCobranzas(jobId, ctx.resultado);
+    const cobros = "error" in ctx
+      ? { ok: false, aplicadas: 0 }
+      : await sincronizarCobranzas(jobId, ctx.resultado);
 
     revalidarConciliacion(jobId);
-    return { ok: true, reemplazadas: Array.isArray(data) ? data.length : 0 };
+
+    // ⚠️ La aprobación SÍ se hizo; lo que pudo fallar es el reparto del saldo.
+    // Decirlo importa: la pantalla anunciaba "ya descuenta el saldo de tus
+    // comprobantes" pasara lo que pasara, y con 32.170 filas que no se
+    // escribieron eso era una afirmación falsa sobre dinero. Mejor una
+    // advertencia fea que un éxito que no ocurrió.
+    return {
+      ok: true,
+      reemplazadas: Array.isArray(data) ? data.length : 0,
+      cobrosAplicados: cobros.aplicadas,
+      cobrosIncompletos: !cobros.ok,
+    };
   }
 
   if (!puede(estadoContable, parsed.data)) {

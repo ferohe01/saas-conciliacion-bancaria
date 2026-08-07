@@ -124,10 +124,26 @@ export function EstadoContablePanel({
         return;
       }
       if (accion === "aprobar") {
+        // El reparto del saldo puede fallar aunque la aprobación salga bien
+        // (son escrituras distintas). Anunciar el cobro sin comprobarlo es
+        // afirmar algo falso sobre dinero, así que ese caso se separa.
+        if (r.cobrosIncompletos) {
+          setError(
+            `La conciliación quedó aprobada, pero el saldo de los comprobantes NO se actualizó del todo` +
+              `${r.cobrosAplicados ? ` (se aplicaron ${r.cobrosAplicados.toLocaleString("es-PE")} cobros de los previstos)` : ""}. ` +
+              `Vuelve a aprobarla para reintentarlo; si sigue igual, revisa Por cobrar antes de darla por buena.`,
+          );
+          return;
+        }
+        const cobros = r.cobrosAplicados ?? 0;
+        const efecto =
+          cobros > 0
+            ? ` Se aplicaron ${cobros.toLocaleString("es-PE")} cobros a tus comprobantes.`
+            : "";
         setAviso(
           r.reemplazadas
-            ? `Aprobada. Se reemplazó ${r.reemplazadas === 1 ? "la versión anterior" : `${r.reemplazadas} versiones anteriores`} de este período.`
-            : "Aprobada. Ya descuenta el saldo de tus comprobantes.",
+            ? `Aprobada. Se reemplazó ${r.reemplazadas === 1 ? "la versión anterior" : `${r.reemplazadas} versiones anteriores`} de este período.${efecto}`
+            : `Aprobada.${efecto || " Ya descuenta el saldo de tus comprobantes."}`,
         );
       }
       router.refresh();

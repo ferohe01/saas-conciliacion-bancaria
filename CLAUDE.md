@@ -699,6 +699,46 @@ comprobantes, y es la única que suman el panel y los reportes. Un borrador con
 decisiones confirmadas no mueve un céntimo. El panel avisa cuando hay
 conciliaciones terminadas sin aprobar, porque si no parecería que se perdieron.
 
+## ⚠️ Postgres corta a los 8 s, y supabase-js NO lanza el error
+
+Hermano de los otros topes silenciosos, y el más caro de todos: aquí lo que se
+pierde es **el cobro**.
+
+Al aprobar el corte de 36.377 partidas, `sincronizarCobranzas` insertaba las
+**32.170 aplicaciones en UNA sola llamada**. El log de PostgREST:
+
+```
+{"code":"57014","message":"canceling statement due to statement timeout"}
+POST /aplicaciones_cobro ... 500
+```
+
+**El rol `authenticator`, con el que se conecta PostgREST, lleva
+`statement_timeout=8s`** (por defecto en Supabase self-hosted). Cada fila dispara
+además el trigger que recalcula el saldo del comprobante (`0008`), así que el
+coste crece con las filas y 32.170 no caben ni de lejos.
+
+⚠️ **Y el error no se veía**, que es lo que lo volvió grave: `supabase-js`
+**devuelve** el error en `{ error }`, no lo lanza, así que el `try/catch` no se
+enteraba y el código seguía. Resultado: una conciliación **aprobada** que
+anunciaba "ya descuenta el saldo de tus comprobantes" con **cero filas
+escritas**. Se descubrió de rebote, porque el aviso previo a aprobar dijo la
+verdad —"no tenía cobros aplicados"— sobre una aprobación que se creía correcta.
+
+- **Lotes de 500.** Al ritmo medido son décimas de segundo contra un techo de 8.
+- **Se comprueba el error de cada lote** y `sincronizarCobranzas` devuelve
+  `{ ok, aplicadas }`. Si el saldo no se aplicó del todo, la pantalla lo dice en
+  rojo en vez de anunciar el cobro: **afirmar un cobro que no ocurrió es peor
+  que un error feo**.
+- La aprobación en sí **no se revierte**: son escrituras distintas y la
+  transición contable sí ocurrió. Se reintenta volviendo a aprobar.
+- Aprobar 32.000 cobros tarda ~90 s, y la mayor parte no es el insert sino
+  `disponiblePorComprobante`: 364 lotes × 3 consultas, porque el `.in()` con
+  UUID se trocea de 100 en 100 por longitud de URL.
+
+**Regla:** toda escritura cuyo número de filas dependa de los datos del cliente
+va **por lotes y con el error comprobado**. Un `await supabase.from(...).insert()`
+sin desestructurar `{ error }` es un fallo silencioso esperando volumen.
+
 ## Aprobar no falla por solaparse: reemplaza, y ahora avisa antes
 
 `aprobar_conciliacion` degrada a `reemplazada` las aprobadas que se crucen con
