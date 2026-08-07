@@ -88,6 +88,30 @@ export function tramoDe(dias: number | null): Tramo {
 const redondear = (n: number) => Math.round(n * 100) / 100;
 
 /**
+ * ¿Este comprobante es deuda viva de este lado?
+ *
+ * Regla ÚNICA de qué entra en Por cobrar / Por pagar. Vive aquí sola porque la
+ * consulta de `lib/comprobantesSaldo.ts` la reproduce en SQL para no traerse la
+ * tabla entera, y dos definiciones que se separen darían una pantalla cuyo
+ * total no corresponde a sus propias filas.
+ *
+ * ⚠️ Al tocar esta función hay que tocar esa consulta. Es el único punto donde
+ * el sistema depende de que dos lenguajes digan lo mismo.
+ */
+export function cuentaComoPendiente(
+  c: ComprobanteCobrar,
+  tipo: TipoSaldo,
+): boolean {
+  // El lado contrario nunca entra. Los comprobantes sin tipo se tratan como
+  // cobranza, que es como los interpreta el resto del sistema.
+  const suTipo: TipoSaldo = c.tipo === "pago" ? "pago" : "cobranza";
+  if (suTipo !== tipo) return false;
+  if (c.estado === "anulado" || c.estado === "cobrado") return false;
+  // Por debajo de medio céntimo no hay deuda que gestionar.
+  return Number(c.saldo ?? 0) > 0.005;
+}
+
+/**
  * Agrupa por contraparte lo que queda pendiente de un lado.
  *
  * **Nunca mezcla cobranzas con pagos.** Sumar lo que te deben con lo que debes
@@ -107,14 +131,8 @@ export function calcularAging(
   const total = { monto: 0, vencido: 0, tramos: vacio(), docs: 0 };
 
   for (const c of comprobantes) {
-    // El lado contrario nunca entra. Los comprobantes sin tipo se tratan como
-    // cobranza, que es como los interpreta el resto del sistema.
-    const suTipo: TipoSaldo = c.tipo === "pago" ? "pago" : "cobranza";
-    if (suTipo !== tipo) continue;
-    if (c.estado === "anulado" || c.estado === "cobrado") continue;
-
+    if (!cuentaComoPendiente(c, tipo)) continue;
     const saldo = Number(c.saldo ?? 0);
-    if (!(saldo > 0.005)) continue;
 
     const dias = diasVencido(c, hoy);
     const tramo = tramoDe(dias);

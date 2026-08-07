@@ -699,6 +699,37 @@ comprobantes, y es la única que suman el panel y los reportes. Un borrador con
 decisiones confirmadas no mueve un céntimo. El panel avisa cuando hay
 conciliaciones terminadas sin aprobar, porque si no parecería que se perdieron.
 
+## Filtrar en la consulta, no en memoria (Por cobrar / Por pagar)
+
+Las dos pantallas se traían la tabla **entera** y descartaban después lo que
+`calcularAging` no cuenta. Con 51.427 comprobantes eran 52 peticiones paginadas
+—cerca de **un minuto**— para quedarse con 19.221 en Por cobrar…
+
+⚠️ …y con **ninguno** en Por pagar: la pantalla tardaba **lo mismo en no
+encontrar nada**, porque todo el trabajo se hacía antes de saber que esa empresa
+no tiene un solo comprobante de tipo `pago`. Ese síntoma es el que delata el
+patrón — si una vista vacía tarda igual que una llena, el filtro está en el
+sitio equivocado.
+
+`calcularAging` descarta exactamente tres cosas, y las tres saben decirse en
+SQL: el tipo contrario, lo anulado/cobrado, y el saldo cero. Traerlas para
+tirarlas era trabajo puro.
+
+- **La regla vive en UN sitio**: `cuentaComoPendiente` en `lib/aging.ts`.
+  `lib/comprobantesSaldo.ts` la reproduce en SQL, y hay tests que la fijan —
+  incluido uno que comprueba que **prefiltrar da el mismo resultado** que dejar
+  que `calcularAging` agregue todo.
+- ⚠️ **Es el único punto donde el sistema depende de que dos lenguajes digan lo
+  mismo.** Si se separan, la pantalla enseñaría un total que no corresponde a
+  sus propias filas, y el usuario no tendría cómo saber cuál creerse.
+- Un comprobante **sin tipo se cuenta como cobranza**, así que ese lado filtra
+  `tipo.eq.cobranza,tipo.is.null` — no basta con `eq`.
+
+**Nota de escala:** esto baja Por cobrar de 52 peticiones a ~20 y Por pagar a
+una. Si algún día 20 siguen siendo demasiadas, el paso siguiente es agregar en
+SQL (vista o RPC) y devolver las pocas filas del resumen, no traer 19.000 para
+sumarlas en Node.
+
 ## ⚠️ Postgres corta a los 8 s, y supabase-js NO lanza el error
 
 Hermano de los otros topes silenciosos, y el más caro de todos: aquí lo que se

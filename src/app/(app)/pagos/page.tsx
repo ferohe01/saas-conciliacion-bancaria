@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { traerTodo } from "@/lib/supabase/paginado";
+import { traerComprobantesConSaldo } from "@/lib/comprobantesSaldo";
 import { empresaTieneModulo } from "@/lib/modulos-servidor";
 import { buscarModulo } from "@/lib/modulos";
 import { CONTACTO_SUSCRIPCION, montoPEN } from "@/lib/suscripcion";
@@ -12,7 +12,6 @@ import {
   filtroSaldoDesdeParams,
   hayFiltroSaldo,
 } from "@/lib/filtrosSaldo";
-import { COLUMNAS_SALDO } from "@/app/(app)/cobranzas/page";
 import { EncabezadoPagina, EstadoVacio, clasesBoton } from "@/components/ui";
 import { DocumentoIcon, CandadoIcon } from "@/components/wizard/icons";
 
@@ -55,18 +54,10 @@ export default async function PagosPage({
   }
 
   const supabase = await createClient();
-  // Paginado: PostgREST corta en 1.000 filas y la antigüedad de deuda se
-  // calcula sobre TODO lo pendiente. Con más comprobantes, los totales de
-  // arriba habrían mentido sin avisar.
-  const todas = (await traerTodo((d, h) =>
-    supabase
-      .from("comprobantes")
-      .select(COLUMNAS_SALDO)
-      .order("fecha", { ascending: true })
-      // Desempate: sin columna única el paginado duplica y pierde filas.
-      .order("id", { ascending: true })
-      .range(d, h),
-  )) as unknown as ComprobanteCobrar[];
+  // Ver la nota de `lib/comprobantesSaldo.ts`: el filtro va en la consulta.
+  // Sin él, esta pantalla recorría los 51.427 comprobantes de la empresa para
+  // acabar sin un solo pago que enseñar.
+  const todas = await traerComprobantesConSaldo(supabase, "pago");
   const hoy = new Date();
 
   // Se filtra ANTES de agregar: filtrar la tabla dejando arriba el total de

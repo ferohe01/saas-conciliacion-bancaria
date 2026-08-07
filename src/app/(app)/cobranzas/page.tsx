@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { traerTodo } from "@/lib/supabase/paginado";
+import { traerComprobantesConSaldo } from "@/lib/comprobantesSaldo";
 import { empresaTieneModulo } from "@/lib/modulos-servidor";
 import { buscarModulo } from "@/lib/modulos";
 import { CONTACTO_SUSCRIPCION, montoPEN } from "@/lib/suscripcion";
@@ -15,8 +15,6 @@ import {
 import { EncabezadoPagina, EstadoVacio, clasesBoton } from "@/components/ui";
 import { DocumentoIcon, CandadoIcon } from "@/components/wizard/icons";
 
-export const COLUMNAS_SALDO =
-  "id, fecha, fecha_vencimiento, monto, saldo, tipo, estado, serie_numero, ruc_contraparte, razon_social_contraparte";
 
 export default async function CobranzasPage({
   searchParams,
@@ -50,18 +48,10 @@ export default async function CobranzasPage({
   }
 
   const supabase = await createClient(); // RLS: solo la empresa del usuario
-  // Paginado: PostgREST corta en 1.000 filas y la antigüedad de deuda se
-  // calcula sobre TODO lo pendiente. Con más comprobantes, los totales de
-  // arriba habrían mentido sin avisar.
-  const todas = (await traerTodo((d, h) =>
-    supabase
-      .from("comprobantes")
-      .select(COLUMNAS_SALDO)
-      .order("fecha", { ascending: true })
-      // Desempate: sin columna única el paginado duplica y pierde filas.
-      .order("id", { ascending: true })
-      .range(d, h),
-  )) as unknown as ComprobanteCobrar[];
+  // Paginado + filtrado EN LA CONSULTA: la antigüedad se calcula sobre todo lo
+  // pendiente, pero traer además lo cobrado y lo del otro lado era trabajo que
+  // se tiraba. Ver `lib/comprobantesSaldo.ts`.
+  const todas = await traerComprobantesConSaldo(supabase, "cobranza");
   const hoy = new Date();
 
   // Se filtra ANTES de agregar: si se filtrara la tabla dejando arriba el total

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   calcularAging,
+  cuentaComoPendiente,
   diasVencido,
   tramoDe,
   type ComprobanteCobrar,
@@ -159,5 +160,69 @@ describe("los dos lados nunca se mezclan", () => {
     const r = calcularAging([cmp({ tipo: null, saldo: 400 })], HOY, "cobranza");
     expect(r.total).toBe(400);
     expect(calcularAging([cmp({ tipo: null, saldo: 400 })], HOY, "pago").total).toBe(0);
+  });
+});
+
+/**
+ * `cuentaComoPendiente` es la regla ÚNICA de qué entra en Por cobrar / Por
+ * pagar, y `lib/comprobantesSaldo.ts` la reproduce en SQL para no traerse la
+ * tabla entera. Estos tests fijan la regla para que, si alguien la cambia aquí,
+ * el fallo aparezca y le obligue a mirar también la consulta.
+ *
+ * Antes no hacía falta porque no había filtro que sincronizar: las pantallas se
+ * traían los 51.427 comprobantes de la empresa y descartaban en memoria. Eso
+ * costaba casi un minuto — y en Por pagar tardaba lo mismo para no encontrar
+ * nada, porque el trabajo se hacía antes de saber que no había pagos.
+ */
+describe("cuentaComoPendiente", () => {
+  const base = {
+    id: "1", fecha: "2026-06-01", fecha_vencimiento: null, monto: 100,
+    saldo: 100, tipo: "cobranza", estado: "pendiente",
+    serie_numero: "F001-1", ruc_contraparte: null, razon_social_contraparte: "X",
+  };
+
+  it("cuenta una cobranza pendiente con saldo", () => {
+    expect(cuentaComoPendiente(base, "cobranza")).toBe(true);
+  });
+
+  it("nunca cuenta el lado contrario", () => {
+    expect(cuentaComoPendiente(base, "pago")).toBe(false);
+    expect(cuentaComoPendiente({ ...base, tipo: "pago" }, "cobranza")).toBe(false);
+  });
+
+  it("un comprobante SIN tipo es una cobranza", () => {
+    // Es como lo interpreta el resto del sistema, y por eso la consulta del
+    // lado de cobranzas admite además el nulo (`tipo.is.null`).
+    expect(cuentaComoPendiente({ ...base, tipo: null }, "cobranza")).toBe(true);
+    expect(cuentaComoPendiente({ ...base, tipo: null }, "pago")).toBe(false);
+  });
+
+  it("lo anulado y lo ya cobrado no son deuda", () => {
+    expect(cuentaComoPendiente({ ...base, estado: "anulado" }, "cobranza")).toBe(false);
+    expect(cuentaComoPendiente({ ...base, estado: "cobrado" }, "cobranza")).toBe(false);
+  });
+
+  it("por debajo de medio céntimo no hay nada que gestionar", () => {
+    expect(cuentaComoPendiente({ ...base, saldo: 0.004 }, "cobranza")).toBe(false);
+    expect(cuentaComoPendiente({ ...base, saldo: 0 }, "cobranza")).toBe(false);
+    expect(cuentaComoPendiente({ ...base, saldo: null }, "cobranza")).toBe(false);
+    expect(cuentaComoPendiente({ ...base, saldo: 0.01 }, "cobranza")).toBe(true);
+  });
+
+  it("prefiltrar da el MISMO resultado que dejar que agregue todo", () => {
+    // Es la garantía que sostiene el arreglo: si filtrar antes cambiara algo,
+    // la pantalla enseñaría un total que no corresponde a sus filas.
+    const todos = [
+      base,
+      { ...base, id: "2", tipo: "pago", saldo: 50 },
+      { ...base, id: "3", estado: "cobrado" },
+      { ...base, id: "4", saldo: 0 },
+      { ...base, id: "5", saldo: 25, razon_social_contraparte: "Y" },
+    ];
+    const hoy = new Date("2026-08-07T00:00:00Z");
+    const prefiltrado = todos.filter((c) => cuentaComoPendiente(c, "cobranza"));
+    expect(calcularAging(prefiltrado, hoy, "cobranza")).toEqual(
+      calcularAging(todos, hoy, "cobranza"),
+    );
   });
 });
