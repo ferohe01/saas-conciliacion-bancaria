@@ -9,7 +9,7 @@ import { ImportadorComprobantes } from "./ImportadorComprobantes";
 import { MapeoDataset } from "./MapeoDataset";
 import { CandadoIcon, ChevronIcon } from "./icons";
 import { createClient } from "@/lib/supabase/client";
-import { mesesRecientes } from "@/lib/periodo";
+import { mesesRecientes, periodoDeRango, VALOR_RANGO } from "@/lib/periodo";
 import { procesarArchivo, type ArchivoProcesado } from "@/lib/parsing/procesar";
 import { detectarSaldoFinal } from "@/lib/parsing/saldo";
 import { validarCoherencia } from "@/lib/parsing/coherencia";
@@ -65,6 +65,31 @@ function elegirMapeo(
 
 function tieneFechaYMonto(m: MapeoColumnas): boolean {
   return Boolean(m.fecha) && Boolean(m.monto);
+}
+
+/** Campo de fecha para el rango libre. */
+function FechaField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-sm font-medium text-neutral-700">
+        {label}
+      </span>
+      <input
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-12 w-full rounded-xl border border-neutral-300 bg-white px-4 text-neutral-800 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none"
+      />
+    </label>
+  );
 }
 
 function SelectField({
@@ -133,6 +158,14 @@ export function WizardContainer({
   const [periodoValor, setPeriodoValor] = useState(
     OPCIONES_MES[1]?.valor ?? OPCIONES_MES[0]!.valor,
   );
+  // El rango hereda el mes que estuviera a la vista al cambiar el desplegable
+  // (ver su `onChange`): así nunca se entra a dos casillas vacías.
+  const [rangoDesde, setRangoDesde] = useState(
+    (OPCIONES_MES[1] ?? OPCIONES_MES[0]!).desde,
+  );
+  const [rangoHasta, setRangoHasta] = useState(
+    (OPCIONES_MES[1] ?? OPCIONES_MES[0]!).hasta,
+  );
   const [cuentaId, setCuentaId] = useState(cuentas[0]?.id ?? "");
   const [fuente, setFuente] = useState<Fuente>("comprobantes");
 
@@ -166,16 +199,27 @@ export function WizardContainer({
   const [cargando, setCargando] = useState(false);
   const [procesando, startTransition] = useTransition();
 
+  const esRango = periodoValor === VALOR_RANGO;
+
+  /**
+   * `null` cuando el rango escrito no sirve (incompleto o del revés). No se cae
+   * a un mes por defecto a propósito: conciliar un período que el usuario no
+   * pidió da un resultado que parece bueno, y ese es el error caro.
+   */
   const periodo = useMemo(
-    () => OPCIONES_MES.find((o) => o.valor === periodoValor) ?? OPCIONES_MES[0]!,
-    [periodoValor],
+    () =>
+      esRango
+        ? periodoDeRango(rangoDesde, rangoHasta)
+        : (OPCIONES_MES.find((o) => o.valor === periodoValor) ??
+          OPCIONES_MES[0]!),
+    [esRango, periodoValor, rangoDesde, rangoHasta],
   );
   const cuenta = cuentas.find((c) => c.id === cuentaId);
   const moneda = cuenta?.moneda ?? "PEN";
 
   const coherenciaExtracto = useMemo(
     () =>
-      extracto?.resumen
+      extracto?.resumen && periodo
         ? validarCoherencia(extracto.resumen.fechasISO, periodo)
         : null,
     [extracto, periodo],
@@ -185,6 +229,12 @@ export function WizardContainer({
   // que su resumen se consulta siempre: es lo que dice si hay materia que
   // conciliar antes de dejar continuar.
   useEffect(() => {
+    // Sin período válido no hay nada que contar, y pedirlo con un rango a
+    // medio escribir daría cifras que cambian a cada tecla.
+    if (!periodo) {
+      setComprobantesResumen(null);
+      return;
+    }
     let cancelado = false;
     (async () => {
       const supabase = createClient();
@@ -245,6 +295,10 @@ export function WizardContainer({
    * había entrado o no.
    */
   async function cargarExtracto(file: File) {
+    if (!periodo) {
+      setError("Antes de subir el extracto, elige un período válido.");
+      return;
+    }
     setError(null);
     setCargando(true);
     try {
@@ -275,6 +329,8 @@ export function WizardContainer({
   // Un botón deshabilitado sin explicación es un callejón sin salida: la lista
   // dice exactamente qué falta.
   const faltaPaso1 = [
+    !periodo &&
+      "elegir un período válido (la fecha inicial no puede ser posterior a la final)",
     !cuentaId && "elegir una cuenta bancaria",
     !internosListo && "tener comprobantes en el período",
     !extractoListo && "subir el extracto del banco",
@@ -300,6 +356,10 @@ export function WizardContainer({
       // Registros internos canónicos.
       let internosOut: RegistroInterno[] = [];
       if (fuente === "comprobantes") {
+        if (!periodo) {
+          setError("El período no es válido. Vuelve al Paso 1 y revísalo.");
+          return;
+        }
         internosOut = await getComprobantesCanonicos(
           periodo.desde,
           periodo.hasta,
@@ -331,7 +391,10 @@ export function WizardContainer({
   }
 
   const puedeIniciar =
-    internosCanon.length > 0 && bancariosCanon.length > 0 && Boolean(cuentaId);
+    internosCanon.length > 0 &&
+    bancariosCanon.length > 0 &&
+    Boolean(cuentaId) &&
+    periodo != null;
   const saldoExtractoFaltante =
     normalizarMonto(saldoExtFin) == null && normalizarMonto(saldoExtIni) == null;
 
@@ -346,6 +409,10 @@ export function WizardContainer({
 
   function iniciarConciliacion() {
     setError(null);
+    if (!periodo) {
+      setError("El período no es válido. Vuelve al Paso 1 y revísalo.");
+      return;
+    }
     const saldoLibrosNum = normalizarMonto(saldoLibros);
     if (saldoLibrosNum == null) {
       setError("Ingresa un saldo según libros válido en el Paso 1.");
@@ -405,13 +472,29 @@ export function WizardContainer({
             <SelectField
               label="Período a conciliar"
               value={periodoValor}
-              onChange={setPeriodoValor}
+              onChange={(v) => {
+                // Al pasar a rango, se hereda el mes que estaba a la vista: se
+                // entra viendo un rango válido y se estrecha, en vez de
+                // encontrarse dos casillas vacías.
+                if (v === VALOR_RANGO) {
+                  const mes = OPCIONES_MES.find((o) => o.valor === periodoValor);
+                  if (mes) {
+                    setRangoDesde(mes.desde);
+                    setRangoHasta(mes.hasta);
+                  }
+                }
+                setPeriodoValor(v);
+              }}
             >
               {OPCIONES_MES.map((o) => (
                 <option key={o.valor} value={o.valor}>
                   {o.etiqueta}
                 </option>
               ))}
+              {/* Al final, no al principio: el mes es lo que quiere una PyME y
+                  sigue siendo la respuesta por defecto. El rango está para
+                  quien concilia por semana o por día. */}
+              <option value={VALOR_RANGO}>Rango de fechas…</option>
             </SelectField>
 
             {cuentas.length > 0 ? (
@@ -441,6 +524,31 @@ export function WizardContainer({
               </div>
             )}
           </div>
+
+          {esRango && (
+            <div className="mt-4 rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FechaField label="Desde" value={rangoDesde} onChange={setRangoDesde} />
+                <FechaField label="Hasta" value={rangoHasta} onChange={setRangoHasta} />
+              </div>
+              {periodo ? (
+                <p className="mt-3 text-sm text-neutral-600">
+                  Conciliarás{" "}
+                  <span className="font-medium text-neutral-900">
+                    {periodo.etiqueta}
+                  </span>
+                  . Para el mismo día en los dos campos, el corte es de un solo
+                  día.
+                </p>
+              ) : (
+                // El aviso va aquí, junto a los campos, y no solo en la lista
+                // de "te falta": el error se comete mirando estas dos casillas.
+                <p className="mt-3 text-sm font-medium text-amber-800">
+                  La fecha inicial no puede ser posterior a la final.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Grupo de radios real: con `<button>` el lector de pantalla no
               anunciaba cuál estaba elegido, y la opción deshabilitada
@@ -771,7 +879,7 @@ export function WizardContainer({
                 <div>
                   <dt className="text-neutral-600">Período</dt>
                   <dd className="font-medium text-neutral-900">
-                    {periodo.etiqueta}
+                    {periodo?.etiqueta ?? "—"}
                   </dd>
                 </div>
                 <div>

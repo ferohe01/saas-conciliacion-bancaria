@@ -79,3 +79,53 @@ export function mesDeISO(iso: string): string | null {
   const m = /^(\d{4})-(\d{2})/.exec(iso);
   return m ? `${m[1]}-${m[2]}` : null;
 }
+
+/**
+ * ── Rango libre de fechas ───────────────────────────────────────────────────
+ *
+ * El mes calendario cubre a la PyME, que es para quien está pensado el
+ * producto, y por eso sigue siendo lo primero del desplegable. Pero hay
+ * clientes cuyo período natural NO es el mes: una recaudadora con 450.000
+ * movimientos mensuales concilia por día —su día pico son 36.390 partidas— y
+ * con solo meses no podía expresar su propio corte. El motor ya lo aguantaba;
+ * la pantalla no lo dejaba pedir.
+ *
+ * El resto del sistema no necesitó cambios: `validarCoherencia` ya recibía
+ * `{desde, hasta}`, la idempotencia compara las dos fechas exactas y los
+ * reportes deduplican por rango exacto (no por mes) desde la Fase 9.
+ */
+
+/** Valor centinela del desplegable para "no es un mes, es un rango". */
+export const VALOR_RANGO = "rango";
+
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+/** dd/mm/yyyy, la forma en que se leen las fechas en pantalla. */
+function aLegible(iso: string): string {
+  const [a, m, d] = iso.split("-");
+  return `${d}/${m}/${a}`;
+}
+
+/**
+ * Período a partir de dos fechas ISO. Devuelve `null` si el rango no sirve —
+ * incompleto o del revés—, y quien lo llama debe bloquear en vez de inventarse
+ * un valor: conciliar un período que el usuario no pidió es peor que no
+ * conciliar.
+ */
+export function periodoDeRango(
+  desde: string,
+  hasta: string,
+): OpcionPeriodo | null {
+  if (!ISO.test(desde) || !ISO.test(hasta) || desde > hasta) return null;
+  return {
+    valor: VALOR_RANGO,
+    // Un solo día se dice como un día. "30/06/2026 a 30/06/2026" se lee como un
+    // error de la aplicación, y el corte diario es justo el caso que motivó esto.
+    etiqueta:
+      desde === hasta
+        ? aLegible(desde)
+        : `${aLegible(desde)} a ${aLegible(hasta)}`,
+    desde,
+    hasta,
+  };
+}

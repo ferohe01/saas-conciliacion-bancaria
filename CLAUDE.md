@@ -856,6 +856,30 @@ archivo** (Excel/CSV/PDF): eso no cambió y es otra cosa. En consecuencia, el
 Paso 2 solo mapea el extracto y `cuentas_bancarias.mapeo_columnas.internos`
 quedó huérfana (no se lee ni se escribe; el merge conserva lo antiguo).
 
+**El período: mes calendario o rango libre.** El desplegable sigue listando los
+últimos 12 meses —es lo que quiere una PyME y es la primera opción—, y al final
+tiene **"Rango de fechas…"**, que despliega dos campos.
+
+No es una comodidad: el mes era el **cuello de botella del caso de volumen**. Una
+recaudadora de 450.000 movimientos al mes concilia por día (su pico son 36.390
+partidas, que el motor ya despacha), pero con solo meses la única petición
+expresable era "Junio entero" = 452.605 partidas, por encima de cualquier tope
+razonable. El motor aguantaba lo que la pantalla no dejaba pedir.
+
+- El resto del sistema **no necesitó cambios**: `validarCoherencia` ya recibía
+  `{desde, hasta}`, la idempotencia y el versionado comparan las dos fechas
+  exactas, y los reportes deduplican por rango exacto —no por mes— desde la
+  Fase 9. La suposición "un período es un mes" solo vivía en el desplegable.
+- ⚠️ **Un rango inválido deja `periodo` en `null` y bloquea**, no cae a un mes
+  por defecto. Conciliar un período que el usuario no pidió produce un resultado
+  que *parece* correcto, que es la clase de error más cara de este producto.
+- Al pasar a rango se **hereda el mes que estuviera a la vista**, para entrar
+  viendo un rango válido y estrecharlo en vez de encontrarse dos casillas
+  vacías. Mismo día en ambos campos = corte de un día, y la etiqueta lo dice así
+  ("30/06/2026", no "30/06/2026 a 30/06/2026").
+- Funciones puras en `src/lib/periodo.ts` (`periodoDeRango`, `VALOR_RANGO`) con
+  tests en `tests/periodo.test.ts`.
+
 ## Estado por fases
 
 - [x] **Fase 1 — Fundaciones:** Next.js + TS estricto + Tailwind, clientes
