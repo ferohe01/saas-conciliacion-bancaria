@@ -193,7 +193,11 @@ async function idsConCobros(
   // longitud de la URL—; las aplicaciones son siempre muchas menos.
   const buscados = new Set(ids);
   const filas = await traerTodo<{ comprobante_id: string }>((d, h) =>
-    supabase.from("aplicaciones_cobro").select("comprobante_id").range(d, h),
+    supabase
+      .from("aplicaciones_cobro")
+      .select("comprobante_id")
+      .order("id", { ascending: true })
+      .range(d, h),
   );
   const conCobros = new Set<string>();
   for (const a of filas) {
@@ -214,7 +218,12 @@ export async function deshacerImportacion(
   const supabase = await createClient(); // RLS acota a la empresa
   const ids = (
     await traerTodo<{ id: string }>((d, h) =>
-      supabase.from("comprobantes").select("id").eq("lote_importacion", lote).range(d, h),
+      supabase
+        .from("comprobantes")
+        .select("id")
+        .eq("lote_importacion", lote)
+        .order("id", { ascending: true })
+        .range(d, h),
     )
   ).map((c) => String(c.id));
   if (ids.length === 0) return { ok: true, borrados: 0, protegidos: 0 };
@@ -264,7 +273,7 @@ export async function vaciarComprobantes(
   const supabase = await createClient(); // RLS acota a la empresa
   const ids = (
     await traerTodo<{ id: string }>((d, h) =>
-      supabase.from("comprobantes").select("id").range(d, h),
+      supabase.from("comprobantes").select("id").order("id", { ascending: true }).range(d, h),
     )
   ).map((c) => String(c.id));
   if (ids.length === 0) return { ok: true, borrados: 0, protegidos: 0 };
@@ -357,6 +366,8 @@ export async function getComprobantesCanonicos(
       .lte("fecha", hasta)
       .not("estado", "in", "(cobrado,anulado)")
       .order("fecha", { ascending: true })
+      // Desempate obligatorio: sin él el paginado duplica y pierde filas.
+      .order("id", { ascending: true })
       .range(d, h),
   );
   return filas.map((c, i) => {

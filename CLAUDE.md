@@ -493,6 +493,20 @@ acota) y cruza en memoria, y los borrados usan `.eq("lote_importacion", …)` o 
 filtro de toda la tabla cuando no hay nada protegido — **una petición en vez de
 doscientas**.
 
+⚠️⚠️ **Paginar exige un orden TOTAL.** Cada página re-ejecuta la consulta, así que
+si el `order by` empata —`fecha` con miles de filas del mismo día— Postgres puede
+devolver las empatadas en distinto orden y **unas salen dos veces y otras no
+salen nunca**. `getComprobantesCanonicos` ordenaba solo por `fecha` y mandó al
+motor **852 comprobantes duplicados dejándose otros 852 sin enviar**, en una
+conciliación de 20.000. El total cuadraba: nada lo delataba desde fuera, y el
+resultado parecía un fallo del motor (95,7% en vez de 100%).
+
+    .order("fecha", { ascending: true })   // ordena, pero empata
+    .order("id",    { ascending: true })   // ROMPE EL EMPATE. Obligatorio.
+
+Hay un test en `tests/paginado.test.ts` que recorre `src/` y falla si algún
+`.range()` no lleva desempate por columna única.
+
 **Y hay un tercer límite, en el otro extremo: el body de las server actions.**
 Next trae **1 MB** por defecto, y la importación manda hasta 5.000 filas de
 golpe — que ronda justo ese tamaño y falla con una *"server-side exception"* sin

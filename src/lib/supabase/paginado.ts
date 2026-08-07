@@ -25,6 +25,20 @@ type Respuesta<T> = { data: T[] | null; error: unknown };
 /**
  * Trae TODAS las filas de una consulta, paginando.
  *
+ * ⚠️⚠️ LA CONSULTA DEBE TENER UN ORDEN **TOTAL**, con una columna única al
+ * final (normalmente `id`). Sin eso el paginado **corrompe los datos en
+ * silencio**: cada página re-ejecuta la consulta, y Postgres puede devolver las
+ * filas empatadas en distinto orden, así que unas salen dos veces y otras no
+ * salen nunca.
+ *
+ * No es teórico. `getComprobantesCanonicos` ordenaba solo por `fecha` —miles de
+ * comprobantes comparten día— y en una conciliación de 20.000 registros mandó
+ * **852 duplicados al motor y se dejó otros 852 sin enviar**. El total cuadraba,
+ * así que no había nada que hiciera sospechar.
+ *
+ *     .order("fecha", { ascending: true })   ← ordena, pero empata
+ *     .order("id",    { ascending: true })   ← ROMPE EL EMPATE. Obligatorio.
+ *
  * @param consulta recibe el rango y debe aplicarlo con `.range(desde, hasta)`.
  *
  *     const filas = await traerTodo<Fila>((desde, hasta) =>

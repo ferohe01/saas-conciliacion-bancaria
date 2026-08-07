@@ -94,3 +94,41 @@ describe("tamaño de lote y longitud de URL", () => {
     expect(500 * UUID).toBeGreaterThan(8192);
   });
 });
+
+describe("orden total en las consultas paginadas", () => {
+  it("toda consulta con .range() ordena por una columna única", () => {
+    // Sin desempate, cada página re-ejecuta la consulta y Postgres puede
+    // devolver las filas empatadas en otro orden: unas salen dos veces y otras
+    // no salen nunca. Le pasó a getComprobantesCanonicos ordenando solo por
+    // `fecha`: mandó 852 comprobantes duplicados al motor y se dejó otros 852
+    // sin enviar, con el total cuadrando — invisible desde fuera.
+    const fs = require("node:fs") as typeof import("node:fs");
+    const path = require("node:path") as typeof import("node:path");
+
+    const archivos: string[] = [];
+    const recorrer = (dir: string) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) recorrer(p);
+        else if (/\.tsx?$/.test(e.name)) archivos.push(p);
+      }
+    };
+    recorrer("src");
+
+    const sinDesempate: string[] = [];
+    for (const f of archivos) {
+      const src = fs.readFileSync(f, "utf8");
+      // Cada bloque que llega a `.range(d, h)`: mirar hacia atrás su consulta.
+      let i = src.indexOf(".range(d, h)");
+      while (i !== -1) {
+        const bloque = src.slice(Math.max(0, i - 700), i);
+        const desde = bloque.lastIndexOf(".from(");
+        if (desde !== -1 && !/\.order\(\s*"id"/.test(bloque.slice(desde))) {
+          sinDesempate.push(`${f}: ${bloque.slice(desde, desde + 60).replace(/\s+/g, " ")}`);
+        }
+        i = src.indexOf(".range(d, h)", i + 1);
+      }
+    }
+    expect(sinDesempate).toEqual([]);
+  });
+});

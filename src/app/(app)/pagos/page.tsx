@@ -63,6 +63,8 @@ export default async function PagosPage({
       .from("comprobantes")
       .select(COLUMNAS_SALDO)
       .order("fecha", { ascending: true })
+      // Desempate: sin columna única el paginado duplica y pierde filas.
+      .order("id", { ascending: true })
       .range(d, h),
   )) as unknown as ComprobanteCobrar[];
   const hoy = new Date();

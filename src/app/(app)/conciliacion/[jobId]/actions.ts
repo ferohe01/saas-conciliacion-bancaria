@@ -124,7 +124,8 @@ async function disponiblePorComprobante(
   for (const lote of enLotes(ids as string[])) {
     const [c, o, r] = await Promise.all([
       traerTodo<{ id: string; monto: number }>((d, h) =>
-        admin.from("comprobantes").select("id, monto").in("id", lote).range(d, h),
+        admin.from("comprobantes").select("id, monto").in("id", lote)
+          .order("id", { ascending: true }).range(d, h),
       ),
       traerTodo<{ comprobante_id: string; monto_aplicado: number }>((d, h) =>
         admin
@@ -132,6 +133,7 @@ async function disponiblePorComprobante(
           .select("comprobante_id, monto_aplicado")
           .in("comprobante_id", lote)
           .neq("job_id", jobId)
+          .order("id", { ascending: true })
           .range(d, h),
       ),
       // Un cobro que el banco revirtió deja de ocupar sitio: la factura vuelve
@@ -143,6 +145,7 @@ async function disponiblePorComprobante(
           .select("comprobante_id, monto_revertido")
           .in("comprobante_id", lote)
           .neq("job_id", jobId)
+          .order("id", { ascending: true })
           .range(d, h),
       ),
     ]);
