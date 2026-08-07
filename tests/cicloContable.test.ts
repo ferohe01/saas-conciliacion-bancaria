@@ -10,6 +10,7 @@ import {
   ETIQUETA,
   EXPLICACION,
   type EstadoContable,
+  avisoDeReemplazo,
 } from "@/lib/cicloContable";
 
 describe("afectaSaldo", () => {
@@ -100,5 +101,61 @@ describe("textos de interfaz", () => {
       expect(ETIQUETA[e as EstadoContable]).toBeTruthy();
       expect(EXPLICACION[e as EstadoContable]).toBeTruthy();
     }
+  });
+});
+
+/**
+ * El aviso previo a aprobar. Se prueba sobre todo que NO aparezca cuando no hay
+ * nada que reemplazar: un diálogo que sale siempre se aprende a despachar sin
+ * leer, y entonces deja de proteger justo el día que dice algo importante.
+ */
+describe("avisoDeReemplazo", () => {
+  it("no avisa cuando no hay nada que reemplazar", () => {
+    expect(avisoDeReemplazo({ reemplaza: [], aplicaciones: 0 })).toBeNull();
+  });
+
+  it("nombra el período que va a dejar de regir", () => {
+    const t = avisoDeReemplazo({
+      reemplaza: [{ desde: "2026-06-01", hasta: "2026-06-30" }],
+      aplicaciones: 1234,
+    })!;
+    expect(t).toContain("01/06/2026 a 30/06/2026");
+    // El número de cobros es lo que mide el daño: "reemplaza una conciliación"
+    // suena a trámite; "se borrarán 1.234 cobros" no.
+    expect(t).toContain("1,234");
+    expect(t).toContain("no se puede deshacer");
+  });
+
+  it("un corte de un día se nombra como un día", () => {
+    const t = avisoDeReemplazo({
+      reemplaza: [{ desde: "2026-06-30", hasta: "2026-06-30" }],
+      aplicaciones: 1,
+    })!;
+    expect(t).toContain("de 30/06/2026");
+    expect(t).not.toContain("30/06/2026 a 30/06/2026");
+    expect(t).toContain("1 cobro aplicado");
+  });
+
+  it("dice explícitamente cuando no se moverá ningún saldo", () => {
+    // Reemplazar una aprobada SIN cobros es inocuo, y callarlo haría dudar de
+    // una acción que no tiene consecuencia sobre el dinero.
+    const t = avisoDeReemplazo({
+      reemplaza: [{ desde: "2026-06-01", hasta: "2026-06-30" }],
+      aplicaciones: 0,
+    })!;
+    expect(t).toContain("ningún saldo cambiará");
+  });
+
+  it("enumera cuando son varias", () => {
+    const t = avisoDeReemplazo({
+      reemplaza: [
+        { desde: "2026-06-01", hasta: "2026-06-10" },
+        { desde: "2026-06-11", hasta: "2026-06-20" },
+      ],
+      aplicaciones: 40,
+    })!;
+    expect(t).toContain("2 conciliaciones aprobadas");
+    expect(t).toContain("01/06/2026 a 10/06/2026");
+    expect(t).toContain("11/06/2026 a 20/06/2026");
   });
 });

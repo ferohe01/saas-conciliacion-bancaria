@@ -3,10 +3,14 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Boton } from "@/components/ui";
-import { cambiarEstadoContable } from "@/app/(app)/conciliacion/[jobId]/actions";
+import {
+  cambiarEstadoContable,
+  impactoDeAprobar,
+} from "@/app/(app)/conciliacion/[jobId]/actions";
 import {
   accionesPosibles,
   puedeAprobarse,
+  avisoDeReemplazo,
   ETIQUETA,
   EXPLICACION,
   type AccionContable,
@@ -104,6 +108,16 @@ export function EstadoContablePanel({
     setError(null);
     setAviso(null);
     startTransition(async () => {
+      // Aprobar es la única acción cuyo aviso depende de datos: solo hay algo
+      // que advertir si existe otra aprobada que se cruce con este rango. Por
+      // eso se consulta antes de preguntar, en vez de un texto fijo — y si no
+      // hay nada que reemplazar no se pregunta nada, para que el diálogo no se
+      // vuelva un trámite que se despacha sin leer.
+      if (accion === "aprobar") {
+        const impacto = await impactoDeAprobar(jobId);
+        const texto = avisoDeReemplazo(impacto);
+        if (texto && !window.confirm(texto)) return;
+      }
       const r = await cambiarEstadoContable(jobId, accion);
       if (!r.ok) {
         setError(r.error ?? "No se pudo completar la acción.");

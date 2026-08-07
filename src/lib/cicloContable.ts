@@ -131,3 +131,48 @@ export const EXPLICACION: Record<EstadoContable, string> = {
   reemplazada:
     "Otra versión de este mismo período se aprobó en su lugar. Se conserva para poder rastrear qué cambió.",
 };
+
+/**
+ * ── El aviso previo a aprobar ───────────────────────────────────────────────
+ *
+ * Aprobar nunca falla por solapamiento: la base degrada a `reemplazada` las
+ * aprobadas que se crucen y borra sus aplicaciones de cobro. Correcto —dos
+ * conciliaciones vigentes sobre el mismo día contarían el saldo dos veces— pero
+ * era invisible hasta después, cuando `reemplazada` ya es un estado terminal.
+ *
+ * Aquí se redacta lo que va a pasar, con las cifras reales. `null` cuando no
+ * hay nada que reemplazar: entonces no se pregunta nada, porque un diálogo que
+ * siempre sale se aprende a despachar sin leer y deja de proteger justo el día
+ * que dice algo importante.
+ */
+export function avisoDeReemplazo(impacto: {
+  reemplaza: { desde: string; hasta: string }[];
+  aplicaciones: number;
+}): string | null {
+  const n = impacto.reemplaza.length;
+  if (n === 0) return null;
+
+  const dia = (iso: string) => iso.split("-").reverse().join("/");
+  const rango = (r: { desde: string; hasta: string }) =>
+    r.desde === r.hasta ? dia(r.desde) : `${dia(r.desde)} a ${dia(r.hasta)}`;
+
+  const cuales =
+    n === 1
+      ? `la conciliación aprobada de ${rango(impacto.reemplaza[0]!)}`
+      : `${n} conciliaciones aprobadas (${impacto.reemplaza.map(rango).join("; ")})`;
+
+  // El número de cobros es el dato que mide el daño: "reemplaza una
+  // conciliación" suena a trámite, "se borran 1.234 cobros" no.
+  const cobros =
+    impacto.aplicaciones === 0
+      ? "No tenía cobros aplicados, así que ningún saldo cambiará."
+      : impacto.aplicaciones === 1
+        ? "Se borrará 1 cobro aplicado y el saldo de ese comprobante volverá a quedar pendiente."
+        : `Se borrarán ${impacto.aplicaciones.toLocaleString("es-PE")} cobros aplicados y el saldo de esos comprobantes volverá a quedar pendiente.`;
+
+  return (
+    `Al aprobar esta conciliación dejará de regir ${cuales}. ` +
+    `${cobros} Ese cambio no se puede deshacer: para recuperarla habría que ` +
+    `volver a ejecutarla.\n\n¿Continuar?`
+  );
+}

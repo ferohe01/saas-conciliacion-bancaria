@@ -523,3 +523,74 @@ export async function conciliarManual(
 
   return guardar(jobId, ctx.resultado);
 }
+
+/** Lo que una aprobación se llevaría por delante. */
+export type ImpactoAprobar = {
+  /** Conciliaciones aprobadas que se degradarían a `reemplazada`. */
+  reemplaza: { id: string; desde: string; hasta: string; version: number }[];
+  /** Cobros que se borrarían: su saldo vuelve a quedar pendiente. */
+  aplicaciones: number;
+};
+
+/**
+ * Qué pasaría si se aprueba esta conciliación, ANTES de aprobarla.
+ *
+ * Aprobar no falla nunca por solapamiento: `aprobar_conciliacion` degrada a
+ * `reemplazada` las aprobadas que se crucen y borra sus aplicaciones de cobro.
+ * Eso es correcto —dos conciliaciones vigentes sobre el mismo día contarían el
+ * saldo dos veces— pero era **invisible hasta después de hacerlo**: la pantalla
+ * lo contaba en el mensaje de éxito, cuando ya no había vuelta atrás y el
+ * estado `reemplazada` es terminal.
+ *
+ * Duele especialmente al cruzar granularidades: aprobar el corte de un día
+ * sobre un mes ya aprobado deja sin cobros los otros 29 días de golpe.
+ *
+ * ⚠️ Reproduce el MISMO criterio de solape que la función de la base
+ * (`daterange(desde, hasta, '[]') &&`, ambos extremos incluidos). Si los dos
+ * dejaran de coincidir, el aviso mentiría — que es peor que no avisar.
+ */
+export async function impactoDeAprobar(
+  jobId: string,
+): Promise<ImpactoAprobar> {
+  const vacio: ImpactoAprobar = { reemplaza: [], aplicaciones: 0 };
+  const usuario = await getUsuarioActual();
+  if (!usuario) return vacio;
+
+  // RLS: solo ve los jobs de su empresa.
+  const supabase = await createClient();
+  const { data: job } = await supabase
+    .from("jobs_conciliacion")
+    .select("id, cuenta_id, periodo_desde, periodo_hasta")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (!job) return vacio;
+
+  const { data: solapadas } = await supabase
+    .from("jobs_conciliacion")
+    .select("id, periodo_desde, periodo_hasta, version")
+    .eq("cuenta_id", job.cuenta_id)
+    .eq("estado_contable", "aprobada")
+    .neq("id", jobId)
+    // Dos rangos cerrados se cruzan si cada uno empieza antes de que el otro
+    // acabe. Es la misma condición que el `&&` de la base, escrita en filtros.
+    .lte("periodo_desde", job.periodo_hasta)
+    .gte("periodo_hasta", job.periodo_desde);
+
+  const reemplaza = (solapadas ?? []).map((j) => ({
+    id: j.id as string,
+    desde: j.periodo_desde as string,
+    hasta: j.periodo_hasta as string,
+    version: Number(j.version ?? 1),
+  }));
+  if (reemplaza.length === 0) return vacio;
+
+  const { count } = await supabase
+    .from("aplicaciones_cobro")
+    .select("id", { count: "exact", head: true })
+    .in(
+      "job_id",
+      reemplaza.map((r) => r.id),
+    );
+
+  return { reemplaza, aplicaciones: count ?? 0 };
+}

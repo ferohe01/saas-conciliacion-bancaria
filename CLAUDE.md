@@ -699,6 +699,34 @@ comprobantes, y es la única que suman el panel y los reportes. Un borrador con
 decisiones confirmadas no mueve un céntimo. El panel avisa cuando hay
 conciliaciones terminadas sin aprobar, porque si no parecería que se perdieron.
 
+## Aprobar no falla por solaparse: reemplaza, y ahora avisa antes
+
+`aprobar_conciliacion` degrada a `reemplazada` las aprobadas que se crucen con
+el rango y **borra sus aplicaciones de cobro**. Es lo correcto —dos
+conciliaciones vigentes sobre el mismo día contarían el saldo dos veces— pero
+era **invisible hasta después**: la pantalla lo contaba en el mensaje de éxito,
+cuando `reemplazada` ya es un estado terminal y no hay vuelta atrás.
+
+⚠️ Duele sobre todo **al cruzar granularidades**, que es lo que el rango de
+fechas acaba de hacer posible. Aprobar el corte del 30/06 sobre un junio ya
+aprobado deja sin cobros los otros 29 días de golpe, y recuperarlos exige
+volver a ejecutar el mes.
+
+- `impactoDeAprobar(jobId)` consulta **antes de preguntar** qué aprobadas se
+  cruzan y cuántas `aplicaciones_cobro` se borrarían.
+- ⚠️ Reproduce el **mismo criterio de solape que la base**
+  (`daterange(desde, hasta, '[]') &&`, ambos extremos incluidos) escrito como
+  filtros `lte`/`gte`. Si los dos dejaran de coincidir, el aviso mentiría — y un
+  aviso que miente es peor que no avisar.
+- `avisoDeReemplazo` (puro, con tests) redacta el texto y devuelve **`null`
+  cuando no hay nada que reemplazar**: entonces no se pregunta nada. Un diálogo
+  que sale siempre se aprende a despachar sin leer, y deja de proteger justo el
+  día que dice algo importante.
+- **El número de cobros es lo que mide el daño.** "Reemplaza una conciliación"
+  suena a trámite; "se borrarán 1.234 cobros aplicados y esos saldos vuelven a
+  pendiente" es la frase que hace parar. Y cuando son cero, se dice también:
+  callarlo haría dudar de una acción que no toca el dinero.
+
 ## Cuando n8n acepta y luego se muere
 
 `POST /api/conciliacion/iniciar` ya marcaba `error` en tres casos: n8n
