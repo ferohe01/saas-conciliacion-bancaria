@@ -78,6 +78,19 @@ export const MovimientoBancario = z.object({
   tipo: TipoMovimientoBancario,
   glosa: z.string().nullable().optional(),
   referencia_banco: z.string().nullable().optional(),
+  /**
+   * Fila de `movimientos_extracto` de la que salió, cuando el extracto se
+   * cargó en tabla (parte B, etapa 1).
+   *
+   * Es el puente de vuelta: el `resultado` de n8n solo referencia
+   * `id_movimiento`, que es sintético ("BCO-0001"), así que sin esto no habría
+   * forma de saber a qué movimiento real corresponde un match. Es el mismo
+   * papel que cumple `comprobante_id` en `RegistroInterno` — y por la misma
+   * razón: sin él, el bucle no se cierra.
+   *
+   * Opcional: los extractos que aún se parsean en el navegador no lo traen.
+   */
+  movimiento_id: z.string().uuid().nullable().optional(),
 });
 export type MovimientoBancario = z.infer<typeof MovimientoBancario>;
 
