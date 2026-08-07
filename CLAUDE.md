@@ -699,6 +699,60 @@ comprobantes, y es la única que suman el panel y los reportes. Un borrador con
 decisiones confirmadas no mueve un céntimo. El panel avisa cuando hay
 conciliaciones terminadas sin aprobar, porque si no parecería que se perdieron.
 
+## Parte B: conciliar 450.000 partidas (en curso)
+
+La ingesta ya permitía **cargar** 450.000 comprobantes, pero no conciliarlos.
+Tres muros, no uno:
+
+1. **Entrada**: 903.308 partidas en un JSON de ~175 MB, contra un webhook de 64.
+2. **Salida**: `resultado` sería un JSONB de cientos de MB en **una fila**.
+3. **Lectura**: pantalla, cobranzas, reportes y aprendizaje leen ese JSONB entero.
+
+Cuatro etapas, cada una desplegable por su cuenta:
+
+| Etapa | Qué | Estado |
+|---|---|---|
+| 1 | El extracto se persiste en `movimientos_extracto`, con ingesta por lotes | ✅ `0022` |
+| 2 | La capa exacta corre en SQL sobre las dos tablas | ✅ `0023` |
+| 3 | n8n recibe solo el **residuo** | pendiente |
+| 4 | La pantalla lee los matches de tabla en vez del JSONB | pendiente |
+
+### La capa exacta como JOIN (etapa 2)
+
+Emparejar por monto + referencia es literalmente un JOIN, y Postgres lo hace
+sobre medio millón de filas en segundos. **Medido con junio completo de la
+recaudadora:**
+
+    452.177 internos · 450.999 movimientos
+    → 447.795 pares (99,03 %) en 31,8 s
+    → residuo para n8n: 4.382 + 3.204 = 7.586 partidas (~1,5 MB)
+
+Verificado: 447.795 comprobantes distintos y 447.795 movimientos distintos
+—ninguna partida usada dos veces—, cero pares con monto distinto y cero con
+referencia distinta.
+
+- ⚠️ **`row_number()` en los dos lados, casando por número.** Con cientos de
+  recibos del mismo importe y la misma referencia, un JOIN a secas da el
+  producto cartesiano: 300 × 300 = 90.000 pares en vez de 300. Numerar cada
+  lado dentro de su grupo reproduce el "toma el siguiente libre" del JavaScript.
+- ⚠️ **Solo el pass 1 (monto + referencia).** El respaldo por monto + FECHA se
+  queda en `n8n/01_exacta.js` a propósito: necesita la guarda de contradicción
+  de referencias —sin ella emparejó 541 pares sin relación marcándolos `auto`—
+  y reescribirla en SQL sería duplicar el punto exacto donde el motor se
+  equivoca en silencio. n8n vuelve a correr su capa exacta sobre el residuo.
+- **Céntimos CON SIGNO**, no valor absoluto: en absoluto, un cobro casaría con
+  un pago del mismo importe.
+
+### Hallazgo de producto: el mes concilia mejor que el día
+
+    corte del 30/06  → 88,44 %
+    junio completo   → 99,03 %
+
+El corte diario **parte pares** cuyo asiento y cobro caen en días distintos; la
+ventana mensual los recupera. Contradice la intuición de que trocear ayuda:
+trocear ayuda al *tamaño*, y perjudica al *resultado*. Con la capa exacta en SQL
+ya no hace falta trocear, así que la recomendación al cliente cambia.
+
 ## ⚠️ RLS cuesta una llamada a función POR FILA (y a 450.000 se nota)
 
 El hallazgo más caro de dimensionar el cliente grande, y no estaba en ninguna
