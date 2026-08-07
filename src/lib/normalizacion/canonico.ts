@@ -86,6 +86,41 @@ export function normalizarInternos(
   return { filas: out, invalidas };
 }
 
+/**
+ * Un movimiento bancario canónico a partir de UNA fila cruda. `null` si le
+ * falta lo imprescindible (fecha o monto).
+ *
+ * Existe suelta —y no dentro del bucle de `normalizarBancarios`— porque la
+ * ingesta en servidor lee el archivo a trozos y normaliza fila a fila, sin
+ * tener nunca el array entero en memoria. Que las dos rutas compartan ESTA
+ * función es lo que garantiza que un extracto grande y uno pequeño se
+ * interpreten igual; con dos copias, la convención de signos acabaría
+ * divergiendo entre el camino del navegador y el del servidor.
+ *
+ * `indice` es la posición en el archivo: de ahí sale el `id_movimiento`
+ * sintético, que tiene que ser estable entre corridas.
+ */
+export function normalizarMovimiento(
+  fila: Record<string, unknown>,
+  mapeo: MapeoColumnas,
+  indice: number,
+): MovimientoBancario | null {
+  const fecha = mapeo.fecha ? normalizarFecha(fila[mapeo.fecha]) : null;
+  const montoRaw = mapeo.monto ? normalizarMonto(fila[mapeo.monto]) : null;
+  if (!fecha || montoRaw == null) return null;
+
+  const dir = determinarDireccion(fila, mapeo, montoRaw);
+  const monto = dir === "entrada" ? Math.abs(montoRaw) : -Math.abs(montoRaw);
+  return {
+    id_movimiento: `BCO-${String(indice + 1).padStart(4, "0")}`,
+    fecha,
+    monto,
+    tipo: dir === "entrada" ? "abono" : "cargo",
+    glosa: mapeo.descripcion ? texto(fila[mapeo.descripcion]) : null,
+    referencia_banco: mapeo.referencia ? texto(fila[mapeo.referencia]) : null,
+  };
+}
+
 /** Convierte filas de extracto bancario a MovimientoBancario[] canónicos. */
 export function normalizarBancarios(
   filas: Record<string, unknown>[],
@@ -95,22 +130,9 @@ export function normalizarBancarios(
   let invalidas = 0;
 
   filas.forEach((fila, i) => {
-    const fecha = mapeo.fecha ? normalizarFecha(fila[mapeo.fecha]) : null;
-    const montoRaw = mapeo.monto ? normalizarMonto(fila[mapeo.monto]) : null;
-    if (!fecha || montoRaw == null) {
-      invalidas++;
-      return;
-    }
-    const dir = determinarDireccion(fila, mapeo, montoRaw);
-    const monto = dir === "entrada" ? Math.abs(montoRaw) : -Math.abs(montoRaw);
-    out.push({
-      id_movimiento: `BCO-${String(i + 1).padStart(4, "0")}`,
-      fecha,
-      monto,
-      tipo: dir === "entrada" ? "abono" : "cargo",
-      glosa: mapeo.descripcion ? texto(fila[mapeo.descripcion]) : null,
-      referencia_banco: mapeo.referencia ? texto(fila[mapeo.referencia]) : null,
-    });
+    const m = normalizarMovimiento(fila, mapeo, i);
+    if (m) out.push(m);
+    else invalidas++;
   });
 
   return { filas: out, invalidas };

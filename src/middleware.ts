@@ -34,6 +34,6 @@ export async function middleware(request: NextRequest) {
 export const config = {
   // Ejecuta en todas las rutas salvo estáticos, imágenes y las de cuerpo grande.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|api/conciliacion/iniciar|api/comprobantes/importar|api/webhooks/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/conciliacion/iniciar|api/comprobantes/importar|api/extracto/importar|api/webhooks/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
