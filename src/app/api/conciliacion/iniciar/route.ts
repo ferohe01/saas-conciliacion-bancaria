@@ -10,6 +10,8 @@ import { construirEjemplos, type JobHistorico } from "@/lib/aprendizaje";
 import { criteriosParaIa } from "@/lib/criteriosIniciales";
 import { estadoSuscripcion } from "@/lib/suscripcion";
 import { bloqueaRelanzamiento } from "@/lib/jobsAtascados";
+import { construirResiduo } from "@/lib/conciliacion/residuo";
+import { calcularCuadre } from "@/lib/conciliacion/cuadre";
 import type { EstadoJob } from "@/lib/contract/enums";
 import {
   PayloadConciliacion,
@@ -55,20 +57,51 @@ const MAX_FILAS = Math.max(
   Math.min(200_000, Number(process.env.MAX_FILAS_CONCILIACION) || 20_000),
 );
 
-const IniciarReq = z.object({
-  cuenta_id: z.string().uuid(),
-  periodo: Periodo,
-  saldos: Saldos,
-  config: ConfigConciliacion.partial().optional(),
-  registros_internos: z
-    .array(RegistroInterno)
-    .min(1)
-    .max(MAX_FILAS, `Máximo ${MAX_FILAS} registros internos por conciliación. Concilia el período en cortes más cortos (por ejemplo, por semana o por día).`),
-  movimientos_bancarios: z
-    .array(MovimientoBancario)
-    .min(1)
-    .max(MAX_FILAS, `Máximo ${MAX_FILAS} movimientos bancarios por conciliación. Concilia el período en cortes más cortos.`),
-});
+/**
+ * Dos formas de iniciar, y la diferencia es de dónde salen las partidas.
+ *
+ * ── Modo TABLA (`lote_extracto_id`) ────────────────────────────────────────
+ *
+ * El extracto ya está en `movimientos_extracto` y los comprobantes en su tabla,
+ * así que el navegador NO manda partidas: manda el identificador del lote y
+ * cuatro datos más. La capa exacta corre en SQL y a n8n solo viaja el residuo.
+ *
+ * Es lo que hace viable el cliente grande: 903.176 partidas no caben en un
+ * JSON, pero un uuid sí.
+ *
+ * ── Modo PAYLOAD (arrays) ──────────────────────────────────────────────────
+ *
+ * El camino de siempre, que sigue vivo: el navegador parsea el extracto y manda
+ * las filas. Para una PyME de 500–2.000 movimientos es más simple y no tiene
+ * ninguna desventaja, y además es el que usan todas las conciliaciones ya
+ * guardadas.
+ */
+const IniciarReq = z
+  .object({
+    cuenta_id: z.string().uuid(),
+    periodo: Periodo,
+    saldos: Saldos,
+    config: ConfigConciliacion.partial().optional(),
+    lote_extracto_id: z.string().uuid().optional(),
+    registros_internos: z
+      .array(RegistroInterno)
+      .max(MAX_FILAS, `Máximo ${MAX_FILAS} registros internos por conciliación. Concilia el período en cortes más cortos (por ejemplo, por semana o por día).`)
+      .optional(),
+    movimientos_bancarios: z
+      .array(MovimientoBancario)
+      .max(MAX_FILAS, `Máximo ${MAX_FILAS} movimientos bancarios por conciliación. Concilia el período en cortes más cortos.`)
+      .optional(),
+  })
+  .refine(
+    (r) =>
+      r.lote_extracto_id != null ||
+      ((r.registros_internos?.length ?? 0) > 0 &&
+        (r.movimientos_bancarios?.length ?? 0) > 0),
+    {
+      message:
+        "Falta el extracto: envía `lote_extracto_id` o las partidas de los dos lados.",
+    },
+  );
 
 export async function POST(request: Request) {
   const usuario = await getUsuarioActual();
@@ -164,6 +197,7 @@ export async function POST(request: Request) {
   const version = (anterior?.version ?? 0) + 1;
 
   const jobId = generarJobId(req.periodo.desde);
+  const modoTabla = req.lote_extracto_id != null;
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
   // Config de la empresa (editable en /configuracion) + override por request.
@@ -193,37 +227,13 @@ export async function POST(request: Request) {
     (filaEmpresa?.criterios_conciliacion as string[] | null) ?? [],
   );
 
-  const payload = {
-    job_id: jobId,
-    metadata: {
-      empresa_id: empresa.empresa_id,
-      usuario_id: usuario.id,
-      periodo: req.periodo,
-      cuenta: {
-        banco: cuenta.banco,
-        numero: cuenta.numero_enmascarado ?? "****",
-        moneda: cuenta.moneda,
-      },
-      saldos: req.saldos,
-      callback_url: `${appUrl}/api/webhooks/resultado-conciliacion`,
-    },
-    config: { ...configEmpresa, ...(req.config ?? {}) },
-    registros_internos: req.registros_internos,
-    movimientos_bancarios: req.movimientos_bancarios,
-    ...(ejemplos.length ? { ejemplos_aprendizaje: ejemplos } : {}),
-    ...(criterios.length ? { criterios_declarados: criterios } : {}),
-  };
-
-  const validado = PayloadConciliacion.safeParse(payload);
-  if (!validado.success) {
-    return NextResponse.json(
-      { error: "El payload no cumple el contrato.", detalle: validado.error.issues[0]?.message },
-      { status: 400 },
-    );
-  }
-
-  // Insertar el job antes de disparar n8n.
-  const { error: insError } = await admin.from("jobs_conciliacion").insert({
+  // ── De dónde salen las partidas ──────────────────────────────────────────
+  //
+  // En modo TABLA el job tiene que existir ANTES de correr la capa exacta:
+  // `conciliar_exacta` parte de él para saber empresa, cuenta, período y lote.
+  // Por eso aquí el orden se invierte respecto al modo payload, donde el job se
+  // inserta ya con las partidas validadas.
+  const filaJob = {
     id: jobId,
     empresa_id: empresa.empresa_id,
     cuenta_id: req.cuenta_id,
@@ -239,8 +249,107 @@ export async function POST(request: Request) {
     // anterior; dentro del JSONB del payload no son consultables.
     saldo_inicial_banco: req.saldos?.saldo_extracto_inicial ?? null,
     saldo_final_banco: req.saldos?.saldo_extracto_final ?? null,
-    payload_entrada: validado.data,
-  });
+    lote_extracto_id: req.lote_extracto_id ?? null,
+  };
+
+  let internos = req.registros_internos ?? [];
+  let bancarios = req.movimientos_bancarios ?? [];
+  let paresExactos = 0;
+
+  if (modoTabla) {
+    const { error } = await admin.from("jobs_conciliacion").insert(filaJob);
+    if (error) {
+      return NextResponse.json({ error: "No se pudo crear el job." }, { status: 500 });
+    }
+    try {
+      const residuo = await construirResiduo(admin, jobId);
+      internos = residuo.registros_internos;
+      bancarios = residuo.movimientos_bancarios;
+      paresExactos = residuo.paresExactos;
+    } catch (e) {
+      // El job ya existe, así que un fallo aquí tiene que dejarlo marcado: si no,
+      // se quedaría `pendiente` para siempre reservando su período.
+      const detalle = e instanceof Error ? e.message : "Fallo al preparar las partidas.";
+      await admin
+        .from("jobs_conciliacion")
+        .update({ estado: "error", error_detalle: detalle })
+        .eq("id", jobId);
+      return NextResponse.json({ error: detalle }, { status: 500 });
+    }
+
+    // ⚠️ Si a alguno de los dos lados no le queda residuo, n8n no puede aportar
+    // nada: no hay contra qué casar lo que sobra. Se cierra aquí en vez de
+    // mandar un payload que el motor rechazaría — y el usuario ve una
+    // conciliación completada, que es la verdad.
+    if (internos.length === 0 || bancarios.length === 0) {
+      const cuadre = calcularCuadre(req.saldos ?? {}, internos, bancarios);
+      await admin
+        .from("jobs_conciliacion")
+        .update({
+          estado: "completado",
+          completed_at: new Date().toISOString(),
+          fase_actual: "exacta",
+          // Los pares viven en `matches_conciliacion`; el JSONB se queda con lo
+          // que no crece: el resumen y el cuadre.
+          resultado: {
+            resumen: {
+              total_internos: paresExactos + internos.length,
+              total_bancarios: paresExactos + bancarios.length,
+              conciliados_exactos: paresExactos,
+              conciliados_difusos: 0,
+              sugeridos_ia: 0,
+              sin_conciliar_internos: internos.length,
+              sin_conciliar_bancarios: bancarios.length,
+            },
+            matches: [],
+            no_conciliados: [],
+            cuadre,
+          },
+        })
+        .eq("id", jobId);
+      return NextResponse.json({ job_id: jobId, modo: "sql", pares: paresExactos });
+    }
+  }
+
+  const payload = {
+    job_id: jobId,
+    metadata: {
+      empresa_id: empresa.empresa_id,
+      usuario_id: usuario.id,
+      periodo: req.periodo,
+      cuenta: {
+        banco: cuenta.banco,
+        numero: cuenta.numero_enmascarado ?? "****",
+        moneda: cuenta.moneda,
+      },
+      saldos: req.saldos,
+      callback_url: `${appUrl}/api/webhooks/resultado-conciliacion`,
+    },
+    config: { ...configEmpresa, ...(req.config ?? {}) },
+    registros_internos: internos,
+    movimientos_bancarios: bancarios,
+    ...(ejemplos.length ? { ejemplos_aprendizaje: ejemplos } : {}),
+    ...(criterios.length ? { criterios_declarados: criterios } : {}),
+  };
+
+  const validado = PayloadConciliacion.safeParse(payload);
+  if (!validado.success) {
+    return NextResponse.json(
+      { error: "El payload no cumple el contrato.", detalle: validado.error.issues[0]?.message },
+      { status: 400 },
+    );
+  }
+
+  // El job: se inserta ahora en modo payload, o se completa el que ya se creó
+  // en modo tabla. En los dos casos queda guardado lo que se envió.
+  const { error: insError } = modoTabla
+    ? await admin
+        .from("jobs_conciliacion")
+        .update({ payload_entrada: validado.data })
+        .eq("id", jobId)
+    : await admin
+        .from("jobs_conciliacion")
+        .insert({ ...filaJob, payload_entrada: validado.data });
   if (insError) {
     return NextResponse.json(
       { error: "No se pudo crear el job." },
