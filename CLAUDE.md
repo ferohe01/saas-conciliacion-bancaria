@@ -49,6 +49,16 @@ coherencia de nombre. Se proponen como **sugerencias** (`estado 'pendiente'`,
 auto-concilian. Lógica en el nodo de producción n8n `03a_agrupacion.js` (fuente
 única).
 
+⚠️ **El prefiltro de identidad de la agrupación acepta REFERENCIA o nombre**, no
+solo nombre. Exigir nombre siempre parecía prudente hasta que apareció una cuenta
+recaudadora: los recibos llegan **sin contraparte** y lo que comparten los que se
+pagaron juntos es el **código de operación**. Con el prefiltro anterior la capa
+no podía agrupar nada — y eran justo los ~490 casos 1:N que había que conciliar,
+el 4% del período y S/ 120.000 de descuadre. Lo que no se toca es que **tiene que
+haber alguna identidad compartida**: sin prefiltro, un subset-sum empareja
+partidas sin relación cuya suma cuadra por azar y el resultado parece correcto.
+Hay tests de las dos caras en `tests/n8nNodos.test.ts`.
+
 **Etapa de generación de candidatos (antes de la IA).** Los pendientes tras
 exacta+difusa no se le pasan crudos a la IA. Primero una etapa determinística
 (record-linkage / blocking) arma, por cada registro interno, una **shortlist
