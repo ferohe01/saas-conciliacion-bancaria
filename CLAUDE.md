@@ -534,6 +534,28 @@ escribía), `idsConCobros` (habría dejado borrar un comprobante con cobros),
 `/cobranzas` y `/pagos` (la antigüedad de deuda se calculaba sobre 1.000), y el
 resumen del wizard (ahora usa `count: "exact"`).
 
+## El tope de partidas es configurable, y va emparejado con n8n
+
+`MAX_FILAS_CONCILIACION` (por defecto **20.000**) acota las partidas por lado.
+Es un **techo, no un objetivo**: el caso para el que está pensado el producto
+—500 a 2.000 movimientos— no lo roza nunca.
+
+⚠️ **No se sube solo.** Cada fila pesa ~194 bytes *medidos*, así que el payload
+son `filas × 2 × 194`:
+
+    20.000 →  7,8 MB   cabe en el defecto de n8n (16 MB)
+    36.000 → 14,0 MB   cabe, justo
+    50.000 → 19,4 MB   NO cabe: hay que subir N8N_PAYLOAD_SIZE_MAX
+
+Por eso es variable de entorno con el valor prudente por defecto: quien necesite
+más lo sube **junto con** el de n8n, y ningún despliegue hereda una combinación
+rota.
+
+**Lección de dimensionado:** una recaudadora de 450.000 movimientos al mes da
+una media de 14.600 al día, pero el **pico real es 36.390** — 2,5 veces la
+media. Con estos volúmenes la media no dice nada; **manda el pico**. Antes de
+prometer que un corte cabe, mirar la distribución diaria, no dividir por 30.
+
 ## Ingesta en servidor por lotes (volumen)
 
 `POST /api/comprobantes/importar` recibe el **archivo** y lo procesa en el

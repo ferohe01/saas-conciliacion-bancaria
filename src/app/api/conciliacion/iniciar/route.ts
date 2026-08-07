@@ -29,15 +29,43 @@ import { ConfigConciliacion } from "@/lib/contract/config";
  * El frontend nunca contacta a n8n ni conoce el token.
  */
 
-const MAX_FILAS = 20000;
+/**
+ * Tope de partidas por lado en una conciliación.
+ *
+ * Es un TECHO, no un objetivo: una PyME con 500–2.000 movimientos —el caso para
+ * el que está pensado el producto— no lo roza nunca. Existe para que un archivo
+ * absurdo no tumbe el motor ni deje un `resultado` inmanejable.
+ *
+ * ⚠️ VA EMPAREJADO CON EL TOPE DE PAYLOAD DE n8n. Cada fila pesa ~194 bytes
+ * medidos, así que el payload son `filas × 2 × 194`:
+ *
+ *     20.000 →  7,8 MB   cabe en el defecto de n8n (16 MB)
+ *     36.000 → 14,0 MB   cabe, justo
+ *     50.000 → 19,4 MB   ⚠️ NO cabe: hay que subir N8N_PAYLOAD_SIZE_MAX
+ *
+ * Por eso es una variable de entorno con el valor prudente por defecto: quien
+ * necesite más lo sube **junto con** el de n8n, y nadie hereda una combinación
+ * rota por defecto. Un despliegue de gran volumen (p. ej. una recaudadora que
+ * concilia por día con picos de 36.000) pone 50.000 aquí y 64 MB allá.
+ */
+const MAX_FILAS = Math.max(
+  1000,
+  Math.min(200_000, Number(process.env.MAX_FILAS_CONCILIACION) || 20_000),
+);
 
 const IniciarReq = z.object({
   cuenta_id: z.string().uuid(),
   periodo: Periodo,
   saldos: Saldos,
   config: ConfigConciliacion.partial().optional(),
-  registros_internos: z.array(RegistroInterno).min(1).max(MAX_FILAS),
-  movimientos_bancarios: z.array(MovimientoBancario).min(1).max(MAX_FILAS),
+  registros_internos: z
+    .array(RegistroInterno)
+    .min(1)
+    .max(MAX_FILAS, `Máximo ${MAX_FILAS} registros internos por conciliación. Concilia el período en cortes más cortos (por ejemplo, por semana o por día).`),
+  movimientos_bancarios: z
+    .array(MovimientoBancario)
+    .min(1)
+    .max(MAX_FILAS, `Máximo ${MAX_FILAS} movimientos bancarios por conciliación. Concilia el período en cortes más cortos.`),
 });
 
 export async function POST(request: Request) {
