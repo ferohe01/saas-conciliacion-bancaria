@@ -1,14 +1,13 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { traerComprobantesConSaldo } from "@/lib/comprobantesSaldo";
+import { traerResumenSaldos } from "@/lib/comprobantesSaldo";
 import { empresaTieneModulo } from "@/lib/modulos-servidor";
 import { buscarModulo } from "@/lib/modulos";
 import { CONTACTO_SUSCRIPCION, montoPEN } from "@/lib/suscripcion";
-import { calcularAging, type ComprobanteCobrar } from "@/lib/aging";
 import { VistaAging } from "@/components/app/VistaAging";
 import { FiltrosSaldo } from "@/components/comprobantes/FiltrosSaldo";
 import {
-  filtrarSaldo,
+  FILTRO_SALDO_VACIO,
   filtroSaldoDesdeParams,
   hayFiltroSaldo,
 } from "@/lib/filtrosSaldo";
@@ -51,18 +50,21 @@ export default async function CobranzasPage({
   // Paginado + filtrado EN LA CONSULTA: la antigüedad se calcula sobre todo lo
   // pendiente, pero traer además lo cobrado y lo del otro lado era trabajo que
   // se tiraba. Ver `lib/comprobantesSaldo.ts`.
-  const todas = await traerComprobantesConSaldo(supabase, "cobranza");
   const hoy = new Date();
 
-  // Se filtra ANTES de agregar: si se filtrara la tabla dejando arriba el total
-  // de todo, la pantalla mostraría dos cifras que no cuadran entre sí.
+  // El filtro viaja a la BASE y la suma la hace Postgres: la pantalla enseña
+  // unas decenas de filas y antes se traían las 452.309 pendientes para
+  // sumarlas aquí. Ver `lib/comprobantesSaldo.ts` y la migración 0021.
+  //
+  // Se filtra ANTES de agregar, no después: filtrar la tabla dejando arriba el
+  // total de todo daría dos cifras que no cuadran entre sí.
   const filtro = filtroSaldoDesdeParams(sp);
-  const aging = calcularAging(filtrarSaldo(todas, filtro, hoy), hoy, "cobranza");
+  const aging = await traerResumenSaldos(supabase, "cobranza", filtro, hoy);
 
-  // Sin filtro, para saber si el vacío es "no te deben nada" o "el filtro no
-  // encuentra nada", que son dos mensajes muy distintos.
+  // Sin filtro, para distinguir "no hay deuda" de "el filtro no encuentra
+  // nada", que son dos mensajes muy distintos. Solo se pide si hace falta.
   const agingTotal = hayFiltroSaldo(filtro)
-    ? calcularAging(todas, hoy, "cobranza")
+    ? await traerResumenSaldos(supabase, "cobranza", FILTRO_SALDO_VACIO, hoy)
     : aging;
 
   if (agingTotal.documentos === 0) {

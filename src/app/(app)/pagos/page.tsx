@@ -1,14 +1,13 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { traerComprobantesConSaldo } from "@/lib/comprobantesSaldo";
+import { traerResumenSaldos } from "@/lib/comprobantesSaldo";
 import { empresaTieneModulo } from "@/lib/modulos-servidor";
 import { buscarModulo } from "@/lib/modulos";
 import { CONTACTO_SUSCRIPCION, montoPEN } from "@/lib/suscripcion";
-import { calcularAging, type ComprobanteCobrar } from "@/lib/aging";
 import { VistaAging } from "@/components/app/VistaAging";
 import { FiltrosSaldo } from "@/components/comprobantes/FiltrosSaldo";
 import {
-  filtrarSaldo,
+  FILTRO_SALDO_VACIO,
   filtroSaldoDesdeParams,
   hayFiltroSaldo,
 } from "@/lib/filtrosSaldo";
@@ -57,16 +56,21 @@ export default async function PagosPage({
   // Ver la nota de `lib/comprobantesSaldo.ts`: el filtro va en la consulta.
   // Sin él, esta pantalla recorría los 51.427 comprobantes de la empresa para
   // acabar sin un solo pago que enseñar.
-  const todas = await traerComprobantesConSaldo(supabase, "pago");
   const hoy = new Date();
 
-  // Se filtra ANTES de agregar: filtrar la tabla dejando arriba el total de
-  // todo mostraría dos cifras que no cuadran entre sí.
+  // El filtro viaja a la BASE y la suma la hace Postgres: la pantalla enseña
+  // unas decenas de filas y antes se traían las 452.309 pendientes para
+  // sumarlas aquí. Ver `lib/comprobantesSaldo.ts` y la migración 0021.
+  //
+  // Se filtra ANTES de agregar, no después: filtrar la tabla dejando arriba el
+  // total de todo daría dos cifras que no cuadran entre sí.
   const filtro = filtroSaldoDesdeParams(sp);
-  const aging = calcularAging(filtrarSaldo(todas, filtro, hoy), hoy, "pago");
+  const aging = await traerResumenSaldos(supabase, "pago", filtro, hoy);
 
+  // Sin filtro, para distinguir "no hay deuda" de "el filtro no encuentra
+  // nada", que son dos mensajes muy distintos. Solo se pide si hace falta.
   const agingTotal = hayFiltroSaldo(filtro)
-    ? calcularAging(todas, hoy, "pago")
+    ? await traerResumenSaldos(supabase, "pago", FILTRO_SALDO_VACIO, hoy)
     : aging;
 
   if (agingTotal.documentos === 0) {

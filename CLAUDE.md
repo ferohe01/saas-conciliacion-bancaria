@@ -699,6 +699,50 @@ comprobantes, y es la única que suman el panel y los reportes. Un borrador con
 decisiones confirmadas no mueve un céntimo. El panel avisa cuando hay
 conciliaciones terminadas sin aprobar, porque si no parecería que se perdieron.
 
+## ⚠️ RLS cuesta una llamada a función POR FILA (y a 450.000 se nota)
+
+El hallazgo más caro de dimensionar el cliente grande, y no estaba en ninguna
+lista de sospechosos.
+
+La política de `comprobantes` es `es_miembro(empresa_id)`: una función sobre una
+**columna**. Aunque esté marcada `stable`, Postgres no puede tratarla como
+constante ni usarla en un índice, así que **la ejecuta una vez por fila**. Con
+452.309 comprobantes, la misma agregación:
+
+    sin RLS (rol postgres, filtro explícito de empresa) →    187 ms
+    con RLS (rol authenticated)                        →  9.500 ms
+
+**50× de diferencia**, y por encima del `statement_timeout` de 8 s: la consulta
+no es que fuera lenta, es que **fallaba**.
+
+`resumen_saldos` (migración `0021`) lo resuelve como ya hacían las funciones de
+la `0013`: **`SECURITY DEFINER`** con la pertenencia resuelta **una sola vez**.
+
+    with mias as (select empresa_id from usuarios_empresa where usuario_id = auth.uid())
+    ... where c.empresa_id in (select empresa_id from mias)
+
+Resultado: **1,14 s** para las 452.309 filas de WIN, 592 ms para las 15.008 de
+la otra empresa, con totales idénticos a los de antes.
+
+⚠️⚠️ **Con `SECURITY DEFINER`, RLS deja de aplicar dentro y esa línea `in` ES la
+frontera de seguridad.** Reglas al escribir una función así:
+
+- La empresa sale **siempre** de `auth.uid()`. La función **nunca** acepta un
+  `empresa_id` por parámetro — sería un `?empresa_id=` en manos de cualquiera.
+- `set search_path = public`, o el dueño de la función es quien decida qué
+  tabla se lee.
+- **`revoke ... from public, anon` explícito.** Postgres concede EXECUTE a
+  `public` por defecto en cada función nueva; sin el revoke, `anon` puede
+  invocar una función `definer`. Hoy devolvería vacío (sin `auth.uid()` no hay
+  empresa), pero dejar la puerta abierta fiándolo al buen comportamiento del
+  cuerpo es justo lo que no se hace con `definer`.
+- Verificado: sin sesión y como `anon`, **0 filas**; tras el revoke, permiso
+  denegado. Y cada empresa ve solo sus cifras.
+
+**Dónde más aplica:** cualquier consulta que recorra muchas filas de una tabla
+con RLS paga este peaje. Si algo va inexplicablemente lento a volumen, medir la
+misma consulta como `postgres` antes de buscar en otro sitio.
+
 ## Filtrar en la consulta, no en memoria (Por cobrar / Por pagar)
 
 Las dos pantallas se traían la tabla **entera** y descartaban después lo que
