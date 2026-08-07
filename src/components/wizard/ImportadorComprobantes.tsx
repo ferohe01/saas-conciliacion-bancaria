@@ -8,8 +8,15 @@ import { normalizarMonto } from "@/lib/normalizacion/monto";
 import { formatearFecha, formatearPEN } from "@/lib/parsing/resumen";
 import { deshacerImportacion } from "@/app/(app)/wizard/actions";
 
-/** Por encima de esto no se previsualiza: el navegador no puede con ello. */
-const MAX_VISTA_PREVIA = 8 * 1024 * 1024;
+/**
+ * Por encima de esto no se previsualiza: el navegador no puede con ello.
+ *
+ * 4 MB de CSV son ~75.000 filas, que SheetJS en el navegador convierte en
+ * cientos de MB. Cubre de sobra la plantilla habitual (5.000 filas ≈ 1,6 MB) y
+ * deja fuera lo que de verdad haría sufrir a la pestaña. El servidor lee ese
+ * mismo archivo con 13 MB de memoria, medidos sobre 100.000 filas.
+ */
+const MAX_VISTA_PREVIA = 4 * 1024 * 1024;
 
 type FilaImport = {
   fecha: string;
