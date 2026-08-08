@@ -66,3 +66,29 @@ describe("validarCoherencia", () => {
     expect(res.mensaje).toMatch(/Mayo 2026/);
   });
 });
+
+/**
+ * La columna de referencia es la que decide el resultado de una cuenta
+ * recaudadora: sin ella la capa exacta no puede emparejar nada.
+ *
+ * Una conciliación de 450.999 movimientos terminó en 0% porque la columna
+ * `Recibos` no se reconoció y nadie la mapeó a mano. Estos tests fijan los
+ * nombres que un banco peruano usa para ese dato.
+ */
+describe("detección de la columna de referencia", () => {
+  const conEncabezados = (headers: string[]) =>
+    detectarColumnas(headers, [Object.fromEntries(headers.map((h) => [h, "x"]))]);
+
+  it("reconoce «Recibos», que es como la llama una recaudadora", () => {
+    expect(
+      conEncabezados(["OPERACIÓN", "Recibos", "Fecha", "Importe", "Descripcion"])
+        .referencia,
+    ).toBe("Recibos");
+  });
+
+  it("reconoce las formas habituales de un extracto", () => {
+    expect(conEncabezados(["Fecha", "Referencia"]).referencia).toBe("Referencia");
+    expect(conEncabezados(["Fecha", "Nro Operacion"]).referencia).toBe("Nro Operacion");
+    expect(conEncabezados(["Fecha", "Recibo"]).referencia).toBe("Recibo");
+  });
+});

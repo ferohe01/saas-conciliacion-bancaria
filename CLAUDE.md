@@ -460,6 +460,20 @@ así que **toda columna nueva nace sin permiso de escritura**. De paso cubre
 `lote_importacion`, que la `0018` añadió sin tocar permisos y cuyo INSERT no se
 había ejercitado desde entonces.
 
+## ⚠️ PostgREST corta en 1.000 filas — TAMBIÉN el resultado de una función
+
+`db-max-rows` no distingue entre un `select` y un RPC. Una función que devuelve
+4.382 filas entrega **1.000 y un 200 OK**, igual que una tabla.
+
+Mordió después de haber documentado el caso de los `select`, porque no se me
+ocurrió que aplicara a las funciones: el residuo de junio son 4.382 internos y
+3.204 movimientos, a n8n le llegaron **1.000 y 1.000**, y la pantalla dijo
+*"2000 partidas · 0 pares"*. Los dos mil redondos eran la única pista.
+
+`construirResiduo` pagina los RPC con `.range()`, igual que `traerTodo` hace con
+las tablas. **Regla: si una función puede devolver un número de filas que
+dependa de los datos del cliente, se pagina.**
+
 ## ⚠️ PostgREST corta en 1.000 filas y no avisa
 
 Un `select` sin rango sobre 20.000 comprobantes devuelve **1.000 filas y un 200
@@ -795,6 +809,28 @@ Necesitan cosas opuestas, y por eso son dos funciones:
 
 Los KPIs y el % de automatización salían ya bien: viven en `resultado.resumen`,
 que la absorción actualiza.
+
+### Sin la columna de referencia, el motor está ciego
+
+Una conciliación de 450.999 movimientos terminó en **0 %** porque la columna
+`Recibos` del extracto no se mapeó a *referencia*. La capa exacta casa por
+monto + referencia; sin referencia no puede emparejar nada, y todo cae en las
+heurísticas de monto y fecha.
+
+Nada avisó hasta ver el resultado, y a ese volumen descubrirlo al final cuesta
+media hora de proceso.
+
+- `deteccion.ts` reconoce ahora `recibo`, `recibos` y `operacion`: es como llama
+  una recaudadora peruana a ese dato, y era **la** columna que decidía el
+  resultado.
+- El Paso 2 avisa en ámbar cuando la referencia no está mapeada. No bloquea
+  —hay extractos que no la traen, y para ellos el respaldo por monto+fecha es
+  legítimo— pero deja de ser un silencio.
+
+⚠️ La validación del Paso 2 solo exigía **fecha y monto**. Es correcto para una
+PyME que concilia por importe, y ruinoso para quien concilia por número de
+operación. La diferencia entre "opcional" y "opcional pero decisivo" tiene que
+verse en pantalla.
 
 ### Hallazgo de producto: el mes concilia mejor que el día
 

@@ -342,6 +342,19 @@ export function WizardContainer({
   const extractoEsExcel = extracto?.formato === "excel";
   const puedeContinuarPaso2 = !extractoEsExcel || tieneFechaYMonto(mapeoExtracto);
 
+  /**
+   * La referencia no es obligatoria, pero sin ella el motor pierde su mejor
+   * herramienta: casar por número de operación es lo que resuelve el grueso de
+   * una cuenta recaudadora. Sin mapearla, esa capa no puede emparejar nada y
+   * todo cae en las heurísticas de monto y fecha.
+   *
+   * Pasó de verdad: una conciliación de 450.999 movimientos terminó en **0 %**
+   * porque la columna de recibos se quedó sin mapear, y nada lo dijo hasta ver
+   * el resultado. A ese volumen, descubrirlo al final cuesta media hora.
+   */
+  const faltaReferencia =
+    extractoEsExcel && !mapeoExtracto.referencia;
+
   function irAPaso2() {
     setAviso(null);
     setError(null);

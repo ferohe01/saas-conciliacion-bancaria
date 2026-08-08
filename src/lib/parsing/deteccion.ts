@@ -73,6 +73,12 @@ const KEYWORDS: Record<CampoCanonico, string[]> = {
     "documento",
     "comprobante",
     "id",
+    // Una recaudadora llama "recibo" a lo que el banco trae como referencia, y
+    // es LA columna por la que se concilia: sin detectarla, el usuario tiene
+    // que acertar a mano cuál es, y si no lo hace la conciliación da 0%.
+    "recibo",
+    "recibos",
+    "operacion",
   ],
   contraparte: [
     "contraparte",

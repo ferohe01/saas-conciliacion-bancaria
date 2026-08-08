@@ -73,15 +73,10 @@ export async function construirResiduo(
   }
   const resumen = (exacta.data as { pares: number; internos: number; movimientos: number }[])?.[0];
 
-  const [ri, rm] = await Promise.all([
-    admin.rpc("residuo_internos", { p_job_id: jobId }),
-    admin.rpc("residuo_movimientos", { p_job_id: jobId }),
+  const [internos, movimientos] = await Promise.all([
+    traerRpc<FilaInterno>(admin, "residuo_internos", jobId),
+    traerRpc<FilaMovimiento>(admin, "residuo_movimientos", jobId),
   ]);
-  if (ri.error) throw new Error(`No se pudo leer el residuo interno: ${ri.error.message}`);
-  if (rm.error) throw new Error(`No se pudo leer el residuo bancario: ${rm.error.message}`);
-
-  const internos = (ri.data ?? []) as FilaInterno[];
-  const movimientos = (rm.data ?? []) as FilaMovimiento[];
 
   return {
     registros_internos: internos.map((c, i) => ({
@@ -108,4 +103,41 @@ export async function construirResiduo(
     totalInternos: Number(resumen?.internos ?? 0),
     totalMovimientos: Number(resumen?.movimientos ?? 0),
   };
+}
+
+
+/**
+ * Trae TODAS las filas de una función, paginando.
+ *
+ * ⚠️ **PostgREST recorta el resultado de un RPC igual que el de una tabla.** Su
+ * `db-max-rows` es 1.000 y no distingue: una función que devuelve 4.382 filas
+ * entrega 1.000 y un 200 OK, sin aviso.
+ *
+ * Costó una conciliación entera. El residuo de junio son 4.382 internos y 3.204
+ * movimientos; a n8n le llegaron 1.000 y 1.000, y el resultado dijo
+ * "2000 partidas, 0 pares". Los dos mil redondos eran la única pista.
+ *
+ * Es la MISMA lección que `lib/supabase/paginado.ts` documenta para los
+ * `select`, y no se me ocurrió que aplicara a las funciones. Aplica.
+ */
+async function traerRpc<T>(
+  admin: SupabaseClient,
+  fn: string,
+  jobId: string,
+): Promise<T[]> {
+  const PAGINA = 1000;
+  const filas: T[] = [];
+  for (let desde = 0; ; desde += PAGINA) {
+    const { data, error } = await admin
+      .rpc(fn, { p_job_id: jobId })
+      .range(desde, desde + PAGINA - 1);
+    if (error) {
+      throw new Error(`No se pudo leer el residuo (${fn}): ${error.message}`);
+    }
+    const lote = (data ?? []) as T[];
+    filas.push(...lote);
+    // Una página incompleta es el final. Las funciones devuelven siempre el
+    // mismo orden (lo fijan con `order by`), así que el rango es estable.
+    if (lote.length < PAGINA) return filas;
+  }
 }
