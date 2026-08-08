@@ -49,14 +49,31 @@ function mapeoAplicable(m: MapeoColumnas, headers: string[]): boolean {
   return valores.length > 0 && valores.every((h) => headers.includes(h!));
 }
 
-/** Prefiere el mapeo guardado (memoria) si aplica a estos encabezados. */
+/**
+ * Combina la detección con el mapeo que la cuenta recordaba.
+ *
+ * ⚠️ El guardado MANDA donde diga algo, pero NO borra lo que no dice.
+ *
+ * Antes se devolvía el guardado entero y la detección se descartaba. Eso
+ * convertía un error de mapeo en permanente: la primera carga del extracto de
+ * una recaudadora se hizo sin la columna de recibos, la cuenta memorizó ese
+ * mapeo incompleto, y las cargas siguientes lo volvían a aplicar pisando la
+ * detección — que ya reconocía la columna. La conciliación dio 0% tres veces
+ * seguidas, y cada intento parecía uno nuevo.
+ *
+ * Memoria que solo puede quitar campos es una trampa: el usuario no tiene forma
+ * de saber que la pantalla está prefiriendo una decisión vieja.
+ */
 function elegirMapeo(
   detectado: MapeoColumnas,
   guardado: MapeoColumnas | undefined,
   headers: string[],
 ): MapeoColumnas {
-  if (guardado && mapeoAplicable(guardado, headers)) return { ...guardado };
-  return { ...detectado };
+  if (!guardado || !mapeoAplicable(guardado, headers)) return { ...detectado };
+  const util = Object.fromEntries(
+    Object.entries(guardado).filter(([, v]) => Boolean(v)),
+  );
+  return { ...detectado, ...util };
 }
 
 function tieneFechaYMonto(m: MapeoColumnas): boolean {
@@ -873,6 +890,20 @@ export function WizardContainer({
               </div>
             )}
           </div>
+
+          {/* La referencia no es obligatoria, pero es EL dato con el que se
+              empareja la mayoría de los movimientos. Sin avisar, una
+              conciliación de 450.999 partidas terminó en 0% y no hubo forma de
+              saberlo hasta ver el resultado. */}
+          {faltaReferencia && (
+            <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              ⚠️ No has indicado la columna de{" "}
+              <strong>referencia / nº de operación</strong>. Se puede conciliar
+              sin ella, pero es el dato con el que se emparejan la mayoría de
+              los movimientos: sin él, todo depende de que coincidan monto y
+              fecha. Si tu extracto la trae, elígela arriba.
+            </p>
+          )}
 
           {error && (
             <p

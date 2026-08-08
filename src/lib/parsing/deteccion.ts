@@ -78,7 +78,10 @@ const KEYWORDS: Record<CampoCanonico, string[]> = {
     // que acertar a mano cuál es, y si no lo hace la conciliación da 0%.
     "recibo",
     "recibos",
-    "operacion",
+    // ⚠️ "operacion" a secas NO va aquí. Un extracto puede traer una columna
+    // "OPERACIÓN" que es un correlativo del banco, no el código con el que se
+    // casa contra el comprobante — y competiría con la columna buena. Las
+    // formas específicas ("nro operacion") sí están arriba.
   ],
   contraparte: [
     "contraparte",
