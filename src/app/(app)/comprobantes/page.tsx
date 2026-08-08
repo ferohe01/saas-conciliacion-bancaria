@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { getEmpresaActual } from "@/lib/auth";
 import { ImportadorComprobantes } from "@/components/wizard/ImportadorComprobantes";
 import {
@@ -93,9 +94,16 @@ export default async function ComprobantesPage({
     .select("id", { count: "exact", head: true })
     .eq("empresa_id", empresa.empresa_id);
 
-  // Las cargas hechas, para poder quitar una sin borrarlo todo. Se agrupa en
-  // la base: contar por lote desde aquí exigiría traerse las 452.309 filas.
-  const { data: lotes } = await supabase.rpc("lotes_importacion");
+  // ⚠️ Esta llamada va con el cliente de SESIÓN, no con `admin`.
+  //
+  // `lotes_importacion` es SECURITY DEFINER y resuelve la empresa desde
+  // `auth.uid()`. Con `admin` no hay usuario, así que devolvía CERO filas y la
+  // sección de cargas desaparecía sin error ninguno — la peor forma de fallar.
+  //
+  // No cuesta nada: la función agrupa en la base y no recorre filas desde aquí,
+  // que es lo que obligó a mover el resto de la página a `admin`.
+  const conSesion = await createClient();
+  const { data: lotes } = await conSesion.rpc("lotes_importacion");
   const cargas: Carga[] = ((lotes ?? []) as {
     lote: string;
     filas: number | string;

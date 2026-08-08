@@ -1044,6 +1044,20 @@ borrar los comprobantes de **todas las empresas del sistema**.
 Regla: toda consulta con `admin` lleva su `.eq("empresa_id", …)` explícito,
 aunque el otro filtro parezca bastar.
 
+⚠️ **Y el reverso: una función `SECURITY DEFINER` que resuelve la empresa desde
+`auth.uid()` NO puede llamarse con `admin`** — no hay usuario, así que devuelve
+**cero filas sin error**. Pasó con `lotes_importacion` en `/comprobantes`: la
+página había pasado a `admin` por rendimiento y la sección de cargas
+desapareció en silencio, que es la peor forma de fallar.
+
+Las dos clases de consulta conviven en la misma página y hay que elegir la
+correcta para cada una:
+
+| | cliente | por qué |
+|---|---|---|
+| Recorre muchas filas | `admin` + `.eq("empresa_id")` | RLS cobra por fila |
+| RPC que agrupa en la base | **sesión** | resuelve la empresa por `auth.uid()` |
+
 **Dónde más aplica:** cualquier consulta que recorra muchas filas de una tabla
 con RLS paga este peaje. Si algo va inexplicablemente lento a volumen, medir la
 misma consulta como `postgres` antes de buscar en otro sitio.
