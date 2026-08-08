@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { traerTodo, enLotes } from "@/lib/supabase/paginado";
 import { getEmpresaActual } from "@/lib/auth";
 import {
@@ -183,7 +184,8 @@ export type BorradoResultado = {
  * diciendo que esa factura se cobró. Lo conciliado no se limpia; se anula.
  */
 async function idsConCobros(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: ReturnType<typeof createAdminClient>,
+  empresaId: string,
 ): Promise<string[]> {
   // Se parte de las APLICACIONES, no de los comprobantes: son órdenes de
   // magnitud menos. Enumerar los comprobantes para preguntar cuáles están
@@ -194,6 +196,10 @@ async function idsConCobros(
     supabase
       .from("aplicaciones_cobro")
       .select("comprobante_id")
+      // Con `admin` no hay RLS: sin este filtro se traerían las aplicaciones de
+      // otras empresas. No causaría un borrado indebido —protegería de más—
+      // pero sí conservaría comprobantes que sí podían borrarse.
+      .eq("empresa_id", empresaId)
       .order("id", { ascending: true })
       .range(d, h),
   );
@@ -212,7 +218,8 @@ async function idsConCobros(
  * usaba cuando no había nada protegido.
  */
 async function borrarComprobantes(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: ReturnType<typeof createAdminClient>,
+  empresaId: string,
   filtrar: (q: any) => any,
   errorMsg: string,
 ): Promise<BorradoResultado> {
@@ -224,7 +231,7 @@ async function borrarComprobantes(
   // ¿Cuáles de los protegidos caen dentro de este filtro? Se pregunta con un
   // `.in()` sobre los pocos protegidos, nunca sobre los miles a borrar.
   const protegidosAqui: string[] = [];
-  for (const parte of enLotes(await idsConCobros(supabase))) {
+  for (const parte of enLotes(await idsConCobros(supabase, empresaId))) {
     const { data } = await filtrar(
       supabase.from("comprobantes").select("id").in("id", parte),
     );
@@ -254,10 +261,17 @@ export async function deshacerImportacion(
   if (!empresa) return { ok: false, error: "Sesión no válida." };
   if (!lote) return { ok: false, error: "Falta indicar qué importación deshacer." };
 
-  const supabase = await createClient(); // RLS acota a la empresa
+  // ⚠️ `admin` + filtro explícito de empresa. Con el cliente de RLS, Postgres
+  // evalúa `es_miembro(empresa_id)` fila a fila: sobre 452.309 comprobantes eso
+  // se pasa del `statement_timeout` de 8 s y el borrado no llega a hacerse.
+  // El acotado no se pierde — se hace aquí, con la empresa de la sesión.
+  const supabase = createAdminClient();
   const res = await borrarComprobantes(
     supabase,
-    (q) => q.eq("lote_importacion", lote),
+    empresa.empresa_id,
+    // El `empresa_id` NO sobra aunque el lote sea único: con `admin` no hay RLS
+    // detrás, y este filtro es lo único que impide tocar otra empresa.
+    (q) => q.eq("empresa_id", empresa.empresa_id).eq("lote_importacion", lote),
     "No se pudo deshacer la importación.",
   );
   if (res.ok) revalidatePath("/comprobantes");
@@ -284,12 +298,22 @@ export async function vaciarComprobantes(
   const empresa = await getEmpresaActual();
   if (!empresa) return { ok: false, error: "Sesión no válida." };
 
-  const supabase = await createClient(); // RLS acota a la empresa
+  // ⚠️ `admin` + filtro explícito de empresa. Con el cliente de RLS, Postgres
+  // evalúa `es_miembro(empresa_id)` fila a fila: sobre 452.309 comprobantes eso
+  // se pasa del `statement_timeout` de 8 s y el borrado no llega a hacerse.
+  // El acotado no se pierde — se hace aquí, con la empresa de la sesión.
+  const supabase = createAdminClient();
   const res = await borrarComprobantes(
     supabase,
-    // "Todos los de la empresa": RLS ya acota, el filtro solo evita un delete
-    // sin condición, que PostgREST rechaza.
-    (q) => q.not("id", "is", null),
+    empresa.empresa_id,
+    // ⚠️⚠️ ESTE FILTRO ES LA FRONTERA. Antes decía `not("id","is",null)` y el
+    // comentario explicaba que "RLS ya acota" — cierto con el cliente anon,
+    // FALSO con `admin`. Al cambiar de cliente por rendimiento, esa línea
+    // pasaba a borrar los comprobantes de TODAS las empresas del sistema.
+    //
+    // Moraleja: cuando una consulta se mueve de RLS a `service_role`, hay que
+    // reescribir a mano cada condición que RLS estaba poniendo por debajo.
+    (q) => q.eq("empresa_id", empresa.empresa_id),
     "No se pudieron borrar los comprobantes.",
   );
   if (res.ok) revalidatePath("/comprobantes");

@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { notFound } from "next/navigation";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { getEmpresaActual } from "@/lib/auth";
 import { ImportadorComprobantes } from "@/components/wizard/ImportadorComprobantes";
 import { formatearFecha } from "@/lib/parsing/resumen";
 import { montoPEN } from "@/lib/suscripcion";
@@ -64,21 +66,39 @@ export default async function ComprobantesPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const sp = await searchParams;
-  const supabase = await createClient(); // RLS: solo la empresa del usuario
+  const empresa = await getEmpresaActual();
+  if (!empresa) notFound();
+
+  // ⚠️ `admin` + filtro EXPLÍCITO de empresa, no el cliente de RLS.
+  //
+  // La política de `comprobantes` es `es_miembro(empresa_id)`: una función
+  // sobre una COLUMNA, que Postgres evalúa fila a fila. Con 452.309
+  // comprobantes tanto el conteo como el listado se pasan del
+  // `statement_timeout` de 8 s, y la página tardaba un minuto para no mostrar
+  // nada. Con la igualdad por `empresa_id` el índice hace su trabajo.
+  //
+  // El acotado por empresa no se pierde: se hace aquí, con la empresa de la
+  // sesión, y es la misma condición que evaluaba RLS.
+  const supabase = createAdminClient();
   // El total EXACTO va aparte: la lista se queda en 500 a propósito, pero
   // "Empezar de cero" borra todos. Decía "se borrarán 500" con 20.000 en la
   // base — el mismo error de contar filas traídas en vez de preguntar cuántas
   // hay.
   const { count: totalReal } = await supabase
     .from("comprobantes")
-    .select("id", { count: "exact", head: true });
+    .select("id", { count: "exact", head: true })
+    .eq("empresa_id", empresa.empresa_id);
 
   const { data } = await supabase
     .from("comprobantes")
     .select(
       "id, fecha, fecha_vencimiento, monto, saldo, tipo, estado, serie_numero, razon_social_contraparte",
     )
+    .eq("empresa_id", empresa.empresa_id)
     .order("fecha", { ascending: false })
+    // Desempate: sin columna única, dos ejecuciones pueden devolver conjuntos
+    // distintos cuando miles de filas comparten fecha.
+    .order("id", { ascending: false })
     .limit(500);
 
   const todas = (data ?? []) as Fila[];

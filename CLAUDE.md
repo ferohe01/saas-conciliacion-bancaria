@@ -922,6 +922,16 @@ frontera de seguridad.** Reglas al escribir una función así:
 - Verificado: sin sesión y como `anon`, **0 filas**; tras el revoke, permiso
   denegado. Y cada empresa ve solo sus cifras.
 
+⚠️⚠️ **Al mover una consulta de RLS a `service_role`, hay que reescribir a mano
+cada condición que RLS ponía por debajo.** Es el riesgo real de este remedio y
+casi cuesta caro: `vaciarComprobantes` filtraba con `not("id","is",null)` y un
+comentario que decía *"RLS ya acota"* — cierto con el cliente `anon`, **falso**
+con `admin`. Al cambiar de cliente por rendimiento, esa misma línea pasaba a
+borrar los comprobantes de **todas las empresas del sistema**.
+
+Regla: toda consulta con `admin` lleva su `.eq("empresa_id", …)` explícito,
+aunque el otro filtro parezca bastar.
+
 **Dónde más aplica:** cualquier consulta que recorra muchas filas de una tabla
 con RLS paga este peaje. Si algo va inexplicablemente lento a volumen, medir la
 misma consulta como `postgres` antes de buscar en otro sitio.
