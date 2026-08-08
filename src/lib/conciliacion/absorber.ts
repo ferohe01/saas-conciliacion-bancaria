@@ -57,7 +57,15 @@ export async function absorberResultado(
   const parsed = ResultadoConciliacion.safeParse(job.resultado);
   if (!parsed.success) return { absorbidos: 0, sinCambios: true };
   const resultado = parsed.data;
-  if (resultado.matches.length === 0) return { absorbidos: 0, sinCambios: true };
+
+  // ⚠️ NO se sale aquí cuando n8n no devolvió matches.
+  //
+  // El resumen que escribe n8n cuenta solo lo que ÉL vio: el residuo. En una
+  // corrida donde la IA no propuso nada, salir antes dejaba
+  // `total_internos: 4.382` en una conciliación de 452.177 — y la pantalla
+  // pintaba "0 % emparejado" sobre un 99 % real.
+  //
+  // Absorber matches es opcional; **corregir los totales no lo es**.
 
   const payload = (job.payload_entrada ?? {}) as PayloadGuardado;
   const porInterno = new Map(
@@ -92,13 +100,15 @@ export async function absorberResultado(
 
   // Reentrante: se borra lo que no sea de la capa exacta y se reescribe. La
   // capa exacta la escribió `conciliar_exacta` y no se toca.
-  const { error: errBorrado } = await admin
-    .from("matches_conciliacion")
-    .delete()
-    .eq("job_id", jobId)
-    .neq("metodo", "exacta");
-  if (errBorrado) {
-    throw new Error(`No se pudieron limpiar los matches previos: ${errBorrado.message}`);
+  if (filas.length > 0) {
+    const { error: errBorrado } = await admin
+      .from("matches_conciliacion")
+      .delete()
+      .eq("job_id", jobId)
+      .neq("metodo", "exacta");
+    if (errBorrado) {
+      throw new Error(`No se pudieron limpiar los matches previos: ${errBorrado.message}`);
+    }
   }
 
   // Por lotes y comprobando el error de cada uno: con el `statement_timeout` de
@@ -114,28 +124,34 @@ export async function absorberResultado(
     absorbidos += parte.length;
   }
 
-  // El JSONB se queda sin `matches`: ya no es su sitio. Conserva el resumen y
-  // el cuadre, que son de tamaño fijo.
-  const { count: exactos } = await admin
-    .from("matches_conciliacion")
-    .select("id", { count: "exact", head: true })
-    .eq("job_id", jobId)
-    .eq("metodo", "exacta");
+  // ── El resumen, recalculado desde la VERDAD y no incrementalmente ────────
+  //
+  // ⚠️ Los totales se piden a `totales_conciliacion`, no se suman a lo que
+  // había. Sumar sería correcto una vez y erróneo dos: esta función la llama la
+  // pantalla en cada carga, y un incremento se aplicaría cada vez.
+  const [tot, exactos, difusos, ia] = await Promise.all([
+    admin.rpc("totales_conciliacion", { p_job_id: jobId }),
+    contarPorMetodo(admin, jobId, "exacta"),
+    contarPorMetodo(admin, jobId, "difusa"),
+    contarPorMetodo(admin, jobId, "ia"),
+  ]);
+  const totales = (tot.data as { internos: number; movimientos: number }[])?.[0];
 
   const { error: errJob } = await admin
     .from("jobs_conciliacion")
     .update({
       resultado: {
         ...resultado,
+        // El JSONB se queda sin `matches`: ya no es su sitio. Conserva el
+        // resumen y el cuadre, que son de tamaño fijo.
         matches: [],
         resumen: {
           ...resultado.resumen,
-          // n8n solo vio el residuo, así que su cuenta de exactas ignora las
-          // que resolvió el SQL. Sin sumarlas, la pantalla diría que se
-          // conciliaron 12 de 452.177.
-          conciliados_exactos: (exactos ?? 0),
-          total_internos: (exactos ?? 0) + resultado.resumen.total_internos,
-          total_bancarios: (exactos ?? 0) + resultado.resumen.total_bancarios,
+          total_internos: Number(totales?.internos ?? resultado.resumen.total_internos),
+          total_bancarios: Number(totales?.movimientos ?? resultado.resumen.total_bancarios),
+          conciliados_exactos: exactos,
+          conciliados_difusos: difusos,
+          sugeridos_ia: ia,
         },
       },
     })
@@ -145,4 +161,17 @@ export async function absorberResultado(
   }
 
   return { absorbidos, sinCambios: false };
+}
+
+async function contarPorMetodo(
+  admin: ReturnType<typeof createAdminClient>,
+  jobId: string,
+  metodo: string,
+): Promise<number> {
+  const { count } = await admin
+    .from("matches_conciliacion")
+    .select("id", { count: "exact", head: true })
+    .eq("job_id", jobId)
+    .eq("metodo", metodo);
+  return count ?? 0;
 }
