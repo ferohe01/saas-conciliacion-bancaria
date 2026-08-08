@@ -487,7 +487,26 @@ export function WizardContainer({
           setError(data.error ?? "No se pudo iniciar la conciliación.");
           return;
         }
-        const data = (await res.json()) as { job_id: string };
+        const data = (await res.json()) as {
+          job_id: string;
+          idempotente?: boolean;
+        };
+
+        // ⚠️ El backend NO crea un job nuevo si ya hay uno en vuelo para esta
+        // cuenta y período: devuelve el que existe. Es lo correcto —dos clics
+        // no deben lanzar dos conciliaciones— pero navegar en silencio hacia él
+        // hace creer que se lanzó algo.
+        //
+        // Pasó de verdad: el usuario aterrizó en una conciliación de hacía 17
+        // minutos, leyó "lleva 17 minutos, más de lo habitual" sobre un botón
+        // que acababa de pulsar, y concluyó que el sistema estaba roto.
+        if (data.idempotente) {
+          setAviso(
+            "Ya hay una conciliación de este período en marcha. Te llevamos a ella en vez de lanzar otra.",
+          );
+          setTimeout(() => router.push(`/conciliacion/${data.job_id}`), 2500);
+          return;
+        }
         router.push(`/conciliacion/${data.job_id}`);
       } catch {
         setError(
