@@ -11,6 +11,8 @@ import { CandadoIcon, ChevronIcon } from "./icons";
 import { createClient } from "@/lib/supabase/client";
 import { mesesRecientes, periodoDeRango, VALOR_RANGO } from "@/lib/periodo";
 import { previsualizarArchivo, type ArchivoProcesado } from "@/lib/parsing/procesar";
+import { detectarSaldoFinal } from "@/lib/parsing/saldo";
+import { validarCoherencia } from "@/lib/parsing/coherencia";
 import { formatearPEN, formatearFecha } from "@/lib/parsing/resumen";
 import { normalizarMonto } from "@/lib/normalizacion/monto";
 import type { MapeoColumnas } from "@/lib/parsing/deteccion";
@@ -115,17 +117,30 @@ function SelectField({
 /**
  * Lo que se enseña del archivo recién elegido.
  *
- * Ya no lleva conteos ni sumas: de este archivo solo se han leído las primeras
- * filas, y contar sobre ellas daría una cifra plausible y falsa. Los totales
- * aparecen en el Paso 3, con lo que devolvió el servidor tras leerlo entero.
+ * Con `resumen` hay cifras porque se leyó entero; sin él el archivo era grande
+ * y solo se leyeron las primeras filas, así que **no se cuenta nada**: una
+ * cifra sacada de 500 filas es plausible y falsa, y aquí lo honesto es decir
+ * cuándo llegarán los totales de verdad.
  */
-function resumenParaZona(p: ArchivoProcesado): ArchivoResumen {
+function resumenParaZona(p: ArchivoProcesado, moneda: string): ArchivoResumen {
+  if (p.formato === "pdf") {
+    return { nombre: p.nombre, total: "PDF · se procesará al conciliar" };
+  }
+  if (!p.resumen) {
+    return {
+      nombre: p.nombre,
+      total: "Archivo grande · los totales se calculan al confirmar las columnas",
+    };
+  }
+  const r = p.resumen;
   return {
     nombre: p.nombre,
-    total:
-      p.formato === "pdf"
-        ? "PDF · se procesará al conciliar"
-        : "Se leerá completo al confirmar las columnas",
+    registros: r.registros,
+    total: formatearPEN(r.sumaTotal, moneda),
+    rangoFechas:
+      r.fechaMin && r.fechaMax
+        ? `${formatearFecha(r.fechaMin)} – ${formatearFecha(r.fechaMax)}`
+        : undefined,
   };
 }
 
@@ -218,10 +233,21 @@ export function WizardContainer({
   const cuenta = cuentas.find((c) => c.id === cuentaId);
   const moneda = cuenta?.moneda ?? "PEN";
 
-  // La coherencia con el período la cuenta el SERVIDOR al importar
-  // (`fuera_de_periodo`), porque es quien ve todas las fechas. Calcularla sobre
-  // las primeras 500 filas daría por bueno un archivo entero mirando su
-  // cabecera, que es justo el error que este aviso existe para evitar.
+  /**
+   * Aviso de "este archivo no parece del período", en el Paso 1.
+   *
+   * Solo existe cuando el archivo era pequeño y se leyó entero. Con uno grande
+   * el navegador ve las primeras 500 filas, y darlo por bueno mirando su
+   * cabecera es exactamente el error que este aviso evita — así que ahí calla y
+   * lo cuenta el servidor al importar (`fuera_de_periodo`, en el Paso 3).
+   */
+  const coherenciaExtracto = useMemo(
+    () =>
+      extracto?.resumen && periodo
+        ? validarCoherencia(extracto.resumen.fechasISO, periodo)
+        : null,
+    [extracto, periodo],
+  );
 
   // Los comprobantes del período son la única fuente de registros internos, así
   // que su resumen se consulta siempre: es lo que dice si hay materia que
@@ -305,12 +331,21 @@ export function WizardContainer({
       // Solo la cabecera: lo justo para reconocer las columnas. Leer el archivo
       // entero aquí es lo que impedía cargar un extracto de 26 MB, y no hace
       // falta — el que lo procesa es el servidor.
-      const proc = await previsualizarArchivo(file);
+      const proc = await previsualizarArchivo(file, periodo);
       setExtracto(proc);
       setArchivoExtracto(file);
       setMapeoExtracto(
         elegirMapeo(proc.mapeo, cuenta?.mapeo_columnas?.extracto, proc.headers),
       );
+      // Autodetectar el saldo final SOLO si se leyó el archivo entero. Con un
+      // archivo grande el navegador ve las primeras 500 filas, así que
+      // detectaría el saldo de la fila 500 creyendo que es el último — y un
+      // saldo final equivocado corrompe el cuadre sin que se note. En ese caso
+      // lo detecta el servidor al importar, que sí ve la última.
+      if (proc.resumen && saldoExtFin.trim() === "") {
+        const detectado = detectarSaldoFinal(proc.headers, proc.filas);
+        if (detectado != null) setSaldoExtFin(String(detectado));
+      }
     } catch {
       setExtracto(null);
       setArchivoExtracto(null);
@@ -720,9 +755,14 @@ export function WizardContainer({
                 formatos="Excel, CSV o PDF"
                 bancos="BCP, BBVA, Interbank, Scotiabank"
                 accept=".xlsx,.xls,.csv,.pdf"
-                resumen={extracto ? resumenParaZona(extracto) : null}
+                resumen={extracto ? resumenParaZona(extracto, moneda) : null}
                 onArchivo={cargarExtracto}
               />
+              {coherenciaExtracto?.advertir && (
+                <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                  ⚠️ {coherenciaExtracto.mensaje}
+                </p>
+              )}
             </div>
           </div>
 

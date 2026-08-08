@@ -70,18 +70,36 @@ export async function procesarArchivo(
 }
 
 /**
- * Previsualización para el Paso 2: SOLO las primeras filas.
+ * Cuándo el navegador puede permitirse leer el archivo entero.
  *
- * El mapeo de columnas necesita ejemplos, no el archivo entero. Leerlo entero
- * era lo que impedía cargar un extracto de 26 MB en el navegador — y no hace
- * falta, porque quien lo procesa es el servidor.
+ * Por debajo de esto, leerlo cuesta poco y el Paso 1 puede enseñar de golpe
+ * cuántos movimientos hay, cuánto suman, qué rango cubren y si el archivo
+ * parece de otro período. Ese resumen inmediato es lo que hace que una PyME
+ * detecte al instante que subió el extracto equivocado, y vale la pena
+ * conservarlo.
  *
- * ⚠️ `resumen` viene en `null` a propósito: contar y sumar sobre las primeras
- * 500 filas daría cifras plausibles y falsas. Los totales, el rango de fechas y
- * el saldo final los devuelve `/api/extracto/importar`, que lo ve completo.
+ * Por encima —una recaudadora con 450.000 movimientos son 26 MB— no se puede:
+ * abrirlo entero agota la memoria del navegador. Ahí se leen solo las primeras
+ * filas y los totales los devuelve el servidor al importarlo.
+ */
+export const BYTES_RESUMEN_INMEDIATO = 8 * 1024 * 1024;
+
+/**
+ * Previsualización para el Paso 2.
+ *
+ * ⚠️ La bifurcación es SOLO de previsualización. Los dos tamaños suben el
+ * archivo al servidor igual y concilian por el mismo camino: lo único que
+ * cambia es cuánto alcanza a enseñar el navegador antes. Si el tamaño decidiera
+ * también cómo se procesa, habría dos motores que mantener y una clase entera
+ * de fallos que solo aparecen con archivos grandes.
+ *
+ * Cuando `resumen` viene `null` es que el archivo era grande: contar o sumar
+ * sobre las primeras 500 filas daría cifras plausibles y falsas, así que no se
+ * calculan. Los totales reales llegan de `/api/extracto/importar`.
  */
 export async function previsualizarArchivo(
   file: File,
+  periodo: { desde: string; hasta: string },
 ): Promise<ArchivoProcesado> {
   if (esPDF(file.name)) {
     return {
@@ -95,6 +113,9 @@ export async function previsualizarArchivo(
       mapeo: {}, resumen: null, coherencia: null,
     };
   }
+
+  // Archivo pequeño: se lee entero y el Paso 1 enseña el resumen completo.
+  if (file.size <= BYTES_RESUMEN_INMEDIATO) return procesarArchivo(file, periodo);
 
   const { headers, filas } = await leerCabecera(file);
   return {
