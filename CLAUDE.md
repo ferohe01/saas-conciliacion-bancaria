@@ -294,6 +294,24 @@ Medido con 20.000 × 20.000: **de abortar a los 30 s a 493 ms.**
 calcula dentro del bucle del otro. A 2.000 partidas no se nota; a 20.000 tumba
 el runner, y el error no dice dónde.
 
+⚠️ **`03a_agrupacion.js` cayó en lo mismo, y por partida doble.** Sus tokens sí
+estaban precalculados —lección aprendida— pero `dias()` llamaba a `Date.parse`
+**dos veces por par**: con 4.382 × 3.204 pendientes son 28 millones de parseos,
+y el `.sort()` volvía a llamarlo. Además cada objetivo recorría la lista entera
+de candidatos.
+
+El prefiltro exige compartir REFERENCIA o una palabra, así que eso se indexa:
+un `Map` por referencia y otro por palabra convierten el recorrido en una
+búsqueda. **No cambia la semántica** —el conjunto que sale de los índices es
+exactamente el que pasaba el filtro— y para reproducir el mismo orden de empate
+los candidatos se reordenan por su posición original antes del criterio de
+fecha. Verificado contra la versión anterior: **731 agrupaciones idénticas**,
+de 1,33 s a 0,19 s; con el residuo real, 0,05 s.
+
+Moraleja: precalcular los tokens no basta si queda **otra** cosa cara dentro del
+bucle. Al optimizar uno de estos nodos hay que mirar TODO lo que se evalúa por
+par, no solo lo que se arregló la vez anterior.
+
 #### Los nodos `.js` no los revisaba nada — ahora sí (mínimo)
 
 Son la **fuente única** del motor pero viven fuera del typecheck (son `.js`

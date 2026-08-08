@@ -37,7 +37,11 @@ const comunesEntre = (a, b) => {
 // MISMO codigo de operacion, esa es una identidad mas fuerte que un nombre.
 const normRef = (r) => String(r ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 const compartenPalabra = (a, b) => { for (const w of a) if (b.has(w)) return true; return false; };
-const dias = (a, b) => Math.abs((Date.parse(a) - Date.parse(b)) / 86400000);
+// Sobre timestamps YA parseados. La version anterior recibia cadenas y llamaba
+// a Date.parse dos veces POR PAR: con 4.382 x 3.204 pendientes son 28 millones
+// de parseos, y el runner de n8n aborta por inactividad a los 30 s. Mismo
+// defecto que tenia 02_difusa.js.
+const diasTs = (a, b) => Math.abs((a - b) / 86400000);
 
 function* combinaciones(items, maxT) {
   const n = items.length;
@@ -52,6 +56,28 @@ function* combinaciones(items, maxT) {
 function agrupar(unos, muchos) {
   const usados = new Set();
   const grupos = [];
+
+  // Indices del prefiltro. El candidato tiene que compartir la REFERENCIA o al
+  // menos una palabra, asi que no hace falta recorrer los otros: se buscan.
+  // Sin esto cada objetivo recorria los miles de candidatos enteros.
+  //
+  // No cambia la semantica: el conjunto que sale de los indices es exactamente
+  // el que pasaba el prefiltro. Lo que cambia es cuantos se miran para
+  // encontrarlo.
+  const porRef = new Map();
+  const porPalabra = new Map();
+  muchos.forEach((m, i) => {
+    m.i = i; // posicion original, para reproducir el orden de antes
+    if (m.ref) {
+      if (!porRef.has(m.ref)) porRef.set(m.ref, []);
+      porRef.get(m.ref).push(m);
+    }
+    for (const w of m.pal) {
+      if (!porPalabra.has(w)) porPalabra.set(w, []);
+      porPalabra.get(w).push(m);
+    }
+  });
+
   for (const t of unos) {
     // Prefiltro de identidad: cada candidato debe compartir con el objetivo la
     // REFERENCIA o al menos una palabra del nombre. Sin prefiltro, un subset-sum
@@ -63,11 +89,26 @@ function agrupar(unos, muchos) {
     // codigo de operacion. Exigir nombre alli hacia imposible la agrupacion — y
     // eran justo los casos 1:N que hay que conciliar. Es el mismo criterio que
     // ya usa ia_llm_01_candidatos.js, donde compartir referencia basta.
-    const cands = muchos
+    const vistos = new Set();
+    const posibles = [];
+    const juntar = (lista) => {
+      if (!lista) return;
+      for (const m of lista) {
+        if (vistos.has(m.i)) continue;
+        vistos.add(m.i);
+        posibles.push(m);
+      }
+    };
+    if (t.ref) juntar(porRef.get(t.ref));
+    for (const w of t.pal) juntar(porPalabra.get(w));
+
+    const cands = posibles
       .filter((m) => !usados.has(m.id) && Math.sign(m.monto) === Math.sign(t.monto) &&
-        Math.abs(m.monto) <= Math.abs(t.monto) + tolSum && dias(t.fecha, m.fecha) <= ventana &&
-        ((m.ref && m.ref === t.ref) || compartenPalabra(m.pal, t.pal)))
-      .sort((a, b) => dias(t.fecha, a.fecha) - dias(t.fecha, b.fecha))
+        Math.abs(m.monto) <= Math.abs(t.monto) + tolSum && diasTs(t.ts, m.ts) <= ventana)
+      // Por posicion original primero: asi el orden de empate es el mismo que
+      // cuando se recorria la lista entera, y el resultado no cambia.
+      .sort((a, b) => a.i - b.i)
+      .sort((a, b) => diasTs(t.ts, a.ts) - diasTs(t.ts, b.ts))
       .slice(0, 12);
     if (cands.length < 2) continue;
     let mejor = null;
@@ -96,12 +137,12 @@ function agrupar(unos, muchos) {
 // n8n por inactividad (mismo fallo que tenia 02_difusa.js).
 const itemInt = (r) => {
   const texto = r.contraparte ?? r.descripcion ?? null;
-  return { id: r.id_interno, monto: r.monto, fecha: r.fecha, texto,
+  return { id: r.id_interno, monto: r.monto, fecha: r.fecha, texto, ts: Date.parse(r.fecha),
            pal: new Set(palabras(texto)), ref: normRef(r.referencia) };
 };
 const itemBanc = (m) => {
   const texto = m.glosa ?? null;
-  return { id: m.id_movimiento, monto: m.monto, fecha: m.fecha, texto,
+  return { id: m.id_movimiento, monto: m.monto, fecha: m.fecha, texto, ts: Date.parse(m.fecha),
            pal: new Set(palabras(texto)), ref: normRef(m.referencia_banco) };
 };
 
