@@ -46,11 +46,14 @@ export function ZonaComprobantes({
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [arrastrando, setArrastrando] = useState(false);
+  /** Solo para explicar la espera: por encima de esto lo lee el servidor. */
+  const [grande, setGrande] = useState(false);
 
   const subir = (file: File | undefined) => {
     if (!file) return;
     setError(null);
     setAviso(null);
+    setGrande(file.size > AVISO_GRANDE);
     startSubida(async () => {
       const cuerpo = new FormData();
       cuerpo.append("archivo", file);
@@ -111,16 +114,6 @@ export function ZonaComprobantes({
         e.target.value = "";
       }}
     />
-  );
-
-  const plantilla = (
-    <button
-      type="button"
-      onClick={() => void descargarPlantilla()}
-      className="text-xs font-medium text-blue-700 underline-offset-2 hover:underline"
-    >
-      Descargar plantilla
-    </button>
   );
 
   const mensajes = (
@@ -251,7 +244,7 @@ export function ZonaComprobantes({
           }
         }}
         className={[
-          "flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-8 text-center transition-colors",
+          "flex h-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-8 text-center transition-colors",
           arrastrando
             ? "border-blue-400 bg-blue-50"
             : "border-neutral-300 bg-white hover:border-neutral-400",
@@ -267,26 +260,46 @@ export function ZonaComprobantes({
             : resumen === null
               ? "Buscando los del período…"
               : "Arrastra el archivo o haz clic para buscar"}
+          {subiendo && grande && " los archivos grandes tardan un poco"}
         </p>
         <span className="mt-4 inline-flex items-center rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 shadow-sm hover:bg-neutral-50">
           Seleccionar archivo
         </span>
-        <p className="mt-3 text-xs text-neutral-500">
-          Excel o CSV · tus cobranzas y pagos
+        <p className="mt-3 text-xs text-neutral-600">
+          Excel o CSV · tus cobranzas y pagos del período
         </p>
-        {/* ⚠️ Con archivos grandes no hay previsualización: el navegador no
-            puede abrirlos y los lee el servidor por lotes. Decirlo aquí evita
-            que un minuto de espera parezca que se colgó. */}
-        <p className="mt-1 text-xs text-neutral-500">
-          Por encima de {Math.round(AVISO_GRANDE / 1024 / 1024)} MB se procesa en
-          el servidor y tarda un poco.
-        </p>
-        <span className="mt-2" onClick={(e) => e.stopPropagation()}>
-          {plantilla}
-        </span>
       </div>
       {mensajes}
       {input}
+    </div>
+  );
+}
+
+/**
+ * "¿No tienes sistema? Usa la plantilla" — solo la descarga.
+ *
+ * Subir la plantilla llena ya vive dentro de `ZonaComprobantes`, que es donde
+ * uno la busca; aquí queda el paso previo, el de quien todavía no tiene un
+ * archivo que soltar. Dejar los dos botones juntos abajo era lo que rompía la
+ * simetría de la pantalla.
+ */
+export function AyudaPlantilla() {
+  return (
+    <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+      <p className="text-sm font-medium text-neutral-800">
+        ¿No tienes sistema? Usa la plantilla
+      </p>
+      <p className="mt-1 text-sm text-neutral-500">
+        Descárgala, llénala con tus cobranzas y pagos, y súbela arriba en
+        «Comprobantes del período».
+      </p>
+      <button
+        type="button"
+        onClick={() => void descargarPlantilla()}
+        className="mt-3 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-800 transition-colors hover:bg-neutral-50"
+      >
+        Descargar plantilla
+      </button>
     </div>
   );
 }

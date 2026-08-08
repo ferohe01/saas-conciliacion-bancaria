@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { Stepper, type PasoWizard } from "./Stepper";
 import { UploadZone, type ArchivoResumen } from "./UploadZone";
-import { ZonaComprobantes } from "./ZonaComprobantes";
+import { ZonaComprobantes, AyudaPlantilla } from "./ZonaComprobantes";
 import { MapeoDataset } from "./MapeoDataset";
 import { CandadoIcon, ChevronIcon, DocumentoIcon } from "./icons";
 import { createClient } from "@/lib/supabase/client";
@@ -750,6 +750,12 @@ export function WizardContainer({
               )}
             </div>
           </div>
+
+          {fuente === "comprobantes" && (
+            <div className="mt-4">
+              <AyudaPlantilla />
+            </div>
+          )}
 
           <div className="mt-6 grid gap-4 sm:grid-cols-3">
             <label className="block">
