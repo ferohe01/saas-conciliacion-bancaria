@@ -53,6 +53,14 @@ const IconoNueva = (p: IconProps) => <Ico {...p} d={["M12 5v14", "M5 12h14"]} />
 const IconoHistorial = (p: IconProps) => (
   <Ico {...p} d={["M3 12a9 9 0 1 0 3-6.7", "M3 4v4h4", "M12 8v4l3 2"]} />
 );
+const IconoResumen = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+       strokeLinecap="round" strokeLinejoin="round" {...p}>
+    <path d="M3 3v18h18" />
+    <path d="M7 15l4-5 3 3 5-7" />
+  </svg>
+);
+
 const IconoReportes = (p: IconProps) => (
   <Ico {...p} d={["M4 19h16", "M7 16V9", "M12 16V5", "M17 16v-4"]} />
 );
@@ -114,6 +122,10 @@ const ENLACES: Enlace[] = [
   { href: "/cobranzas", label: "Por cobrar", Icono: IconoCobranzas, modulo: "cobranzas" },
   { href: "/pagos", label: "Por pagar", Icono: IconoPagar, modulo: "cobranzas" },
   { href: "/reportes", label: "Reportes", Icono: IconoReportes },
+  // Debajo de Reportes y no dentro: responden preguntas distintas y las hacen
+  // personas distintas. Reportes es "cómo fue la conciliación"; esto es "cómo
+  // está la empresa", y lo mira quien decide.
+  { href: "/resumen", label: "Resumen ejecutivo", Icono: IconoResumen },
   // Núcleo, no módulo contratable: es el diferenciador del producto y no debe
   // vivir detrás de una puerta.
   { href: "/aprendizaje", label: "Aprendizaje IA", Icono: IconoAprendizaje },

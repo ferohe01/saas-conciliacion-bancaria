@@ -1504,6 +1504,44 @@ razonable. El motor aguantaba lo que la pantalla no dejaba pedir.
     conciliación y el balance aceptados/rechazados del pool. Versión compacta y
     enlazable también en `/dashboard`. Ver nota de arquitectura abajo.
 
+## Resumen ejecutivo (`/resumen`)
+
+Los reportes responden *cómo fue la conciliación*; esto responde *cómo está la
+empresa*. Es otra pregunta y la hace otra persona: quien decide si puede pagar
+la planilla, a quién reclamar, y si puede fiarse de sus propios saldos. Por eso
+va **debajo** de Reportes en la navegación y no dentro.
+
+⚠️ **DOS RELOJES, y confundirlos hace mentir al número.** Lo conciliado
+pertenece a un período; lo que te deben es una foto de **hoy**. Un "por cobrar
+de junio" no significa nada —o son las facturas emitidas en junio, que quizá ya
+se cobraron, o el saldo vivo, que no es de junio—. La pantalla los separa en dos
+bloques y lo dice con todas las letras.
+
+Orden deliberado: **dinero → confianza → detalle**. Empezar por métricas de
+proceso hace que el gerente cierre la pestaña.
+
+- **La posición neta se muestra, pero nunca sola.** El aging jamás mezcla cobrar
+  con pagar —ahí es correcto: se gestionan distinto— pero aquí la pregunta *«si
+  todo se cobra y todo se paga, ¿me queda a favor?»* sí existe y es de
+  dirección. Lo que la cifra **no** dice es el calendario: cobrar a 90 días y
+  pagar a 30 da neto positivo y aun así te deja sin caja. La pantalla lo advierte
+  junto al número.
+- **Solo cuenta lo APROBADO**, y avisa de las conciliaciones terminadas sin
+  aprobar: su trabajo está hecho pero no ha movido un céntimo, y callarlo daría
+  a entender que se perdió.
+- **`porcentajeAutomatizado` devuelve `null`, no `0`**, cuando no hubo partidas.
+  0% diría "no automatizó nada"; null dice "no había nada que automatizar". Son
+  dos conversaciones distintas con el dueño.
+- Todo se agrega en la base (`resumen_ejecutivo`, migración `0032`): con 452.309
+  comprobantes, traerlos para sumarlos en Node es lo que la parte B eliminó.
+
+⚠️ **`0033` existe por un efecto de segundo orden que casi pasa desapercibido.**
+El total de partidas de una conciliación salía de contar comprobantes *no
+cobrados*; al aprobar, 447.795 pasaban a `cobrado` y el total se desplomaba de
+452.177 a 4.382. El resumen **se degradaba solo**, y como la pantalla recalcula
+en cada carga, el número empeoraba cada vez que alguien lo miraba. Ahora se
+cuenta lo que la conciliación TOCÓ, que ya no cambia.
+
 ## Aprendizaje IA: sección propia y de núcleo
 
 `/aprendizaje` es el **diferenciador comercial** del producto: no concilia mejor

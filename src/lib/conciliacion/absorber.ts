@@ -130,12 +130,25 @@ export async function absorberResultado(
   // había. Sumar sería correcto una vez y erróneo dos: esta función la llama la
   // pantalla en cada carga, y un incremento se aplicaría cada vez.
   const [tot, exactos, difusos, ia] = await Promise.all([
-    admin.rpc("totales_conciliacion", { p_job_id: jobId }),
+    // ⚠️ Las partidas que la conciliación TOCÓ, no las que hoy siguen sin
+    // cobrar. `totales_conciliacion` cuenta comprobantes no cobrados: al
+    // aprobar, 447.795 pasan a `cobrado` y el total se desplomaba de 452.177 a
+    // 4.382. Como esta función corre en cada carga de la pantalla, el número
+    // empeoraba cada vez que alguien lo miraba.
+    admin.rpc("partidas_conciliadas_job", { p_job_id: jobId }),
     contarPorMetodo(admin, jobId, "exacta"),
     contarPorMetodo(admin, jobId, "difusa"),
     contarPorMetodo(admin, jobId, "ia"),
   ]);
-  const totales = (tot.data as { internos: number; movimientos: number }[])?.[0];
+  const cubiertas = (tot.data as { internos: number; movimientos: number }[])?.[0];
+  // Total del período = lo emparejado + lo que quedó suelto. Los sueltos los
+  // cuenta n8n sobre el residuo, que es exactamente lo que sobró del período.
+  const totales = cubiertas
+    ? {
+        internos: Number(cubiertas.internos) + resultado.resumen.sin_conciliar_internos,
+        movimientos: Number(cubiertas.movimientos) + resultado.resumen.sin_conciliar_bancarios,
+      }
+    : null;
 
   const { error: errJob } = await admin
     .from("jobs_conciliacion")
