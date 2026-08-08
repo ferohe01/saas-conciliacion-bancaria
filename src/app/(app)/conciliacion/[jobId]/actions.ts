@@ -168,6 +168,62 @@ async function guardar(jobId: string, resultado: ResultadoConciliacion) {
  * irreemplazable; se registra para poder reconstruirlo.
  */
 /**
+ * Reparto de cobros cuando los pares viven en `matches_conciliacion`.
+ *
+ * Tres pasos, y el orden importa: primero se retira lo que dejó de estar
+ * confirmado (si no, un rechazo seguiría descontando saldo), y después se
+ * escribe lo que falta.
+ *
+ * ⚠️ **Por lotes, obligatoriamente.** Escribir las 447.795 de una vez tarda
+ * 2 min 24 s —cada fila dispara el trigger que recalcula el saldo— y el
+ * `statement_timeout` con el que PostgREST ejecuta es de **8 segundos**: la
+ * llamada entera se cancelaría y no se escribiría nada. Lotes de 5.000 van a
+ * ~2,7 s y no se degradan.
+ *
+ * ⚠️ El residuo (pagos parciales, agrupaciones 1:N, comisiones absorbidas) NO
+ * pasa por aquí: esa aritmética decide cuánto dinero se le descuenta a quién y
+ * vive en `src/lib/cobranzas.ts`, que es puro y tiene tests. Son unos miles de
+ * pares, así que no hay razón de rendimiento para duplicarla en SQL — y sí una
+ * muy buena para no hacerlo.
+ */
+const LOTE_COBROS = 5000;
+/** Techo de seguridad: 450.000 pares son 90 vueltas. Si se pasa de esto, algo
+ *  va mal y es mejor parar que girar para siempre. */
+const MAX_VUELTAS_COBROS = 500;
+
+async function aplicarCobrosModoTabla(
+  jobId: string,
+  admin: ReturnType<typeof createAdminClient>,
+): Promise<SincronizacionCobros> {
+  const limpieza = await admin.rpc("limpiar_cobros_desconfirmados", {
+    p_job_id: jobId,
+  });
+  if (limpieza.error) {
+    console.error(`[cobranzas] no se pudo limpiar ${jobId}:`, limpieza.error);
+    return { ok: false, aplicadas: 0 };
+  }
+
+  let aplicadas = 0;
+  for (let vuelta = 0; vuelta < MAX_VUELTAS_COBROS; vuelta++) {
+    const { data, error } = await admin.rpc("aplicar_cobros_exactos", {
+      p_job_id: jobId,
+      p_limite: LOTE_COBROS,
+    });
+    if (error) {
+      console.error(`[cobranzas] fallo aplicando cobros de ${jobId}:`, error);
+      // Se devuelve lo que SÍ entró: el saldo queda a medias y quien llama
+      // tiene que poder decirlo en vez de dar el cobro por hecho.
+      return { ok: false, aplicadas };
+    }
+    const n = Number(data ?? 0);
+    if (n === 0) return { ok: true, aplicadas };
+    aplicadas += n;
+  }
+  console.error(`[cobranzas] ${jobId} no terminó de aplicar en ${MAX_VUELTAS_COBROS} vueltas`);
+  return { ok: false, aplicadas };
+}
+
+/**
  * Cuánto le queda por cobrar a cada comprobante del payload, descontando lo que
  * han aplicado OTROS jobs y no este.
  *
@@ -277,21 +333,18 @@ async function sincronizarCobranzas(
       return { ok: true, aplicadas: 0 };
     }
 
-    // ⚠️⚠️ EN MODO TABLA NO SE TOCA EL SALDO DESDE AQUI.
+    // ── Modo tabla: el reparto lo hace Postgres ─────────────────────────────
     //
-    // Esta funcion REEMPLAZA el conjunto completo de aplicaciones del job a
-    // partir de `resultado.matches`. En modo tabla ese array es una PAGINA de
-    // como mucho mil pares, no la conciliacion entera: rehacer las
-    // aplicaciones con eso borraria las de los otros 446.795 y dejaria medio
-    // millon de comprobantes figurando como no cobrados.
+    // No se puede pasar por el camino de abajo: ese REEMPLAZA el conjunto
+    // completo de aplicaciones a partir de `resultado.matches`, y en modo tabla
+    // ese array es una página de mil pares, no la conciliación entera. Rehacer
+    // con eso borraría las de los otros 446.795.
     //
-    // Hacerlo bien exige calcular el reparto en SQL, igual que la capa exacta:
-    // 447.795 aplicaciones no se escriben desde Node en un tiempo razonable
-    // (~900 peticiones). Hasta que exista esa via, se prefiere NO mover el
-    // saldo a moverlo mal — un cobro perdido se ve; uno borrado en masa se
-    // descubre semanas despues, cuando alguien mira Por cobrar.
+    // Aquí se toca solo lo que cambió y las exactas las escribe la base:
+    // 447.795 aplicaciones desde Node serían ~900 peticiones y un cuarto de
+    // hora; en SQL son lotes de 5.000 a ~2,7 s.
     if (job.lote_extracto_id) {
-      return { ok: false, aplicadas: 0 };
+      return aplicarCobrosModoTabla(jobId, admin);
     }
 
     const payload = job.payload_entrada as {

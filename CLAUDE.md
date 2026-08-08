@@ -714,8 +714,39 @@ Cuatro etapas, cada una desplegable por su cuenta:
 |---|---|---|
 | 1 | El extracto se persiste en `movimientos_extracto`, con ingesta por lotes | ✅ `0022` |
 | 2 | La capa exacta corre en SQL sobre las dos tablas | ✅ `0023` |
-| 3 | n8n recibe solo el **residuo** | pendiente |
-| 4 | La pantalla lee los matches de tabla en vez del JSONB | pendiente |
+| 3 | n8n recibe solo el **residuo** | ✅ `0024` |
+| 4 | La pantalla lee los matches de tabla en vez del JSONB | ✅ |
+| 5 | El reparto de cobros de la capa exacta, en SQL | ✅ `0025` |
+
+### El reparto de cobros (etapa 5)
+
+Aprobar descuenta el saldo de cada comprobante cobrado. Con 32.170 cobros ya
+tardaba ~90 s desde Node; con 447.795 serían ~900 peticiones y un cuarto de hora.
+
+**Solo las exactas van en SQL.** Son 1:1 y con el mismo importe por
+construcción, así que el factor de reparto es 1 y solo queda topar por saldo
+disponible. Los pagos parciales, las agrupaciones 1:N y las diferencias
+absorbidas siguen en `src/lib/cobranzas.ts` — esa aritmética decide cuánto
+dinero se le descuenta a quién, es pura, tiene tests, y son unos miles de pares:
+no hay razón de rendimiento para duplicarla y sí una muy buena para no hacerlo.
+
+⚠️ **Por lotes de 5.000, y el número no es decorativo.** De una vez tarda
+**2 min 24 s** —cada fila dispara el trigger de saldo de la `0008`— contra un
+`statement_timeout` de 8 s: la llamada entera se cancelaría sin escribir nada.
+
+⚠️⚠️ **El primer lote de 20.000 tardó 10 s y el segundo 60 s**, con el mismo
+trabajo por delante. El filtro "lo ya aplicado no se vuelve a mirar" busca por
+`(job_id, comprobante_id)` y el único índice era por `job_id`, así que cada lote
+recorría todo lo ya escrito. La clave única existente no sirve: su columna
+principal es `comprobante_id`. La `0025` añade
+`idx_aplicaciones_job_comprobante` y queda en ~2,7 s por lote, estable.
+
+**Y no se borra todo para rehacerlo.** `limpiar_cobros_desconfirmados` retira
+solo los pares que dejaron de estar confirmados; borrar las 447.795 tarda otros
+90 s y en régimen normal no cambia ninguna.
+
+Verificado sobre los 447.795 pares reales: **cero comprobantes con saldo
+negativo y cero con más aplicado que su importe**.
 
 ### La capa exacta como JOIN (etapa 2)
 
