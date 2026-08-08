@@ -269,7 +269,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No se pudo crear el job." }, { status: 500 });
     }
     try {
-      const residuo = await construirResiduo(admin, jobId);
+      const residuo = await construirResiduo(admin, jobId, MAX_FILAS);
       internos = residuo.registros_internos;
       bancarios = residuo.movimientos_bancarios;
       paresExactos = residuo.paresExactos;

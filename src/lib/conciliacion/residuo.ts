@@ -66,12 +66,31 @@ type FilaMovimiento = {
 export async function construirResiduo(
   admin: SupabaseClient,
   jobId: string,
+  maxFilas: number,
 ): Promise<Residuo> {
   const exacta = await admin.rpc("conciliar_exacta", { p_job_id: jobId });
   if (exacta.error) {
     throw new Error(`No se pudo correr la capa exacta: ${exacta.error.message}`);
   }
   const resumen = (exacta.data as { pares: number; internos: number; movimientos: number }[])?.[0];
+
+  // ⚠️ FRENO. El residuo se calcula ANTES de pedirlo: son los totales menos lo
+  // que casó, y eso ya lo devuelve `conciliar_exacta` sin coste añadido.
+  //
+  // Si la capa exacta no casa casi nada —pasa cuando el extracto llega sin
+  // columna de referencia— el "residuo" son TODAS las partidas. Sin este freno,
+  // el paginado intentaría traer 903.176 filas en 903 peticiones y el usuario
+  // vería el botón en "Iniciando" durante minutos antes de que n8n rechazara un
+  // payload de 175 MB. Fallar aquí, rápido y explicando por qué, es mejor.
+  const pares = Number(resumen?.pares ?? 0);
+  const faltanInt = Number(resumen?.internos ?? 0) - pares;
+  const faltanMov = Number(resumen?.movimientos ?? 0) - pares;
+  if (faltanInt > maxFilas || faltanMov > maxFilas) {
+    throw new Error(
+      `La conciliación automática solo pudo emparejar ${pares.toLocaleString("es-PE")} de ${Number(resumen?.internos ?? 0).toLocaleString("es-PE")} partidas, así que quedan ${Math.max(faltanInt, faltanMov).toLocaleString("es-PE")} para revisar y no caben en una sola corrida (el máximo es ${maxFilas.toLocaleString("es-PE")}). ` +
+        `La causa más habitual es que el extracto se cargó sin la columna de referencia o nº de operación: sin ella no se puede emparejar por código de pago. Vuelve al Paso 2 y comprueba ese mapeo.`,
+    );
+  }
 
   const [internos, movimientos] = await Promise.all([
     traerRpc<FilaInterno>(admin, "residuo_internos", jobId),
