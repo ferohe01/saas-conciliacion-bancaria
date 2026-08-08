@@ -315,3 +315,49 @@ describe("la cadena después de la IA aguanta el residuo", () => {
     expect(parseado.matches).toHaveLength(0);
   });
 });
+
+/**
+ * El cuadre tiene que contar las diferencias que quedan DENTRO de un par.
+ *
+ * Se descubrió con junio completo: el cuadre daba S/ 117.697,49 y la resta
+ * independiente de los dos lados S/ 117.717,49. Faltaban 20 soles exactos, que
+ * eran la diferencia de UN solo par propuesto por la IA entre 447.796.
+ *
+ * Con la capa exacta esto es siempre cero —casa por importe idéntico— y por eso
+ * el fallo estuvo escondido hasta que hubo medio millón de partidas.
+ */
+describe("cuadre: diferencias dentro de los pares", () => {
+  const correr = (entrada: unknown) =>
+    new Function("$json", readFileSync(join(DIR, "04_ensamblar.js"), "utf8"))(
+      entrada,
+    )[0].json.resultado_update.resultado.cuadre;
+
+  it("un par con diferencia entra en el cuadre", () => {
+    const c = correr({
+      job_id: "t",
+      metadata: { saldos: { saldo_extracto_final: 80, saldo_libros_final: 100 } },
+      total_internos: 1,
+      total_bancarios: 1,
+      // Comprobante de 100 casado con un depósito de 80.
+      matches: [{ ids_internos: ["R1"], ids_movimientos: ["B1"], metodo: "ia", diferencia_monto: 20 }],
+      pendientes_internos: [],
+      pendientes_bancarios: [],
+    });
+    expect(c.diferencias_emparejadas).toBe(20);
+    expect(c.diferencia).toBe(0);
+  });
+
+  it("los pares exactos no aportan nada, por construcción", () => {
+    const c = correr({
+      job_id: "t",
+      metadata: { saldos: { saldo_extracto_final: 100, saldo_libros_final: 100 } },
+      total_internos: 1,
+      total_bancarios: 1,
+      matches: [{ ids_internos: ["R1"], ids_movimientos: ["B1"], metodo: "exacta", diferencia_monto: 0 }],
+      pendientes_internos: [],
+      pendientes_bancarios: [],
+    });
+    expect(c.diferencias_emparejadas).toBe(0);
+    expect(c.diferencia).toBe(0);
+  });
+});

@@ -45,12 +45,23 @@ const chequesNoCobrados = pendInt.reduce((a, it) => a + (it.monto < 0 ? it.monto
 // estuviera explicada, que es justo lo que el cuadre existe para demostrar.
 const abonosNoRegistrados = pendBanc.reduce((a, bc) => a + (bc.monto > 0 ? bc.monto : 0), 0);
 const cargosNoRegistrados = pendBanc.reduce((a, bc) => a + (bc.monto < 0 ? bc.monto : 0), 0);
+// ⚠️ Las diferencias DENTRO de un par emparejado tambien son partidas
+// conciliatorias. Un comprobante de 100 casado con un deposito de 80 deja 20
+// sin explicar: los libros dicen 100 y el banco 80, y ninguno de los dos esta
+// "pendiente", asi que ese hueco se escapaba del cuadre.
+//
+// Con la capa exacta siempre es cero —casa por importe identico— y por eso no
+// se notaba. La difusa, la IA y la agrupacion si producen pares con diferencia.
+// Medido con junio completo: un solo par de la IA con 20 soles hacia que el
+// cuadre no cuadrara contra la resta de los dos lados.
+const difEmparejadas = matches.reduce((a, m) => a + Number(m.diferencia_monto ?? 0), 0);
 const saldoBancoAjustado =
   saldoExtractoFinal +
   depositosEnTransito +
   chequesNoCobrados -
   abonosNoRegistrados -
-  cargosNoRegistrados;
+  cargosNoRegistrados +
+  difEmparejadas;
 const saldoLibros = Number(saldos.saldo_libros_final ?? 0);
 
 const resultado = {
@@ -70,6 +81,7 @@ const resultado = {
     depositos_en_transito: r2(depositosEnTransito),
     cheques_no_cobrados: r2(chequesNoCobrados),
     abonos_no_registrados: r2(abonosNoRegistrados),
+    diferencias_emparejadas: r2(difEmparejadas),
     cargos_no_registrados: r2(cargosNoRegistrados),
     saldo_banco_ajustado: r2(saldoBancoAjustado),
     saldo_libros_final: r2(saldoLibros),

@@ -33,6 +33,11 @@ export function calcularCuadre(
   },
   pendientesInternos: { monto: number }[],
   pendientesBancarios: { monto: number }[],
+  /**
+   * Diferencias de importe DENTRO de los pares emparejados. Ninguna de sus dos
+   * partidas está pendiente, así que sin esto el hueco desaparece del cuadre.
+   */
+  diferenciasEmparejadas = 0,
 ): Cuadre {
   const saldoExtracto = Number(saldos.saldo_extracto_final ?? 0);
   const saldoLibros = Number(saldos.saldo_libros_final ?? 0);
@@ -50,7 +55,8 @@ export function calcularCuadre(
     depositosEnTransito +
     chequesNoCobrados -
     abonosNoRegistrados -
-    cargosNoRegistrados;
+    cargosNoRegistrados +
+    diferenciasEmparejadas;
 
   return {
     saldo_extracto_final: r2(saldoExtracto),
@@ -58,6 +64,7 @@ export function calcularCuadre(
     cheques_no_cobrados: r2(chequesNoCobrados),
     abonos_no_registrados: r2(abonosNoRegistrados),
     cargos_no_registrados: r2(cargosNoRegistrados),
+    diferencias_emparejadas: r2(diferenciasEmparejadas),
     saldo_banco_ajustado: r2(saldoBancoAjustado),
     saldo_libros_final: r2(saldoLibros),
     diferencia: r2(saldoBancoAjustado - saldoLibros),

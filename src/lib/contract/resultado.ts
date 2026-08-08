@@ -103,6 +103,19 @@ export const Cuadre = z.object({
    */
   abonos_no_registrados: Monto.default(0),
   cargos_no_registrados: Monto,
+  /**
+   * Suma de las diferencias de importe DENTRO de los pares emparejados.
+   *
+   * Un comprobante de 100 casado con un depósito de 80 deja 20 sin explicar, y
+   * ninguna de las dos partidas está "pendiente", así que ese hueco se escapaba
+   * del cuadre. Con la capa exacta siempre es cero —casa por importe idéntico—
+   * y por eso tardó en verse: hizo falta una conciliación de 452.177 partidas
+   * donde UN par de la IA con 20 soles descuadró el total.
+   *
+   * `default(0)`: los resultados guardados antes no lo traen. Ver
+   * `abonos_no_registrados`.
+   */
+  diferencias_emparejadas: Monto.default(0),
   saldo_banco_ajustado: Monto,
   saldo_libros_final: Monto,
   diferencia: Monto,

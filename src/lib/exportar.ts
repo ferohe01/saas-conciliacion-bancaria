@@ -25,6 +25,7 @@ export async function construirWorkbookResultado(
     { Concepto: "− Cheques no cobrados", Monto: c.cheques_no_cobrados },
     { Concepto: "− Abonos no registrados en libros", Monto: c.abonos_no_registrados },
     { Concepto: "+ Cargos no registrados en libros", Monto: c.cargos_no_registrados },
+    { Concepto: "± Diferencias en pares emparejados", Monto: c.diferencias_emparejadas },
     { Concepto: "= Saldo banco ajustado", Monto: c.saldo_banco_ajustado },
     { Concepto: "Saldo según libros", Monto: c.saldo_libros_final },
     { Concepto: "Diferencia", Monto: c.diferencia },

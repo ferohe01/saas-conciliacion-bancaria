@@ -1187,6 +1187,21 @@ Lo que estaba mal en `04_ensamblar.js`:
 Juntos hacían que **el cuadre no pudiera cerrar aunque todo estuviera
 explicado**, que es exactamente el caso en que tiene que cerrar.
 
+⚠️ **Y había un tercero, que solo se ve a volumen.** Las diferencias DENTRO de
+un par emparejado no entraban: un comprobante de 100 casado con un depósito de
+80 deja 20 sin explicar, y ninguna de las dos partidas está "pendiente", así que
+ese hueco se escapaba.
+
+Con la capa exacta siempre es cero —casa por importe idéntico— y por eso estuvo
+escondido. Se destapó con junio completo de la recaudadora: el cuadre daba
+**S/ 117.697,49** y la resta independiente de los dos lados **S/ 117.717,49**.
+Faltaban 20 soles exactos, que eran la diferencia de **un solo par** propuesto
+por la IA entre 447.796.
+
+La lección de método: **el cuadre se verifica contra la resta de los totales de
+los dos lados**, no contra sí mismo. Es la única comprobación que no comparte
+supuestos con lo que está comprobando.
+
 - ⚠️ `abonos_no_registrados` es `Monto.default(0)`, **no requerido**: los
   resultados viven como JSONB en la fila del job y no se migran, así que
   exigirlo dejaría ilegible todo el histórico. Cero es además lo honesto — no se

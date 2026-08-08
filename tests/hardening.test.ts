@@ -57,6 +57,7 @@ describe("construirWorkbookResultado", () => {
       cheques_no_cobrados: 0,
       abonos_no_registrados: 0,
       cargos_no_registrados: 0,
+      diferencias_emparejadas: 0,
       saldo_banco_ajustado: 100,
       saldo_libros_final: 100,
       diferencia: 0,

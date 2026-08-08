@@ -83,4 +83,24 @@ describe("calcularCuadre (aplicación)", () => {
     const c = calcularCuadre({}, [{ monto: 414_616.52 }], [{ monto: 2_067.49 }]);
     expect(c.diferencia).toBe(412_549.03);
   });
+
+  it("una diferencia DENTRO de un par emparejado también cuenta", () => {
+    // Un comprobante de 100 casado con un depósito de 80: los libros dicen 100,
+    // el banco 80, y ninguna de las dos partidas está pendiente. Sin contarlo,
+    // esos 20 desaparecen del cuadre y el total deja de cuadrar contra la resta
+    // de los dos lados — que es exactamente lo que pasó con junio completo.
+    const c = calcularCuadre({ saldo_extracto_final: 80, saldo_libros_final: 100 }, [], [], 20);
+    expect(c.diferencias_emparejadas).toBe(20);
+    expect(c.diferencia).toBe(0);
+  });
+
+  it("con la capa exacta es cero y no cambia nada", () => {
+    // Casa por importe idéntico, así que su diferencia es 0 por construcción.
+    // Por eso el fallo tardó en verse: hicieron falta 452.177 partidas y UN par
+    // de la IA para destaparlo.
+    const sin = calcularCuadre({ saldo_extracto_final: 900, saldo_libros_final: 1000 }, [{ monto: 100 }], []);
+    const con = calcularCuadre({ saldo_extracto_final: 900, saldo_libros_final: 1000 }, [{ monto: 100 }], [], 0);
+    expect(sin).toEqual(con);
+    expect(con.diferencia).toBe(0);
+  });
 });

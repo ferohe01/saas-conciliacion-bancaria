@@ -661,6 +661,7 @@ function CuadreBarra({
           <LineaCuadre label="− Cheques no cobrados" valor={cuadre.cheques_no_cobrados} moneda={moneda} />
           <LineaCuadre label="− Abonos no registrados en libros" valor={cuadre.abonos_no_registrados} moneda={moneda} />
           <LineaCuadre label="+ Cargos no registrados en libros" valor={cuadre.cargos_no_registrados} moneda={moneda} />
+          <LineaCuadre label="± Diferencias en pares emparejados" valor={cuadre.diferencias_emparejadas} moneda={moneda} />
           <div className="my-2 border-t border-neutral-300" />
           <LineaCuadre label="Saldo banco ajustado" valor={cuadre.saldo_banco_ajustado} moneda={moneda} fuerte />
           <LineaCuadre label="Saldo según libros" valor={cuadre.saldo_libros_final} moneda={moneda} fuerte />
