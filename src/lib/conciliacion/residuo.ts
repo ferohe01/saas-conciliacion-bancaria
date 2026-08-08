@@ -68,11 +68,13 @@ export async function construirResiduo(
   jobId: string,
   maxFilas: number,
 ): Promise<Residuo> {
-  const exacta = await admin.rpc("conciliar_exacta", { p_job_id: jobId });
-  if (exacta.error) {
-    throw new Error(`No se pudo correr la capa exacta: ${exacta.error.message}`);
+  const pares = await correrCapaExacta(admin, jobId);
+
+  const tot = await admin.rpc("totales_conciliacion", { p_job_id: jobId });
+  if (tot.error) {
+    throw new Error(`No se pudieron contar las partidas: ${tot.error.message}`);
   }
-  const resumen = (exacta.data as { pares: number; internos: number; movimientos: number }[])?.[0];
+  const resumen = (tot.data as { internos: number; movimientos: number }[])?.[0];
 
   // ⚠️ FRENO. El residuo se calcula ANTES de pedirlo: son los totales menos lo
   // que casó, y eso ya lo devuelve `conciliar_exacta` sin coste añadido.
@@ -82,7 +84,6 @@ export async function construirResiduo(
   // el paginado intentaría traer 903.176 filas en 903 peticiones y el usuario
   // vería el botón en "Iniciando" durante minutos antes de que n8n rechazara un
   // payload de 175 MB. Fallar aquí, rápido y explicando por qué, es mejor.
-  const pares = Number(resumen?.pares ?? 0);
   const faltanInt = Number(resumen?.internos ?? 0) - pares;
   const faltanMov = Number(resumen?.movimientos ?? 0) - pares;
   if (faltanInt > maxFilas || faltanMov > maxFilas) {
@@ -118,7 +119,7 @@ export async function construirResiduo(
       referencia_banco: m.referencia_banco,
       movimiento_id: m.movimiento_id,
     })),
-    paresExactos: Number(resumen?.pares ?? 0),
+    paresExactos: pares,
     totalInternos: Number(resumen?.internos ?? 0),
     totalMovimientos: Number(resumen?.movimientos ?? 0),
   };
@@ -159,4 +160,74 @@ async function traerRpc<T>(
     // mismo orden (lo fijan con `order by`), así que el rango es estable.
     if (lote.length < PAGINA) return filas;
   }
+}
+
+
+/**
+ * Corre la capa exacta, troceando si la base la cancela.
+ *
+ * ⚠️ El rol con el que se conecta PostgREST lleva `statement_timeout = 8s`, y
+ * **no se puede ampliar desde dentro**: un `set local statement_timeout` en el
+ * cuerpo de la función no rearma el temporizador de la sentencia ya en marcha
+ * (probado: se cancela igual, a los 8,3 s).
+ *
+ * Con la referencia ya normalizada en la fila (migración 0029) una sola pasada
+ * basta de sobra. Los bloques quedan como red: si un cliente aún mayor vuelve
+ * a rozar el techo, se reparte solo en vez de fallar.
+ *
+ * ⚠️ El troceo es por **hash de la referencia**, nunca por fecha. Un par
+ * siempre comparte referencia, así que ningún emparejamiento queda partido;
+ * trocear por días sí los parte —un asiento del 30 puede cobrarse el 28— y esa
+ * es la diferencia entre el 88 % de un día y el 99 % del mes.
+ */
+async function correrCapaExacta(
+  admin: SupabaseClient,
+  jobId: string,
+): Promise<number> {
+  const TIMEOUT_PG = "57014";
+  // Medido con junio completo (452.177 × 450.999) y la referencia ya
+  // normalizada en la fila (0029):
+  //
+  //     1 bloque  → CANCELADO a los 8,1 s
+  //     4 bloques → 447.795 pares, pero el peor tarda 7,6 s. Cabe por poco, y
+  //                 "por poco" con un cliente que crece es no caber.
+  //     8 bloques → margen holgado, y para una PyME son ocho viajes de 50 ms.
+  //
+  // El coste que se reparte es el ORDEN: los dos `row_number()` sobre 450.000
+  // filas cada uno. Normalizar la referencia dejó de pesar al guardarla ya
+  // normalizada, pero ordenar no se puede evitar — solo trocear.
+  for (const bloques of [8, 32]) {
+    let total = 0;
+    let cancelado = false;
+    for (let b = 0; b < bloques; b++) {
+      const { data, error } = await admin.rpc("conciliar_exacta", {
+        p_job_id: jobId,
+        p_bloque: b,
+        p_bloques: bloques,
+      });
+      if (error) {
+        if (error.code === TIMEOUT_PG) {
+          cancelado = true;
+          break;
+        }
+        throw new Error(`No se pudo correr la capa exacta: ${error.message}`);
+      }
+      total += Number(data ?? 0);
+    }
+    if (!cancelado) return total;
+
+    // Los bloques que sí entraron dejaron pares escritos: se retiran antes de
+    // reintentar con más trozos, o el segundo intento los duplicaría.
+    const { error } = await admin
+      .from("matches_conciliacion")
+      .delete()
+      .eq("job_id", jobId)
+      .eq("metodo", "exacta");
+    if (error) {
+      throw new Error(`No se pudo reintentar la capa exacta: ${error.message}`);
+    }
+  }
+  throw new Error(
+    "La capa exacta no pudo completarse ni troceada en 32 partes. El período es demasiado grande para procesarlo de una vez: prueba con un rango más corto.",
+  );
 }
