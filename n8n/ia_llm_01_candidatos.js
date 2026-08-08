@@ -15,6 +15,21 @@ const wh = $('Webhook').first().json;
 const ejemplos = ((wh.body ?? wh).ejemplos_aprendizaje) ?? [];
 const criterios = ((wh.body ?? wh).criterios_declarados) ?? [];
 const tolIa = Number(cfg.tolerancia_ia_monto ?? 10);
+// ⚠️ CUANTOS registros se le pasan al LLM de una vez.
+//
+// La etapa de candidatos se penso para 2.000 partidas, donde la shortlist
+// entera cabe en un prompt. Con el residuo de una recaudadora —4.382 internos—
+// el prompt salia de 4,7 MB y ~1,2 MILLONES de tokens: ningun modelo lo acepta,
+// y si lo aceptara costaria una fortuna por conciliacion.
+//
+// La IA esta para ADJUDICAR casos dudosos, no para revisar todo lo que sobro.
+// La inmensa mayoria de esos 4.382 no tiene ningun candidato plausible —son
+// recibos cobrados por otro banco— y preguntarselo al modelo no aporta nada.
+// Los que no entran quedan como estan: sin conciliar, esperando criterio
+// humano, que es exactamente donde estaban.
+const MAX_CONSULTAS = Number(cfg.max_consultas_ia ?? 150);
+// Por debajo de esto no hay duda que adjudicar: es ruido.
+const SCORE_MINIMO = 0.35;
 const K = Number(cfg.top_k_candidatos ?? 3);
 const ventana = Number(cfg.ventana_ia_dias ?? 30); // ventana de fecha amplia para IA
 
@@ -68,29 +83,57 @@ const palBc = bancarios.map((bc) => new Set(palabras(bc.glosa)));
 const tBc = bancarios.map((bc) => Date.parse(bc.fecha));
 const MS_DIA = 86400000;
 
+// Indices del prefiltro. Un candidato tiene que compartir un token de
+// REFERENCIA o una palabra del nombre, asi que no hace falta recorrer los
+// 3.204 movimientos por cada uno de los 4.382 internos: se buscan.
+//
+// No cambia la semantica —el conjunto que sale de los indices es exactamente
+// el que pasaba el filtro— pero evita construir dos estructuras nuevas por cada
+// uno de los 14 millones de pares, que es lo que abortaba el runner de n8n.
+const porRefBc = new Map();
+const porPalBc = new Map();
+for (let bi = 0; bi < bancarios.length; bi++) {
+  for (const t of refsBc[bi]) {
+    if (!porRefBc.has(t)) porRefBc.set(t, []);
+    porRefBc.get(t).push(bi);
+  }
+  for (const w of palBc[bi]) {
+    if (!porPalBc.has(w)) porPalBc.set(w, []);
+    porPalBc.get(w).push(bi);
+  }
+}
+
 for (const it of internos) {
   const refsIt = refsInterno(it);
   const palIt = palabras(it.contraparte);
   const setIt = new Set(palIt);
   const tIt = Date.parse(it.fecha);
   const cands = [];
-  for (let bi = 0; bi < bancarios.length; bi++) {
+
+  // Candidatos posibles, por indice. Se recorren en orden creciente para que el
+  // resultado sea el mismo que recorriendo la lista entera.
+  const posibles = new Set();
+  for (const t of refsIt) { const l = porRefBc.get(t); if (l) for (const bi of l) posibles.add(bi); }
+  for (const w of setIt) { const l = porPalBc.get(w); if (l) for (const bi of l) posibles.add(bi); }
+
+  for (const bi of [...posibles].sort((a, b) => a - b)) {
     const bc = bancarios[bi];
     if (Math.sign(it.monto) !== Math.sign(bc.monto)) continue;
     const d = Math.abs((tIt - tBc[bi]) / MS_DIA);
     if (d > ventana) continue;
     const difAbs = Math.abs(it.monto - bc.monto);
     const comparteRef = intersecta(refsIt, refsBc[bi]);
+    // La banda de monto se comprueba ANTES de construir nada: descarta la
+    // mayoria de los pares sin asignar memoria.
+    if (!comparteRef && difAbs > tolIa) continue;
     // Tokens ya calculados: solo se intersectan.
     const comunes = [...new Set(palIt.filter((w) => palBc[bi].has(w)))];
     // Si comparte referencia, es candidato aunque no comparta nombre ni esté en
     // la banda de monto. Si no, exige nombre Y banda de monto.
-    if (!comparteRef) {
-      if (!comunes.length) continue;
-      if (difAbs > tolIa) continue;
-    }
-    // Jaccard sobre los conjuntos ya construidos.
-    const union = new Set([...setIt, ...palBc[bi]]).size;
+    if (!comparteRef && !comunes.length) continue;
+    // Jaccard SIN construir la union: |A∪B| = |A| + |B| − |A∩B|. Antes se hacia
+    // `new Set([...a, ...b]).size` por cada par, o sea millones de copias.
+    const union = setIt.size + palBc[bi].size - comunes.length;
     const sim = union ? comunes.length / union : 0;
     const cercM = 1 - Math.min(difAbs / (tolIa || 1), 1);
     const cercF = 1 - Math.min(d / (ventana || 1), 1);
@@ -182,7 +225,15 @@ const declarado = criterios.length
 
 const systemFinal = system + declarado + fewShot;
 
-const user = `Tolerancias: ${JSON.stringify(cfg)}\n\nCandidatos por registro interno:\n${JSON.stringify(shortlists)}`;
+// Se le pregunta a la IA por los casos con DUDA REAL, y solo por los mejores.
+// Ordenar por el mejor score y cortar es lo que convierte un prompt imposible
+// en uno de unos pocos KB.
+const conDuda = shortlists.filter((s) => (s.candidatos[0]?.score ?? 0) >= SCORE_MINIMO);
+conDuda.sort((a, b) => (b.candidatos[0]?.score ?? 0) - (a.candidatos[0]?.score ?? 0));
+const consultadas = conDuda.slice(0, MAX_CONSULTAS);
+const omitidas = shortlists.length - consultadas.length;
+
+const user = `Tolerancias: ${JSON.stringify(cfg)}\n\nCandidatos por registro interno:\n${JSON.stringify(consultadas)}`;
 
 // NOTA: aquí vivía `ia_body`, un cuerpo con forma de la API de Anthropic para
 // un nodo HTTP Request alternativo. Se retiró: ningún nodo lo consumía, tenía
@@ -200,7 +251,14 @@ return [{
     matches: prev.matches,
     pendientes_internos: internos,
     pendientes_bancarios: bancarios,
-    shortlists, // para validar la respuesta del LLM
+    // Solo las consultadas: el nodo de parseo valida la respuesta contra
+    // ESTAS, y aceptar una adjudicacion sobre algo que el modelo no vio seria
+    // aceptar una invencion.
+    shortlists: consultadas,
+    // Cuantos registros con candidato NO se le preguntaron al modelo. Se
+    // reporta para que la pantalla pueda decirlo: callarlo daria a entender que
+    // la IA los reviso y no encontro nada.
+    shortlists_omitidas: omitidas,
     ejemplos_aprendizaje: ejemplos, // trazabilidad del few-shot usado
     criterios_declarados: criterios, // trazabilidad de la semilla en frio
     ia_system: systemFinal, // nodo AI Agent (systemMessage)

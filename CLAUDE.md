@@ -312,6 +312,33 @@ Moraleja: precalcular los tokens no basta si queda **otra** cosa cara dentro del
 bucle. Al optimizar uno de estos nodos hay que mirar TODO lo que se evalúa por
 par, no solo lo que se arregló la vez anterior.
 
+#### Y el prompt de la IA no cabía en ningún modelo
+
+`ia_llm_01_candidatos.js` abortó por lo mismo, pero al medirlo apareció algo
+peor que la lentitud: con el residuo de una recaudadora —4.382 internos— el
+prompt salía de **4,7 MB y ~1,2 MILLONES de tokens**. Ningún modelo lo acepta, y
+si lo aceptara costaría una fortuna por conciliación.
+
+La etapa de candidatos se pensó para 2.000 partidas, donde la shortlist entera
+cabe en un prompt. A este volumen hay que **elegir qué se le pregunta**:
+
+- Solo los casos con **duda real** (mejor candidato con score ≥ 0,35) y como
+  mucho `max_consultas_ia` (150 por defecto), ordenados por score.
+- Los demás quedan **sin conciliar**, que es exactamente donde estaban: la
+  inmensa mayoría no tiene ningún candidato plausible —son recibos cobrados por
+  otro banco— y preguntárselo al modelo no aporta nada.
+- El nodo devuelve `shortlists_omitidas`. Callarlo daría a entender que la IA
+  los revisó y no encontró nada.
+- ⚠️ `shortlists` pasa al nodo de parseo **ya recortado**: valida la respuesta
+  contra lo que el modelo vio de verdad. Aceptar una adjudicación sobre algo que
+  no se le mostró sería aceptar una invención.
+
+Además, dos micro-optimizaciones con efecto grande: índices por token de
+referencia y por palabra (como en la agrupación), y el Jaccard calculado como
+`|A| + |B| − |A∩B|` en vez de construir la unión —que era un `Set` nuevo por
+cada uno de los 14 millones de pares—. Con datos como los del cliente: **de
+1,50 s a 0,03 s**, y el prompt de 266 KB a 54 KB.
+
 #### Los nodos `.js` no los revisaba nada — ahora sí (mínimo)
 
 Son la **fuente única** del motor pero viven fuera del typecheck (son `.js`
