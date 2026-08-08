@@ -69,6 +69,26 @@ const nodes = [
     type: "@n8n/n8n-nodes-langchain.agent",
     typeVersion: 1.7,
     position: [700, 300],
+    // ⚠️ UN FALLO DE LA IA NO PUEDE TUMBAR LA CONCILIACIÓN.
+    //
+    // Este nodo llama a un servicio externo: puede caerse, agotar su cuota,
+    // pasarse de tiempo o devolver algo raro. Sin esto, cualquiera de esas
+    // cosas mata el flujo y NO se ejecutan "Ensamblar resultado" ni "Actualizar
+    // Supabase": el job se queda en `procesando` para siempre y se pierden los
+    // 447.795 pares que la capa exacta ya había resuelto — el 99% del trabajo,
+    // tirado porque un modelo no contestó.
+    //
+    // Con `continueRegularOutput` el flujo sigue. "Parsear IA" reconstruye su
+    // estado desde "Candidatos IA" (no del Agent), así que sin respuesta
+    // simplemente no hay adjudicaciones: todo queda pendiente de revisión
+    // humana, que es exactamente donde estaba.
+    //
+    // La degradación correcta de una capa opcional es hacer menos, no romper.
+    onError: "continueRegularOutput",
+    // Un error de red o un 429 no deberían costar la corrida entera.
+    retryOnFail: true,
+    maxTries: 2,
+    waitBetweenTries: 3000,
   },
   {
     // Sub-nodo de modelo. Se enlaza al AI Agent por ai_languageModel (no por
@@ -120,6 +140,13 @@ const nodes = [
     type: "n8n-nodes-base.httpRequest",
     typeVersion: 4.2,
     position: [1280, 300],
+    // Aquí SÍ se quiere que falle si falla: es la escritura del resultado, y
+    // continuar en silencio dejaría el job en `procesando` creyendo que se
+    // guardó. Lo que sí se hace es reintentar, porque un corte de red no
+    // debería costar la corrida.
+    retryOnFail: true,
+    maxTries: 3,
+    waitBetweenTries: 2000,
   },
 ];
 

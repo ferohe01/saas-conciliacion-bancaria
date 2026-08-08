@@ -233,3 +233,85 @@ describe("cuadre bancario", () => {
     expect(c.diferencia).toBe(413_209.03);
   });
 });
+
+/**
+ * La cadena posterior a la IA, con el residuo de un cliente grande.
+ *
+ * Los tres nodos que van detrás de "Candidatos IA" nunca se habían ejercitado a
+ * volumen, y son los que convierten el trabajo en resultado: si alguno revienta,
+ * se pierden los 447.795 pares que la capa exacta ya resolvió — el 99 % — porque
+ * "Actualizar Supabase" no llega a ejecutarse y el job se queda en `procesando`.
+ *
+ * El caso que se prueba es el PEOR: la IA no contesta. Es el más probable de
+ * todos —depende de un servicio externo— y el que más tiene que degradar bien.
+ */
+describe("la cadena después de la IA aguanta el residuo", () => {
+  const DIR2 = "n8n";
+  const residuo = (n: number, m: number) => ({
+    job_id: "t",
+    metadata: { saldos: { saldo_extracto_final: 0, saldo_libros_final: 0 } },
+    config: { tolerancia_ia_monto: 50, ventana_ia_dias: 30, top_k_candidatos: 5, umbral_confianza_auto: 0.95 },
+    total_internos: n,
+    total_bancarios: m,
+    matches: [],
+    pendientes_internos: Array.from({ length: n }, (_, i) => ({
+      id_interno: `REG-${i}`, fecha: "2026-06-15", monto: 100 + (i % 50),
+      referencia: `SR11-${i}`, contraparte: null, descripcion: `PA-WIN-${i}`, tipo: "cobranza",
+    })),
+    pendientes_bancarios: Array.from({ length: m }, (_, j) => ({
+      id_movimiento: `BCO-${j}`, fecha: "2026-06-15", monto: 100 + (j % 50),
+      referencia_banco: `SR11-${j}`, glosa: `EFECTIVO${j}`, tipo: "abono",
+    })),
+  });
+
+  const correrCandidatos = (entrada: unknown) => {
+    const src = readFileSync(join(DIR2, "ia_llm_01_candidatos.js"), "utf8")
+      .replace("$('Webhook').first().json", "({ body: {} })");
+    return new Function("$json", src)(entrada)[0].json;
+  };
+
+  const correrParsear = (deCandidatos: unknown, respuestaIa: unknown) => {
+    const src = readFileSync(join(DIR2, "ia_llm_02_parsear.js"), "utf8")
+      .replace("$('Candidatos IA').first().json", "__PREP__");
+    return new Function("$json", "__PREP__", src)(respuestaIa, deCandidatos)[0].json;
+  };
+
+  const correrEnsamblar = (entrada: unknown) =>
+    new Function("$json", readFileSync(join(DIR2, "04_ensamblar.js"), "utf8"))(entrada)[0]
+      .json.resultado_update.resultado;
+
+  it("con la IA caída, el resultado sale igual y nada queda a medias", () => {
+    // Una IA que no contesta es lo más probable que puede fallar: es un
+    // servicio externo. Tiene que hacer MENOS, no romper — si rompe, se pierde
+    // el 99% que ya estaba resuelto.
+    const cand = correrCandidatos(residuo(4382, 3204));
+    const parseado = correrParsear(cand, {}); // sin `output`: el LLM no respondió
+    const resultado = correrEnsamblar(parseado);
+
+    expect(resultado.resumen.sugeridos_ia).toBe(0);
+    // Ninguna partida se pierde por el camino.
+    expect(resultado.resumen.sin_conciliar_internos).toBe(4382);
+    expect(resultado.resumen.sin_conciliar_bancarios).toBe(3204);
+    expect(resultado.no_conciliados).toHaveLength(4382 + 3204);
+    expect(resultado.cuadre).toBeTruthy();
+  });
+
+  it("el prompt cabe en un modelo real", () => {
+    // Con 4.382 internos el prompt llegó a pesar 4,7 MB (~1,2 millones de
+    // tokens): ningún modelo lo acepta. Se acota a los casos con duda real.
+    const cand = correrCandidatos(residuo(4382, 3204));
+    expect(String(cand.ia_user).length).toBeLessThan(500 * 1024);
+    expect(cand.shortlists.length).toBeLessThanOrEqual(150);
+  });
+
+  it("solo se adjudica lo que el modelo llegó a ver", () => {
+    // Aceptar una adjudicación sobre un registro que no estaba en el prompt
+    // sería aceptar una invención del modelo.
+    const cand = correrCandidatos(residuo(50, 50));
+    const inventado = { output: JSON.stringify([
+      { id_interno: "REG-9999", id_movimiento: "BCO-0", confianza: 0.99 },
+    ]) };
+    const parseado = correrParsear(cand, inventado);
+    expect(parseado.matches).toHaveLength(0);
+  });
+});

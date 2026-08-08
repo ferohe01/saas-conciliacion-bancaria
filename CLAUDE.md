@@ -312,6 +312,30 @@ Moraleja: precalcular los tokens no basta si queda **otra** cosa cara dentro del
 bucle. Al optimizar uno de estos nodos hay que mirar TODO lo que se evalúa por
 par, no solo lo que se arregló la vez anterior.
 
+#### Un fallo de la IA no puede tumbar la conciliación
+
+El AI Agent llama a un servicio externo: puede caerse, agotar cuota, pasarse de
+tiempo o devolver algo raro. Sin protección, cualquiera de esas cosas **mata el
+flujo** y no llegan a ejecutarse `Ensamblar resultado` ni `Actualizar Supabase`:
+el job se queda en `procesando` para siempre y se pierden los **447.795 pares
+que la capa exacta ya había resuelto** — el 99 % del trabajo, tirado porque un
+modelo no contestó.
+
+El generador emite el nodo con **`onError: "continueRegularOutput"`** y dos
+reintentos. `Parsear IA` reconstruye su estado desde `Candidatos IA`, no del
+Agent, así que sin respuesta simplemente no hay adjudicaciones: todo queda
+pendiente de revisión humana, que es donde estaba.
+
+**La degradación correcta de una capa opcional es hacer menos, no romper.**
+
+`Actualizar Supabase` sí conserva el fallo —continuar en silencio dejaría el job
+creyendo que se guardó— pero reintenta tres veces: un corte de red no debe
+costar la corrida.
+
+Hay tests de la cadena entera (`tests/n8nNodos.test.ts`) con el residuo real y
+la IA caída: ninguna partida se pierde, el cuadre sale, y una adjudicación sobre
+un registro que el modelo no vio se rechaza.
+
 #### Y el prompt de la IA no cabía en ningún modelo
 
 `ia_llm_01_candidatos.js` abortó por lo mismo, pero al medirlo apareció algo
