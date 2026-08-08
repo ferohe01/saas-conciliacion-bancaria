@@ -70,6 +70,24 @@ export async function construirResiduo(
 ): Promise<Residuo> {
   const pares = await correrCapaExacta(admin, jobId);
 
+  // ⚠️ ANALYZE antes de leer el residuo, y no es opcional.
+  //
+  // `conciliar_exacta` acaba de meter 447.795 filas en `matches_conciliacion`,
+  // una tabla que hace un segundo estaba vacía. El planificador sigue creyendo
+  // que lo está, así que para el anti-join del residuo elige un plan pensado
+  // para cero filas — y se pasa de los 8 s del `statement_timeout`.
+  //
+  // Es una CARRERA, que es lo peor de depurar: minutos después autovacuum ya
+  // analizó la tabla y la misma consulta tarda 1,3 s. Falla solo cuando se pide
+  // justo después de escribir, o sea siempre que el usuario concilia de verdad
+  // y nunca cuando uno va a comprobarlo.
+  //
+  // Si falla no se interrumpe: lo peor es el plan malo que ya teníamos.
+  const { error: errStats } = await admin.rpc("analizar_tablas_conciliacion");
+  if (errStats) {
+    console.error(`[conciliacion] no se pudieron refrescar las estadísticas de ${jobId}:`, errStats);
+  }
+
   const tot = await admin.rpc("totales_conciliacion", { p_job_id: jobId });
   if (tot.error) {
     throw new Error(`No se pudieron contar las partidas: ${tot.error.message}`);

@@ -933,6 +933,17 @@ hecho es **exactamente** cuando alguien concilia lo que acaba de importar.
 - **Regla: toda migración que reescriba una tabla grande termina con `analyze`.**
   Añadir una columna `generated ... stored` la reescribe.
 
+⚠️⚠️ **Y también dentro de un mismo proceso.** `conciliar_exacta` mete 447.795
+filas en `matches_conciliacion` —vacía un segundo antes— y acto seguido se lee
+el residuo con un anti-join contra ellas. El planificador todavía cree que la
+tabla está vacía y elige un plan pensado para cero filas: se pasa de los 8 s.
+
+Es una **carrera**, que es lo peor de depurar: minutos después autovacuum ya
+analizó y la misma consulta tarda 1,3 s. Falla solo cuando se pide justo después
+de escribir —o sea, siempre que alguien concilia de verdad— y nunca cuando uno
+va a comprobarlo. Por eso `construirResiduo` llama a `analizar_tablas_conciliacion()`
+entre la capa exacta y la lectura del residuo.
+
 ## ⚠️ RLS cuesta una llamada a función POR FILA (y a 450.000 se nota)
 
 El hallazgo más caro de dimensionar el cliente grande, y no estaba en ninguna
