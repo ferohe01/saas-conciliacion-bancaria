@@ -944,6 +944,24 @@ de escribir —o sea, siempre que alguien concilia de verdad— y nunca cuando u
 va a comprobarlo. Por eso `construirResiduo` llama a `analizar_tablas_conciliacion()`
 entre la capa exacta y la lectura del residuo.
 
+⚠️ **Y pasa DOS veces en el mismo circuito.** Al aprobar, `aplicaciones_cobro`
+va de 0 a 447.795 filas en lotes, y el anti-join que decide qué queda por
+aplicar consulta esa misma tabla mientras crece. La aprobación escribió 10.000
+cobros y el tercer lote se canceló; minutos después el mismo lote tardaba 3,2 s.
+
+Dos remedios, y hacen falta los dos:
+
+1. La tabla se analiza **tras el primer lote** —el salto de 0 a algo es el que
+   más despista al planificador— y luego cada 20, porque el orden de magnitud
+   vuelve a cambiar.
+2. Un lote cancelado **se reintenta** tras refrescar estadísticas, en vez de
+   abortar la aprobación entera. Rendirse a la primera dejaba el saldo aplicado
+   a medias, que es el peor estado posible.
+
+**Regla general: toda tabla que se llene DURANTE un proceso y se consulte en
+ese mismo proceso necesita un `analyze` intermedio.** No basta con analizar al
+importar.
+
 ## ⚠️ RLS cuesta una llamada a función POR FILA (y a 450.000 se nota)
 
 El hallazgo más caro de dimensionar el cliente grande, y no estaba en ninguna

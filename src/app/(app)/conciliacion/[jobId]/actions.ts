@@ -203,12 +203,33 @@ async function aplicarCobrosModoTabla(
     return { ok: false, aplicadas: 0 };
   }
 
+  const TIMEOUT_PG = "57014";
+  const analizar = () => admin.rpc("analizar_tablas_conciliacion");
+
   let aplicadas = 0;
   for (let vuelta = 0; vuelta < MAX_VUELTAS_COBROS; vuelta++) {
-    const { data, error } = await admin.rpc("aplicar_cobros_exactos", {
+    let { data, error } = await admin.rpc("aplicar_cobros_exactos", {
       p_job_id: jobId,
       p_limite: LOTE_COBROS,
     });
+
+    // ⚠️ Un lote cancelado por tiempo NO tumba la aprobación: se refrescan las
+    // estadísticas y se reintenta una vez.
+    //
+    // `aplicaciones_cobro` pasa de 0 a 447.795 filas durante esta misma
+    // función, y el anti-join que decide qué queda por aplicar la consulta
+    // mientras crece. Con las estadísticas de cuando estaba vacía, el
+    // planificador elige un plan para cero filas y se pasa de los 8 s. Pasó:
+    // la aprobación escribió 10.000 cobros y el tercer lote se canceló;
+    // minutos después el mismo lote tardaba 3,2 s.
+    if (error?.code === TIMEOUT_PG) {
+      await analizar();
+      ({ data, error } = await admin.rpc("aplicar_cobros_exactos", {
+        p_job_id: jobId,
+        p_limite: LOTE_COBROS,
+      }));
+    }
+
     if (error) {
       console.error(`[cobranzas] fallo aplicando cobros de ${jobId}:`, error);
       // Se devuelve lo que SÍ entró: el saldo queda a medias y quien llama
@@ -218,6 +239,11 @@ async function aplicarCobrosModoTabla(
     const n = Number(data ?? 0);
     if (n === 0) return { ok: true, aplicadas };
     aplicadas += n;
+
+    // Tras el primer lote la tabla deja de estar vacía, que es el salto que
+    // más despista al planificador. Después, cada 20 lotes: el orden de
+    // magnitud vuelve a cambiar y conviene que lo sepa.
+    if (vuelta === 0 || vuelta % 20 === 19) await analizar();
   }
   console.error(`[cobranzas] ${jobId} no terminó de aplicar en ${MAX_VUELTAS_COBROS} vueltas`);
   return { ok: false, aplicadas };
