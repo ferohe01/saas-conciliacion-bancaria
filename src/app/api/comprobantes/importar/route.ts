@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getEmpresaActual } from "@/lib/auth";
-import { traerTodo, enLotes } from "@/lib/supabase/paginado";
+import { enLotes } from "@/lib/supabase/paginado";
 import { LectorCsv, type FilaCsv } from "@/lib/parsing/csv";
 import { normalizarFecha } from "@/lib/normalizacion/fecha";
 import { normalizarMonto } from "@/lib/normalizacion/monto";
@@ -104,7 +104,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const supabase = await createClient();
+  const admin = createAdminClient();
   const lote = randomUUID();
   const resumen: ResumenImportacion = {
     insertados: 0,
@@ -116,17 +116,34 @@ export async function POST(request: Request) {
   // Series ya presentes en la empresa. Se piden UNA vez y se llevan en memoria:
   // preguntar por cada lote serían cientos de viajes, y un Set de 500.000
   // cadenas cortas cabe de sobra.
+  //
+  // ⚠️ CON `admin` Y FILTRANDO POR EMPRESA, no con el cliente de RLS.
+  //
+  // La política de `comprobantes` es `es_miembro(empresa_id)`: una función
+  // sobre una COLUMNA, que Postgres evalúa fila a fila. Sobre 452.309
+  // comprobantes eso pasa de los 8 s de `statement_timeout` y la consulta
+  // muere. Y como `traerTodo` se traga el error, el conjunto salía VACÍO: la
+  // ruta creía que ninguna serie existía, intentaba insertarlas todas y
+  // chocaba con el índice único.
+  //
+  // El síntoma era desconcertante — "se intentó cargar un comprobante que ya
+  // existe" sobre una carga que no había insertado nada— y apuntaba al archivo
+  // en vez de a la consulta.
+  const { filas: existentes, error: errExistentes } = await traerSeries(
+    admin,
+    empresa.empresa_id,
+  );
+  if (errExistentes) {
+    return NextResponse.json(
+      {
+        error:
+          "No se pudo comprobar qué comprobantes ya tienes cargados, así que no se importó nada para no duplicarlos. Vuelve a intentarlo en un momento.",
+      },
+      { status: 503 },
+    );
+  }
   const yaEnBase = new Set(
-    (
-      await traerTodo<{ tipo: string; serie_numero: string | null }>((d, h) =>
-        supabase
-          .from("comprobantes")
-          .select("tipo, serie_numero")
-          .not("serie_numero", "is", null)
-          .order("id", { ascending: true })
-          .range(d, h),
-      )
-    )
+    existentes
       .map((c) => claveComprobante({ tipo: c.tipo, referencia: c.serie_numero }))
       .filter((k): k is string => k !== null),
   );
@@ -138,10 +155,15 @@ export async function POST(request: Request) {
   const descargar = async (): Promise<string | null> => {
     if (pendientes.length === 0) return null;
     for (const parte of enLotes(pendientes, LOTE)) {
-      const { error } = await supabase.from("comprobantes").insert(parte);
+      const { error } = await admin.from("comprobantes").insert(parte);
       if (error) {
+        // El 23505 no debería ocurrir: los repetidos se filtran antes. Si
+        // llega aquí es que el filtro no vio la base, y decir "vuelve a
+        // intentarlo, los repetidos se omiten" manda a repetir algo que va a
+        // fallar igual.
+        console.error(`[comprobantes] fallo al insertar el lote ${lote}:`, error);
         return error.code === "23505"
-          ? "Se intentó cargar un comprobante que ya existe. Vuelve a intentarlo: los repetidos se omiten."
+          ? "Algunos comprobantes de este archivo ya estaban cargados y no se pudo distinguirlos. No se importó nada; revisa la lista antes de volver a subirlo."
           : "No se pudieron guardar los comprobantes.";
       }
       resumen.insertados += parte.length;
@@ -233,4 +255,37 @@ export async function POST(request: Request) {
     lote: resumen.insertados > 0 ? lote : undefined,
     mensaje: mensajeImportacion(resumen),
   });
+}
+
+
+/**
+ * Todas las series ya cargadas de una empresa, paginando.
+ *
+ * Devuelve el error en vez de tragárselo: quedarse corto aquí no da un aviso,
+ * da una carga duplicada — o, si el índice único la para, un mensaje que culpa
+ * al archivo.
+ */
+async function traerSeries(
+  admin: ReturnType<typeof createAdminClient>,
+  empresaId: string,
+): Promise<{ filas: { tipo: string; serie_numero: string | null }[]; error: string | null }> {
+  const filas: { tipo: string; serie_numero: string | null }[] = [];
+  const PAGINA = 1000;
+  for (let desde = 0; ; desde += PAGINA) {
+    const { data, error } = await admin
+      .from("comprobantes")
+      .select("tipo, serie_numero")
+      .eq("empresa_id", empresaId)
+      .not("serie_numero", "is", null)
+      // Desempate obligatorio: sin columna única el paginado duplica y pierde.
+      .order("id", { ascending: true })
+      .range(desde, desde + PAGINA - 1);
+    if (error) {
+      console.error("[comprobantes] no se pudieron leer las series:", error);
+      return { filas: [], error: error.message };
+    }
+    const lote = data ?? [];
+    filas.push(...(lote as { tipo: string; serie_numero: string | null }[]));
+    if (lote.length < PAGINA) return { filas, error: null };
+  }
 }
