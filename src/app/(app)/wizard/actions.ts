@@ -387,3 +387,67 @@ export async function getComprobantesCanonicos(
     };
   });
 }
+
+
+/** Lo que el Paso 1 necesita saber de los comprobantes del período. */
+export type ResumenComprobantes = {
+  registros: number;
+  suma: number;
+  /** Ya no lo es nunca: la suma la calcula la base sobre TODAS las filas. */
+  sumaParcial: boolean;
+  /** Total cargado en la empresa, sin filtrar por período. */
+  totalCargados: number;
+  /** Del período, pero ya saldados: no entran a conciliar. */
+  yaCobrados: number;
+};
+
+/**
+ * Conteo y suma de los comprobantes de un período (migración 0027).
+ *
+ * ⚠️ Lo cuenta Postgres. Hacerlo desde el navegador con el cliente de RLS
+ * —tres consultas sin filtro de empresa— no termina con medio millón de
+ * comprobantes: la política `es_miembro(empresa_id)` se evalúa fila a fila, se
+ * pasa del `statement_timeout` de 8 s, y la pantalla acababa diciendo "No hay
+ * comprobantes en este período" sobre los que sí estaban.
+ */
+export async function resumenComprobantesPeriodo(
+  desde: string,
+  hasta: string,
+): Promise<ResumenComprobantes> {
+  const vacio: ResumenComprobantes = {
+    registros: 0,
+    suma: 0,
+    sumaParcial: false,
+    totalCargados: 0,
+    yaCobrados: 0,
+  };
+  const supabase = await createClient(); // la función acota por auth.uid()
+  const { data, error } = await supabase.rpc("resumen_comprobantes_periodo", {
+    p_desde: desde,
+    p_hasta: hasta,
+  });
+  if (error) {
+    // Devolver ceros diría "no hay comprobantes", que es una afirmación falsa
+    // sobre datos que sí existen — exactamente el fallo que esto viene a
+    // corregir. Mejor que la pantalla falle a que tranquilice.
+    throw new Error(
+      `No se pudo contar los comprobantes del período: ${error.message}`,
+    );
+  }
+  const f = (data as ResumenFila[] | null)?.[0];
+  if (!f) return vacio;
+  return {
+    registros: Number(f.registros ?? 0),
+    suma: Number(f.suma ?? 0),
+    sumaParcial: false,
+    totalCargados: Number(f.total_cargados ?? 0),
+    yaCobrados: Number(f.ya_cobrados ?? 0),
+  };
+}
+
+type ResumenFila = {
+  registros: number | string;
+  suma: number | string;
+  total_cargados: number | string;
+  ya_cobrados: number | string;
+};

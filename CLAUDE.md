@@ -850,6 +850,24 @@ frontera de seguridad.** Reglas al escribir una función así:
 con RLS paga este peaje. Si algo va inexplicablemente lento a volumen, medir la
 misma consulta como `postgres` antes de buscar en otro sitio.
 
+### Los tres sitios donde ya mordió, y cómo se disfrazó cada uno
+
+El peaje no se manifiesta como lentitud. Se manifiesta como **una respuesta
+tranquilizadora y falsa**, porque quien recibe el error se lo traga:
+
+| Dónde | Lo que se veía |
+|---|---|
+| Por cobrar / Por pagar | un minuto de espera, y Por pagar tardaba igual **para no traer nada** |
+| Importar comprobantes | *"Se intentó cargar un comprobante que ya existe. Vuelve a intentarlo"* — y repetir daba lo mismo. El conjunto de series existentes salía vacío al morir la consulta, así que intentaba insertarlas todas |
+| Paso 1 del wizard | **"No hay comprobantes en este período"** sobre 452.309 que sí estaban |
+
+Los tres compartían el mismo par de causas: **recorrer una tabla grande a
+través de RLS** y **descartar el error en silencio**. El remedio también es el
+mismo: contar/leer en la base con la pertenencia resuelta una vez
+(`resumen_saldos` 0021, `resumen_comprobantes_periodo` 0027) o con `admin` y
+filtro explícito de empresa, y **comprobar siempre el error** — devolver ceros
+donde hay medio millón de filas es peor que fallar.
+
 ## Filtrar en la consulta, no en memoria (Por cobrar / Por pagar)
 
 Las dos pantallas se traían la tabla **entera** y descartaban después lo que

@@ -16,7 +16,11 @@ import { validarCoherencia } from "@/lib/parsing/coherencia";
 import { formatearPEN, formatearFecha } from "@/lib/parsing/resumen";
 import { normalizarMonto } from "@/lib/normalizacion/monto";
 import type { MapeoColumnas } from "@/lib/parsing/deteccion";
-import { guardarMapeoCuenta } from "@/app/(app)/wizard/actions";
+import {
+  guardarMapeoCuenta,
+  resumenComprobantesPeriodo,
+  type ResumenComprobantes,
+} from "@/app/(app)/wizard/actions";
 import { Boton, CLASES_ENTRADA } from "@/components/ui";
 
 export type CuentaOpcion = {
@@ -174,16 +178,8 @@ export function WizardContainer({
   const [extracto, setExtracto] = useState<ArchivoProcesado | null>(null);
   const [mapeoExtracto, setMapeoExtracto] = useState<MapeoColumnas>({});
 
-  const [comprobantesResumen, setComprobantesResumen] = useState<{
-    registros: number;
-    suma: number;
-    /** La suma solo cubre las filas traídas (PostgREST corta en 1.000). */
-    sumaParcial: boolean;
-    /** Total cargado en la empresa, sin filtrar por período. */
-    totalCargados: number;
-    /** Del período, pero ya saldados: no entran a conciliar. */
-    yaCobrados: number;
-  } | null>(null);
+  const [comprobantesResumen, setComprobantesResumen] =
+    useState<ResumenComprobantes | null>(null);
   const [recargaComprobantes, setRecargaComprobantes] = useState(0);
 
   const [saldoLibros, setSaldoLibros] = useState("");
@@ -261,51 +257,18 @@ export function WizardContainer({
     }
     let cancelado = false;
     (async () => {
-      const supabase = createClient();
-      // Se pide también el TOTAL sin filtro de fecha: si el usuario cargó 5
-      // comprobantes y en el período caen 2, decir solo "2 registros" parece
-      // que se perdieron los otros. Saber que existen fuera del período evita
-      // esa alarma —y también avisa de que quizá eligió el mes equivocado.
-      const [{ data, count: enPeriodo }, { count: total }, { count: yaCobrados }] =
-        await Promise.all([
-          // Mismo criterio que `getComprobantesCanonicos`: lo saldado y lo
-          // anulado no entra, así que tampoco debe contarse aquí.
-          //
-          // ⚠️ El CONTEO va en `count: "exact"`, no en `data.length`: PostgREST
-          // corta en 1.000 filas y esta pantalla decía "1.000 registros" con
-          // 20.000 en el período. La suma sí sale de las filas traídas, así que
-          // con más de 1.000 es parcial — y el texto lo dice.
-          supabase
-            .from("comprobantes")
-            .select("monto", { count: "exact" })
-            .gte("fecha", periodo.desde)
-            .lte("fecha", periodo.hasta)
-            .not("estado", "in", "(cobrado,anulado)"),
-          supabase
-            .from("comprobantes")
-            .select("id", { count: "exact", head: true }),
-          // Los que caen en el período pero ya se cobraron: hay que decir que
-          // se dejan fuera, o parecerá que faltan.
-          supabase
-            .from("comprobantes")
-            .select("id", { count: "exact", head: true })
-            .gte("fecha", periodo.desde)
-            .lte("fecha", periodo.hasta)
-            .eq("estado", "cobrado"),
-        ]);
+      // ⚠️ Lo cuenta la BASE, no el navegador.
+      //
+      // Antes esto eran tres consultas por PostgREST con el cliente de RLS y
+      // sin filtro de empresa. La política es `es_miembro(empresa_id)`, una
+      // función sobre una columna que Postgres evalúa fila a fila: con 452.309
+      // comprobantes se pasa del `statement_timeout` de 8 s, las consultas
+      // vuelven nulas y la pantalla decía **"No hay comprobantes en este
+      // período"** sobre medio millón que sí estaban. Una respuesta
+      // tranquilizadora y falsa, que es la peor clase.
+      const r = await resumenComprobantesPeriodo(periodo.desde, periodo.hasta);
       if (cancelado) return;
-      const filas = data ?? [];
-      const suma = filas.reduce(
-        (acc, r) => acc + Math.abs(Number(r.monto ?? 0)),
-        0,
-      );
-      setComprobantesResumen({
-        registros: enPeriodo ?? filas.length,
-        sumaParcial: (enPeriodo ?? 0) > filas.length,
-        suma,
-        totalCargados: total ?? filas.length,
-        yaCobrados: yaCobrados ?? 0,
-      });
+      setComprobantesResumen(r);
     })();
     return () => {
       cancelado = true;
