@@ -864,3 +864,74 @@ export async function impactoDeAprobar(
 
   return { reemplaza, aplicaciones: count ?? 0 };
 }
+
+
+/** Cuántos cobros deberían estar aplicados y cuántos lo están. */
+export type EstadoCobros = { esperados: number; aplicados: number };
+
+/**
+ * ¿Quedó el reparto de cobros a medias?
+ *
+ * Aprobar son dos escrituras distintas: la transición contable y el reparto del
+ * saldo. La primera puede salir bien y la segunda quedarse a medio camino —pasó
+ * con 447.795 cobros, donde un lote se canceló por tiempo tras escribir 10.000.
+ *
+ * ⚠️ Y desde `aprobada` el botón "Aprobar" ya no se ofrece (`cicloContable`
+ * no lo permite), así que no había forma de reintentarlo desde la pantalla: la
+ * conciliación se quedaba diciendo que rige mientras medio millón de
+ * comprobantes seguían figurando como no cobrados. Un callejón sin salida.
+ */
+export async function estadoCobros(jobId: string): Promise<EstadoCobros> {
+  const admin = createAdminClient();
+  const [conf, apl] = await Promise.all([
+    admin
+      .from("matches_conciliacion")
+      .select("id", { count: "exact", head: true })
+      .eq("job_id", jobId)
+      .in("estado_revision", ["auto", "aceptado", "modificado"]),
+    admin
+      .from("aplicaciones_cobro")
+      .select("id", { count: "exact", head: true })
+      .eq("job_id", jobId),
+  ]);
+  return { esperados: conf.count ?? 0, aplicados: apl.count ?? 0 };
+}
+
+/**
+ * Reintenta el reparto de cobros de una conciliación ya aprobada.
+ *
+ * Continúa donde se quedó: cada lote salta lo ya aplicado, así que no duplica
+ * nada. Con medio millón de pares tarda varios minutos.
+ */
+export async function reintentarCobros(
+  jobId: string,
+): Promise<{ ok: boolean; aplicadas: number; error?: string }> {
+  const usuario = await getUsuarioActual();
+  if (!usuario) return { ok: false, aplicadas: 0, error: "No autenticado." };
+
+  // Lectura con RLS: garantiza que el job es de su empresa.
+  const supabase = await createClient();
+  const { data: job } = await supabase
+    .from("jobs_conciliacion")
+    .select("id, estado_contable")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (!job) return { ok: false, aplicadas: 0, error: "Conciliación no encontrada." };
+  if (job.estado_contable !== "aprobada") {
+    // Solo la aprobada mueve saldo: reintentar sobre otra escribiría cobros que
+    // no deben existir.
+    return { ok: false, aplicadas: 0, error: "Solo una conciliación aprobada aplica cobros." };
+  }
+
+  const ctx = await cargarContexto(jobId);
+  if ("error" in ctx) return { ok: false, aplicadas: 0, error: ctx.error };
+
+  const res = await sincronizarCobranzas(jobId, ctx.resultado);
+  revalidarConciliacion(jobId);
+  revalidatePath("/cobranzas");
+  return {
+    ok: res.ok,
+    aplicadas: res.aplicadas,
+    error: res.ok ? undefined : "El reparto volvió a interrumpirse. Vuelve a intentarlo.",
+  };
+}

@@ -962,6 +962,21 @@ Dos remedios, y hacen falta los dos:
 ese mismo proceso necesita un `analyze` intermedio.** No basta con analizar al
 importar.
 
+⚠️⚠️ **Y hacía falta una salida.** Aprobar son DOS escrituras —la transición
+contable y el reparto del saldo— y la primera puede salir bien con la segunda a
+medias. Desde `aprobada`, `cicloContable` ya no ofrece "Aprobar", así que no
+había forma de reintentar: la conciliación decía que regía mientras 437.795
+comprobantes seguían figurando como no cobrados.
+
+Un callejón sin salida, y de los que no se ven: **el saldo equivocado no
+protesta**. `estadoCobros` compara los pares confirmados con las aplicaciones
+escritas, y cuando no cuadran el panel lo dice y ofrece
+**"Reintentar la aplicación de cobros"**, que continúa donde se quedó.
+
+Lección: cuando una acción hace dos cosas y una puede fallar sola, **el estado
+intermedio necesita su propio camino de vuelta**. Basta con que no exista para
+que un fallo recuperable se vuelva permanente.
+
 ## ⚠️ RLS cuesta una llamada a función POR FILA (y a 450.000 se nota)
 
 El hallazgo más caro de dimensionar el cliente grande, y no estaba en ninguna

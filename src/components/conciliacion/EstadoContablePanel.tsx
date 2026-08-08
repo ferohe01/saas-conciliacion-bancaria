@@ -6,6 +6,7 @@ import { Boton } from "@/components/ui";
 import {
   cambiarEstadoContable,
   impactoDeAprobar,
+  reintentarCobros,
 } from "@/app/(app)/conciliacion/[jobId]/actions";
 import {
   accionesPosibles,
@@ -84,6 +85,7 @@ export function EstadoContablePanel({
   version,
   fechaAprobacion,
   hayVersionesPrevias,
+  cobros,
 }: {
   jobId: string;
   estadoContable: EstadoContable;
@@ -91,11 +93,28 @@ export function EstadoContablePanel({
   version: number;
   fechaAprobacion: string | null;
   hayVersionesPrevias: boolean;
+  /** Cobros esperados vs aplicados. Ausente en las conciliaciones antiguas. */
+  cobros?: { esperados: number; aplicados: number } | null;
 }) {
   const router = useRouter();
   const [pendiente, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
+
+  /**
+   * Aprobar son DOS escrituras: la transición contable y el reparto del saldo.
+   * La primera puede salir bien y la segunda quedarse a medias — pasó con
+   * 447.795 cobros, donde un lote se canceló tras escribir 10.000.
+   *
+   * ⚠️ Y desde `aprobada` el botón "Aprobar" ya no se ofrece, así que no había
+   * forma de reintentar: la conciliación decía que regía mientras medio millón
+   * de comprobantes seguían sin cobrar. Un callejón sin salida, y de los que no
+   * se ven — el saldo equivocado no protesta.
+   */
+  const cobrosIncompletos =
+    estadoContable === "aprobada" &&
+    cobros != null &&
+    cobros.aplicados < cobros.esperados;
 
   const tono = TONO[estadoContable];
   const acciones = accionesPosibles(estadoContable);
@@ -220,6 +239,45 @@ export function EstadoContablePanel({
           {hayVersionesPrevias &&
             " La versión anterior quedará marcada como reemplazada, sin borrarse."}
         </p>
+      )}
+
+      {cobrosIncompletos && (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-sm text-amber-900">
+            ⚠️ Esta conciliación rige, pero el saldo de tus comprobantes solo se
+            actualizó en parte:{" "}
+            <span className="font-semibold tabular-nums">
+              {cobros!.aplicados.toLocaleString("es-PE")}
+            </span>{" "}
+            de{" "}
+            <span className="font-semibold tabular-nums">
+              {cobros!.esperados.toLocaleString("es-PE")}
+            </span>{" "}
+            cobros. Hasta que termine, Por cobrar mostrará de más.
+          </p>
+          <Boton
+            variante="confirmar"
+            tamano="sm"
+            className="mt-3"
+            disabled={pendiente}
+            onClick={() => {
+              setError(null);
+              setAviso(null);
+              startTransition(async () => {
+                const r = await reintentarCobros(jobId);
+                if (!r.ok) setError(r.error ?? "No se pudo aplicar los cobros.");
+                else setAviso(`Se aplicaron ${r.aplicadas.toLocaleString("es-PE")} cobros.`);
+                router.refresh();
+              });
+            }}
+          >
+            {pendiente ? "Aplicando…" : "Reintentar la aplicación de cobros"}
+          </Boton>
+          <p className="mt-2 text-xs text-amber-800">
+            Continúa donde se quedó, no repite lo ya aplicado. Con medio millón
+            de pares tarda varios minutos.
+          </p>
+        </div>
       )}
 
       {aviso && (

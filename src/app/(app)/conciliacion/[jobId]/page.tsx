@@ -8,6 +8,7 @@ import { ResultadoReview } from "@/components/conciliacion/ResultadoReview";
 import { formatearFecha } from "@/lib/parsing/resumen";
 import { ResultadoConciliacion } from "@/lib/contract/resultado";
 import { absorberResultado } from "@/lib/conciliacion/absorber";
+import { estadoCobros } from "./actions";
 import { cargarVistaResultado } from "@/lib/conciliacion/vista";
 import { PayloadConciliacion } from "@/lib/contract/payload";
 import { EncabezadoPagina, BadgeEstadoJob } from "@/components/ui";
@@ -71,6 +72,13 @@ export default async function ConciliacionPage({
         .maybeSingle()
     : { data: null };
 
+  // Solo tiene sentido en el modo tabla: en el de siempre, el reparto va con
+  // las decisiones y no puede quedarse a medias.
+  const cobros =
+    data.lote_extracto_id && data.estado_contable === "aprobada"
+      ? await estadoCobros(jobId)
+      : null;
+
   const resultadoParsed =
     data.estado === "completado"
       ? ResultadoConciliacion.safeParse(fresco?.resultado ?? data.resultado)
@@ -124,6 +132,7 @@ export default async function ConciliacionPage({
         version={data.version ?? 1}
         fechaAprobacion={data.fecha_aprobacion ?? null}
         hayVersionesPrevias={hayVersionesPrevias}
+        cobros={cobros}
       />
 
       {mostrarReview ? (
