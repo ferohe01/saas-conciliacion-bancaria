@@ -147,6 +147,7 @@ export default async function ConciliacionPage({
             bancarios={vista?.bancarios ?? payloadParsed.data.movimientos_bancarios}
             moneda={payloadParsed.data.metadata.cuenta.moneda}
             precedentes={precedentes}
+            totalPares={vista?.totalPares}
           />
         </>
       ) : (

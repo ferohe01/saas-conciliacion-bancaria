@@ -63,7 +63,16 @@ export function ResultadoReview({
   bancarios,
   moneda,
   precedentes = {},
-}: Props & { precedentes?: Record<string, Precedente> }) {
+  totalPares,
+}: Props & {
+  precedentes?: Record<string, Precedente>;
+  /**
+   * Pares que existen de verdad. En modo tabla la pantalla solo carga mil, así
+   * que contarlos aquí subestimaría el trabajo hecho por dos órdenes de
+   * magnitud.
+   */
+  totalPares?: number;
+}) {
   const router = useRouter();
   const [pendiente, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -231,7 +240,21 @@ export function ResultadoReview({
 
   const c = resultado.cuadre;
   const cuadreCero = Math.abs(c.diferencia) < 0.005;
-  const totalPartidas = internos.length + bancarios.length;
+  /**
+   * ⚠️ Los totales salen del RESUMEN del job, no de los arrays cargados.
+   *
+   * En modo tabla la pantalla trae mil pares y las partidas que esos pares
+   * tocan: contar sobre eso daba "1.000 pares resueltos · 21% emparejado" en
+   * una conciliación de 447.796 pares al 99%. Dos cifras contradictorias en la
+   * misma pantalla —el aviso de arriba decía 447.796— y la mala era la grande y
+   * en negrita.
+   *
+   * El resumen sí es del período completo: la absorción lo actualiza sumando
+   * los pares que resolvió el SQL a los que devolvió n8n.
+   */
+  const totalPartidas =
+    (resultado.resumen?.total_internos ?? internos.length) +
+    (resultado.resumen?.total_bancarios ?? bancarios.length);
 
   return (
     <div className="space-y-6">
@@ -245,7 +268,7 @@ export function ResultadoReview({
       <ResumenTriaje
         porRevisar={cola.length}
         sinConciliar={sinConciliarInt.length + sinConciliarMov.length}
-        conciliados={conciliados.length}
+        conciliados={totalPares ?? conciliados.length}
         totalPartidas={totalPartidas}
       />
 
