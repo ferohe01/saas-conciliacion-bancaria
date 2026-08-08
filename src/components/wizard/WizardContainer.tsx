@@ -10,21 +10,11 @@ import { MapeoDataset } from "./MapeoDataset";
 import { CandadoIcon, ChevronIcon } from "./icons";
 import { createClient } from "@/lib/supabase/client";
 import { mesesRecientes, periodoDeRango, VALOR_RANGO } from "@/lib/periodo";
-import { procesarArchivo, type ArchivoProcesado } from "@/lib/parsing/procesar";
-import { detectarSaldoFinal } from "@/lib/parsing/saldo";
-import { validarCoherencia } from "@/lib/parsing/coherencia";
+import { previsualizarArchivo, type ArchivoProcesado } from "@/lib/parsing/procesar";
 import { formatearPEN, formatearFecha } from "@/lib/parsing/resumen";
 import { normalizarMonto } from "@/lib/normalizacion/monto";
 import type { MapeoColumnas } from "@/lib/parsing/deteccion";
-import { normalizarBancarios } from "@/lib/normalizacion/canonico";
-import {
-  guardarMapeoCuenta,
-  getComprobantesCanonicos,
-} from "@/app/(app)/wizard/actions";
-import type {
-  RegistroInterno,
-  MovimientoBancario,
-} from "@/lib/contract/payload";
+import { guardarMapeoCuenta } from "@/app/(app)/wizard/actions";
 import { Boton, CLASES_ENTRADA } from "@/components/ui";
 
 export type CuentaOpcion = {
@@ -122,23 +112,20 @@ function SelectField({
   );
 }
 
-function resumenParaZona(p: ArchivoProcesado, moneda: string): ArchivoResumen {
-  if (p.formato !== "excel" || !p.resumen) {
-    return {
-      nombre: p.nombre,
-      total:
-        p.formato === "pdf" ? "PDF · se procesará al conciliar" : undefined,
-    };
-  }
-  const r = p.resumen;
+/**
+ * Lo que se enseña del archivo recién elegido.
+ *
+ * Ya no lleva conteos ni sumas: de este archivo solo se han leído las primeras
+ * filas, y contar sobre ellas daría una cifra plausible y falsa. Los totales
+ * aparecen en el Paso 3, con lo que devolvió el servidor tras leerlo entero.
+ */
+function resumenParaZona(p: ArchivoProcesado): ArchivoResumen {
   return {
     nombre: p.nombre,
-    registros: r.registros,
-    total: formatearPEN(r.sumaTotal, moneda),
-    rangoFechas:
-      r.fechaMin && r.fechaMax
-        ? `${formatearFecha(r.fechaMin)} – ${formatearFecha(r.fechaMax)}`
-        : undefined,
+    total:
+      p.formato === "pdf"
+        ? "PDF · se procesará al conciliar"
+        : "Se leerá completo al confirmar las columnas",
   };
 }
 
@@ -188,11 +175,25 @@ export function WizardContainer({
   const [saldoExtIni, setSaldoExtIni] = useState("");
   const [saldoExtFin, setSaldoExtFin] = useState("");
 
-  // Resultados canónicos (para Paso 3 / envío a n8n en Fase 5).
-  const [internosCanon, setInternosCanon] = useState<RegistroInterno[]>([]);
-  const [bancariosCanon, setBancariosCanon] = useState<MovimientoBancario[]>(
-    [],
-  );
+  /**
+   * El archivo del extracto, tal cual. Ya no se parsea entero en el navegador:
+   * de él solo se leen las primeras filas para poder mapear columnas, y el
+   * original viaja al servidor, que es quien lo procesa por lotes.
+   */
+  const [archivoExtracto, setArchivoExtracto] = useState<File | null>(null);
+
+  /**
+   * Lo que devolvió el servidor al cargar el extracto. Los conteos y el saldo
+   * final son REALES —los ve quien leyó el archivo entero— en vez de una
+   * estimación sobre una previsualización.
+   */
+  const [lote, setLote] = useState<{
+    lote_id: string;
+    insertados: number;
+    invalidas: number;
+    saldo_final: number | null;
+    fuera_de_periodo: number;
+  } | null>(null);
 
   const [aviso, setAviso] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -217,13 +218,10 @@ export function WizardContainer({
   const cuenta = cuentas.find((c) => c.id === cuentaId);
   const moneda = cuenta?.moneda ?? "PEN";
 
-  const coherenciaExtracto = useMemo(
-    () =>
-      extracto?.resumen && periodo
-        ? validarCoherencia(extracto.resumen.fechasISO, periodo)
-        : null,
-    [extracto, periodo],
-  );
+  // La coherencia con el período la cuenta el SERVIDOR al importar
+  // (`fuera_de_periodo`), porque es quien ve todas las fechas. Calcularla sobre
+  // las primeras 500 filas daría por bueno un archivo entero mirando su
+  // cabecera, que es justo el error que este aviso existe para evitar.
 
   // Los comprobantes del período son la única fuente de registros internos, así
   // que su resumen se consulta siempre: es lo que dice si hay materia que
@@ -301,19 +299,21 @@ export function WizardContainer({
     }
     setError(null);
     setCargando(true);
+    // Un extracto nuevo invalida el que se hubiera cargado antes.
+    setLote(null);
     try {
-      const proc = await procesarArchivo(file, periodo);
+      // Solo la cabecera: lo justo para reconocer las columnas. Leer el archivo
+      // entero aquí es lo que impedía cargar un extracto de 26 MB, y no hace
+      // falta — el que lo procesa es el servidor.
+      const proc = await previsualizarArchivo(file);
       setExtracto(proc);
+      setArchivoExtracto(file);
       setMapeoExtracto(
         elegirMapeo(proc.mapeo, cuenta?.mapeo_columnas?.extracto, proc.headers),
       );
-      // Autodetectar el saldo final del extracto (columna de saldo/balance).
-      if (proc.formato === "excel" && saldoExtFin.trim() === "") {
-        const detectado = detectarSaldoFinal(proc.headers, proc.filas);
-        if (detectado != null) setSaldoExtFin(String(detectado));
-      }
     } catch {
       setExtracto(null);
+      setArchivoExtracto(null);
       setError(
         `No pudimos leer "${file.name}". Si es el extracto de tu banco, descárgalo en Excel, CSV o PDF y vuelve a subirlo.`,
       );
@@ -350,49 +350,75 @@ export function WizardContainer({
     setPaso(2);
   }
 
+  /**
+   * Confirmar el mapeo SUBE el extracto al servidor.
+   *
+   * Es el momento correcto: antes no se sabe qué columna es cuál, y después ya
+   * no habría dónde enseñar el resultado. Lo que vuelve —cuántos movimientos
+   * entraron, su saldo final, cuántos caen fuera del período— sale de leer el
+   * archivo entero, cosa que el navegador ya no hace.
+   */
   function confirmarPaso2() {
     setError(null);
+    if (!periodo || !cuentaId || !archivoExtracto) {
+      setError("Falta el período, la cuenta o el extracto. Vuelve al Paso 1.");
+      return;
+    }
     startTransition(async () => {
-      // Registros internos canónicos.
-      let internosOut: RegistroInterno[] = [];
-      if (fuente === "comprobantes") {
-        if (!periodo) {
-          setError("El período no es válido. Vuelve al Paso 1 y revísalo.");
-          return;
-        }
-        internosOut = await getComprobantesCanonicos(
-          periodo.desde,
-          periodo.hasta,
-        );
-      }
-
-      // Movimientos bancarios canónicos (solo si el extracto es Excel/CSV; el
-      // PDF se procesa en n8n).
-      const bancariosOut = extractoEsExcel
-        ? normalizarBancarios(extracto!.filas, mapeoExtracto).filas
-        : [];
-
-      if (internosOut.length === 0) {
-        setError("No hay registros internos válidos para conciliar.");
-        return;
-      }
-
-      // Guardar memoria de mapeos en la cuenta.
       if (cuentaId) {
         await guardarMapeoCuenta(cuentaId, {
           extracto: extractoEsExcel ? mapeoExtracto : undefined,
         });
       }
 
-      setInternosCanon(internosOut);
-      setBancariosCanon(bancariosOut);
-      setPaso(3);
+      const cuerpo = new FormData();
+      cuerpo.append("archivo", archivoExtracto);
+      cuerpo.append("cuenta_id", cuentaId);
+      cuerpo.append("mapeo", JSON.stringify(mapeoExtracto));
+      cuerpo.append("desde", periodo.desde);
+      cuerpo.append("hasta", periodo.hasta);
+
+      try {
+        const res = await fetch("/api/extracto/importar", {
+          method: "POST",
+          body: cuerpo,
+        });
+        const data = (await res.json()) as {
+          error?: string;
+          lote_id?: string;
+          insertados?: number;
+          invalidas?: number;
+          saldo_final?: number | null;
+          fuera_de_periodo?: number;
+        };
+        if (!res.ok || !data.lote_id) {
+          setError(data.error ?? "No se pudo cargar el extracto.");
+          return;
+        }
+        setLote({
+          lote_id: data.lote_id,
+          insertados: data.insertados ?? 0,
+          invalidas: data.invalidas ?? 0,
+          saldo_final: data.saldo_final ?? null,
+          fuera_de_periodo: data.fuera_de_periodo ?? 0,
+        });
+        // El saldo final lo detecta el servidor, que ve la última fila.
+        if (data.saldo_final != null && saldoExtFin.trim() === "") {
+          setSaldoExtFin(String(data.saldo_final));
+        }
+        setPaso(3);
+      } catch {
+        setError(
+          "No se pudo conectar con el servidor al cargar el extracto. Revisa tu conexión e inténtalo de nuevo.",
+        );
+      }
     });
   }
 
   const puedeIniciar =
-    internosCanon.length > 0 &&
-    bancariosCanon.length > 0 &&
+    lote != null &&
+    lote.insertados > 0 &&
+    (comprobantesResumen?.registros ?? 0) > 0 &&
     Boolean(cuentaId) &&
     periodo != null;
   const saldoExtractoFaltante =
@@ -421,11 +447,7 @@ export function WizardContainer({
     // Saldo extracto final: el ingresado, o (si falta) inicial + suma de
     // movimientos bancarios del período.
     const extIni = normalizarMonto(saldoExtIni);
-    let extFin = normalizarMonto(saldoExtFin);
-    if (extFin == null && extIni != null) {
-      const sumaMov = bancariosCanon.reduce((a, m) => a + m.monto, 0);
-      extFin = Number((extIni + sumaMov).toFixed(2));
-    }
+    const extFin = normalizarMonto(saldoExtFin);
 
     startTransition(async () => {
       try {
@@ -440,8 +462,11 @@ export function WizardContainer({
               saldo_extracto_inicial: extIni,
               saldo_extracto_final: extFin,
             },
-            registros_internos: internosCanon,
-            movimientos_bancarios: bancariosCanon,
+            // Ni una partida viaja en el cuerpo: el extracto ya está en la
+            // base y los comprobantes también. El backend corre la capa exacta
+            // en SQL y solo manda a n8n el residuo. Es lo que hace que 903.176
+            // partidas quepan en una petición de dos líneas.
+            lote_extracto_id: lote?.lote_id,
           }),
         });
         if (!res.ok) {
@@ -695,14 +720,9 @@ export function WizardContainer({
                 formatos="Excel, CSV o PDF"
                 bancos="BCP, BBVA, Interbank, Scotiabank"
                 accept=".xlsx,.xls,.csv,.pdf"
-                resumen={extracto ? resumenParaZona(extracto, moneda) : null}
+                resumen={extracto ? resumenParaZona(extracto) : null}
                 onArchivo={cargarExtracto}
               />
-              {coherenciaExtracto?.advertir && (
-                <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                  ⚠️ {coherenciaExtracto.mensaje}
-                </p>
-              )}
             </div>
           </div>
 
@@ -858,13 +878,13 @@ export function WizardContainer({
               <div className="rounded-2xl border border-neutral-200 bg-white p-5">
                 <p className="text-sm text-neutral-600">Tus registros</p>
                 <p className="mt-1 text-2xl font-bold tabular-nums text-neutral-900">
-                  {internosCanon.length.toLocaleString("es-PE")}
+                  {(comprobantesResumen?.registros ?? 0).toLocaleString("es-PE")}
                 </p>
               </div>
               <div className="rounded-2xl border border-neutral-200 bg-white p-5">
                 <p className="text-sm text-neutral-600">Movimientos del banco</p>
                 <p className="mt-1 text-2xl font-bold tabular-nums text-neutral-900">
-                  {bancariosCanon.length.toLocaleString("es-PE")}
+                  {(lote?.insertados ?? 0).toLocaleString("es-PE")}
                   {!extractoEsExcel && (
                     <span className="ml-2 text-sm font-normal text-neutral-600">
                       · se leerán del PDF al conciliar
@@ -873,6 +893,24 @@ export function WizardContainer({
                 </p>
               </div>
             </div>
+
+            {/* Lo que solo sabe quien leyó el archivo entero. Antes esto se
+                calculaba en el navegador sobre todas las filas; ahora el
+                navegador solo ve las primeras, así que lo cuenta el servidor
+                —y de paso son cifras reales, no estimaciones. */}
+            {lote && lote.fuera_de_periodo > 0 && (
+              <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                ⚠️ {lote.fuera_de_periodo.toLocaleString("es-PE")} de los{" "}
+                {lote.insertados.toLocaleString("es-PE")} movimientos del archivo
+                caen fuera del período elegido. ¿Es el extracto correcto?
+              </p>
+            )}
+            {lote && lote.invalidas > 0 && (
+              <p className="mt-2 rounded-lg bg-neutral-100 px-3 py-2 text-sm text-neutral-700">
+                Se descartaron {lote.invalidas.toLocaleString("es-PE")} filas sin
+                fecha o sin monto legible.
+              </p>
+            )}
 
             <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm">
               <dl className="grid gap-3 sm:grid-cols-2">
@@ -905,7 +943,7 @@ export function WizardContainer({
               </dl>
             </div>
 
-            {!puedeIniciar && bancariosCanon.length === 0 && (
+            {!puedeIniciar && (lote?.insertados ?? 0) === 0 && (
               <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700">
                 No hay movimientos bancarios para conciliar (¿el extracto es un
                 PDF? En el MVP usa Excel/CSV).

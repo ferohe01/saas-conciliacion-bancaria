@@ -7,6 +7,7 @@ import { getEmpresaActual } from "@/lib/auth";
 import { enLotes } from "@/lib/supabase/paginado";
 import { LectorCsv, type FilaCsv } from "@/lib/parsing/csv";
 import { normalizarMovimiento } from "@/lib/normalizacion/canonico";
+import { normalizarMonto } from "@/lib/normalizacion/monto";
 import type { MapeoColumnas } from "@/lib/parsing/deteccion";
 
 /**
@@ -47,6 +48,12 @@ const MAX_FILAS_XLSX = 50_000;
 
 const Cuerpo = z.object({
   cuenta_id: z.string().uuid(),
+  // El período elegido, para poder avisar de un archivo que no le corresponde.
+  // Lo cuenta el servidor porque es quien ve TODAS las fechas: el navegador
+  // solo tiene las primeras filas y podría dar por bueno un archivo entero
+  // mirando su cabecera.
+  desde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  hasta: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   mapeo: z.object({
     fecha: z.string().optional(),
     monto: z.string().optional(),
@@ -84,6 +91,8 @@ export async function POST(request: Request) {
   const parsed = Cuerpo.safeParse({
     cuenta_id: form?.get("cuenta_id"),
     mapeo: JSON.parse(String(form?.get("mapeo") ?? "{}")),
+    desde: form?.get("desde") ?? undefined,
+    hasta: form?.get("hasta") ?? undefined,
   });
   if (!parsed.success) {
     return NextResponse.json(
@@ -91,7 +100,7 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  const { cuenta_id, mapeo } = parsed.data;
+  const { cuenta_id, mapeo, desde, hasta } = parsed.data;
 
   // La cuenta debe ser de su empresa. RLS lo garantiza en esta lectura.
   const supabase = await createClient();
@@ -109,6 +118,14 @@ export async function POST(request: Request) {
   let insertados = 0;
   let invalidas = 0;
   let orden = 0;
+  // El saldo de la ÚLTIMA fila con valor. El navegador ya no puede detectarlo
+  // —solo ve las primeras filas— y adivinarlo mal corrompe el cuadre en
+  // silencio, así que lo devuelve quien ve el archivo entero.
+  let saldoFinal: number | null = null;
+  let sumaMontos = 0;
+  let fueraDePeriodo = 0;
+  let fechaMin: string | null = null;
+  let fechaMax: string | null = null;
   let pendientes: Fila[] = [];
 
   const descargar = async (): Promise<string | null> => {
@@ -134,6 +151,14 @@ export async function POST(request: Request) {
       invalidas++;
       return;
     }
+    if (mapeo.saldo) {
+      const s = normalizarMonto(cruda[mapeo.saldo]);
+      if (s != null) saldoFinal = s;
+    }
+    sumaMontos += m.monto;
+    if (fechaMin === null || m.fecha < fechaMin) fechaMin = m.fecha;
+    if (fechaMax === null || m.fecha > fechaMax) fechaMax = m.fecha;
+    if ((desde && m.fecha < desde) || (hasta && m.fecha > hasta)) fueraDePeriodo++;
     pendientes.push({
       empresa_id: empresa.empresa_id,
       cuenta_id,
@@ -212,5 +237,16 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({ ok: true, lote_id, insertados, invalidas });
+  return NextResponse.json({
+    ok: true,
+    lote_id,
+    insertados,
+    invalidas,
+    // Conteo y sumas REALES, no estimadas sobre una previsualización.
+    saldo_final: saldoFinal,
+    suma_montos: Number(sumaMontos.toFixed(2)),
+    fuera_de_periodo: fueraDePeriodo,
+    fecha_min: fechaMin,
+    fecha_max: fechaMax,
+  });
 }

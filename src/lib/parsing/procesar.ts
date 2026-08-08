@@ -1,5 +1,6 @@
 import {
   leerArchivo,
+  leerCabecera,
   esExtensionSoportada,
   esPDF,
 } from "./leerArchivo";
@@ -65,5 +66,44 @@ export async function procesarArchivo(
     mapeo,
     resumen,
     coherencia,
+  };
+}
+
+/**
+ * Previsualización para el Paso 2: SOLO las primeras filas.
+ *
+ * El mapeo de columnas necesita ejemplos, no el archivo entero. Leerlo entero
+ * era lo que impedía cargar un extracto de 26 MB en el navegador — y no hace
+ * falta, porque quien lo procesa es el servidor.
+ *
+ * ⚠️ `resumen` viene en `null` a propósito: contar y sumar sobre las primeras
+ * 500 filas daría cifras plausibles y falsas. Los totales, el rango de fechas y
+ * el saldo final los devuelve `/api/extracto/importar`, que lo ve completo.
+ */
+export async function previsualizarArchivo(
+  file: File,
+): Promise<ArchivoProcesado> {
+  if (esPDF(file.name)) {
+    return {
+      nombre: file.name, formato: "pdf", headers: [], filas: [],
+      mapeo: {}, resumen: null, coherencia: null,
+    };
+  }
+  if (!esExtensionSoportada(file.name)) {
+    return {
+      nombre: file.name, formato: "no_soportado", headers: [], filas: [],
+      mapeo: {}, resumen: null, coherencia: null,
+    };
+  }
+
+  const { headers, filas } = await leerCabecera(file);
+  return {
+    nombre: file.name,
+    formato: "excel",
+    headers,
+    filas,
+    mapeo: detectarColumnas(headers, filas.slice(0, 20)),
+    resumen: null,
+    coherencia: null,
   };
 }
