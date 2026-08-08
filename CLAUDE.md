@@ -489,7 +489,24 @@ wizard ofrecía dos veces la misma factura.
 
 **Limpiar lo cargado.** Cada carga marca sus filas con `lote_importacion`, así
 que se puede *deshacer esa importación* sin tocar las demás; y `/comprobantes`
-tiene un "Empezar de cero" que exige escribir la palabra. Ninguna de las dos
+tiene un "Empezar de cero" que exige escribir la palabra.
+
+⚠️ **Deshacer solo existía en el instante de subir.** Vivía en el estado del
+componente de carga: al recargar la página desaparecía y la única salida era
+"Empezar de cero" — que borra TODO y pide escribir una palabra. O sea que quitar
+la última carga para volver a subirla, lo más normal del mundo mientras se
+preparan los datos, obligaba a borrarlo todo.
+
+`/comprobantes` lista ahora las **Cargas realizadas** (`lotes_importacion`,
+migración `0034`), cada una con su fecha, su recuento y su propio "Quitar esta
+carga". Sobrevive a la recarga porque sale de la base, no del estado.
+
+- Confirmación en **dos pasos pero sin escribir nada**: quitar una carga es
+  reversible volviéndola a subir. La palabra escrita se reserva para "Empezar de
+  cero", que se lleva también lo que no se sabe de dónde salió.
+- El aviso dice **siempre** cuántos se conservaron por tener cobros aplicados,
+  aunque sean cero: omitirlo haría que un "borrados 900 de 1.000" pareciera un
+  fallo en vez de la regla. Ninguna de las dos
 borra un comprobante **con cobros aplicados**: eso se iría en cascada y dejaría
 un agujero en una conciliación aprobada, que seguiría diciendo que esa factura
 se cobró. Lo conciliado no se limpia, se **anula** (ver `0016`).

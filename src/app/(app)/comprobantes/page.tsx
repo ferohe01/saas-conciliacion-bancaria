@@ -3,6 +3,10 @@ import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getEmpresaActual } from "@/lib/auth";
 import { ImportadorComprobantes } from "@/components/wizard/ImportadorComprobantes";
+import {
+  CargasRealizadas,
+  type Carga,
+} from "@/components/comprobantes/CargasRealizadas";
 import { formatearFecha } from "@/lib/parsing/resumen";
 import { montoPEN } from "@/lib/suscripcion";
 import { EncabezadoPagina, EstadoVacio } from "@/components/ui";
@@ -89,6 +93,19 @@ export default async function ComprobantesPage({
     .select("id", { count: "exact", head: true })
     .eq("empresa_id", empresa.empresa_id);
 
+  // Las cargas hechas, para poder quitar una sin borrarlo todo. Se agrupa en
+  // la base: contar por lote desde aquí exigiría traerse las 452.309 filas.
+  const { data: lotes } = await supabase.rpc("lotes_importacion");
+  const cargas: Carga[] = ((lotes ?? []) as {
+    lote: string;
+    filas: number | string;
+    cargado: string;
+  }[]).map((l) => ({
+    lote: l.lote,
+    filas: Number(l.filas),
+    cargado: l.cargado,
+  }));
+
   const { data } = await supabase
     .from("comprobantes")
     .select(
@@ -118,6 +135,8 @@ export default async function ComprobantesPage({
       />
 
       <ImportadorComprobantes />
+
+      <CargasRealizadas cargas={cargas} />
 
       {todas.length > 0 && (
         <FiltrosComprobantes valores={filtro} anios={anios} />
