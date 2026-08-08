@@ -10,6 +10,8 @@ import {
   ResultadoConciliacion,
   type Match,
 } from "@/lib/contract/resultado";
+import { PayloadConciliacion } from "@/lib/contract/payload";
+import { cargarVistaResultado } from "@/lib/conciliacion/vista";
 import {
   calcularAplicaciones,
   type RegistroPayload,
@@ -37,6 +39,16 @@ import {
 type Ctx = {
   usuarioId: string;
   resultado: ResultadoConciliacion;
+  /**
+   * Ids de `matches_conciliacion` alineados por índice con
+   * `resultado.matches`, o `null` si los pares viven en el JSONB.
+   *
+   * ⚠️ Se cargan con la MISMA consulta que usa la pantalla
+   * (`cargarVistaResultado`), y eso no es casual: los componentes identifican
+   * un par por su POSICIÓN en el array, así que si las dos listas no salieran
+   * en el mismo orden, aceptar el tercero de la pantalla modificaría otro.
+   */
+  idsTabla: string[] | null;
 };
 
 async function cargarContexto(jobId: string): Promise<Ctx | { error: string }> {
@@ -46,7 +58,7 @@ async function cargarContexto(jobId: string): Promise<Ctx | { error: string }> {
   const supabase = await createClient(); // RLS: solo jobs de su empresa
   const { data } = await supabase
     .from("jobs_conciliacion")
-    .select("resultado")
+    .select("resultado, payload_entrada, lote_extracto_id")
     .eq("id", jobId)
     .maybeSingle();
 
@@ -55,7 +67,68 @@ async function cargarContexto(jobId: string): Promise<Ctx | { error: string }> {
   const parsed = ResultadoConciliacion.safeParse(data.resultado);
   if (!parsed.success) return { error: "Resultado con formato inesperado." };
 
-  return { usuarioId: usuario.id, resultado: parsed.data };
+  if (!data.lote_extracto_id) {
+    return { usuarioId: usuario.id, resultado: parsed.data, idsTabla: null };
+  }
+
+  const payload = PayloadConciliacion.safeParse(data.payload_entrada);
+  const vista = await cargarVistaResultado(
+    jobId,
+    parsed.data,
+    payload.success ? payload.data : null,
+  );
+  return {
+    usuarioId: usuario.id,
+    resultado: vista.resultado,
+    idsTabla: vista.idsMatches,
+  };
+}
+
+/**
+ * Persiste en `matches_conciliacion` los pares que cambiaron.
+ *
+ * Solo los tocados: la vista carga hasta mil y reescribirlos todos por una
+ * aceptación sería mil escrituras para un clic.
+ */
+async function guardarEnTabla(
+  jobId: string,
+  ctx: Ctx,
+  indices: number[],
+): Promise<{ ok: boolean; error?: string }> {
+  const admin = createAdminClient();
+  for (const i of indices) {
+    const m = ctx.resultado.matches[i];
+    const id = ctx.idsTabla?.[i];
+    if (!m || !id) continue;
+    // ⚠️ Se comprueba el error: `supabase-js` lo devuelve, no lo lanza, y una
+    // decisión que no se guarda es peor que una que falla a la vista.
+    const { error } = await admin
+      .from("matches_conciliacion")
+      .update({
+        estado_revision: m.estado_revision,
+        decisiones: m.decisiones ?? [],
+        excluido_aprendizaje: m.excluido_aprendizaje ?? false,
+      })
+      .eq("id", id);
+    if (error) {
+      console.error(`[decision] no se pudo guardar el par ${id}:`, error);
+      return { ok: false, error: "No se pudo guardar la decisión." };
+    }
+  }
+  await sincronizarCobranzas(jobId, ctx.resultado);
+  revalidatePath(`/conciliacion/${jobId}`);
+  return { ok: true };
+}
+
+/** Guarda por el camino que corresponda: tabla o JSONB. */
+async function persistir(
+  jobId: string,
+  ctx: Ctx,
+  indices: number[],
+): Promise<{ ok: boolean; error?: string }> {
+  return ctx.idsTabla
+    ? guardarEnTabla(jobId, ctx, indices)
+    : guardar(jobId, ctx.resultado);
 }
 
 async function guardar(jobId: string, resultado: ResultadoConciliacion) {
@@ -181,7 +254,7 @@ async function sincronizarCobranzas(
     const admin = createAdminClient();
     const { data: job } = await admin
       .from("jobs_conciliacion")
-      .select("empresa_id, usuario_id, estado_contable, payload_entrada")
+      .select("empresa_id, usuario_id, estado_contable, payload_entrada, lote_extracto_id")
       .eq("id", jobId)
       .maybeSingle();
     if (!job) return { ok: false, aplicadas: 0 };
@@ -202,6 +275,23 @@ async function sincronizarCobranzas(
       // Retirar el saldo cuando el documento deja de regir ES el resultado
       // correcto, no un fallo: cero aplicaciones es exactamente lo que toca.
       return { ok: true, aplicadas: 0 };
+    }
+
+    // ⚠️⚠️ EN MODO TABLA NO SE TOCA EL SALDO DESDE AQUI.
+    //
+    // Esta funcion REEMPLAZA el conjunto completo de aplicaciones del job a
+    // partir de `resultado.matches`. En modo tabla ese array es una PAGINA de
+    // como mucho mil pares, no la conciliacion entera: rehacer las
+    // aplicaciones con eso borraria las de los otros 446.795 y dejaria medio
+    // millon de comprobantes figurando como no cobrados.
+    //
+    // Hacerlo bien exige calcular el reparto en SQL, igual que la capa exacta:
+    // 447.795 aplicaciones no se escriben desde Node en un tiempo razonable
+    // (~900 peticiones). Hasta que exista esa via, se prefiere NO mover el
+    // saldo a moverlo mal — un cobro perdido se ve; uno borrado en masa se
+    // descubre semanas despues, cuando alguien mira Por cobrar.
+    if (job.lote_extracto_id) {
+      return { ok: false, aplicadas: 0 };
     }
 
     const payload = job.payload_entrada as {
@@ -444,7 +534,7 @@ export async function registrarDecision(
     },
   ];
 
-  return guardar(jobId, ctx.resultado);
+  return persistir(jobId, ctx, [matchIndex]);
 }
 
 /**
@@ -492,7 +582,7 @@ export async function registrarDecisiones(
     return { ok: false, error: "No se encontró ninguna de esas sugerencias." };
   }
 
-  const res = await guardar(jobId, ctx.resultado);
+  const res = await persistir(jobId, ctx, matchIndices);
   return res.ok ? { ok: true, aplicadas } : res;
 }
 
@@ -537,7 +627,7 @@ export async function reabrirDecision(
     },
   ];
 
-  return guardar(jobId, ctx.resultado);
+  return persistir(jobId, ctx, [matchIndex]);
 }
 
 const ManualSchema = z.object({
@@ -594,6 +684,33 @@ export async function conciliarManual(
     ctx.resultado.no_conciliados.filter((p) => p.lado === "interno").length;
   ctx.resultado.resumen.sin_conciliar_bancarios =
     ctx.resultado.no_conciliados.filter((p) => p.lado === "bancario").length;
+
+  // ⚠️ Un match MANUAL es una fila nueva, no una modificación: en modo tabla
+  // hay que insertarla, porque `persistir` solo sabe actualizar las que ya
+  // existen. Sin esto, conciliar a mano no dejaría rastro.
+  if (ctx.idsTabla) {
+    const admin = createAdminClient();
+    const { data: job } = await admin
+      .from("jobs_conciliacion")
+      .select("empresa_id")
+      .eq("id", jobId)
+      .maybeSingle();
+    const { error } = await admin.from("matches_conciliacion").insert({
+      job_id: jobId,
+      empresa_id: job?.empresa_id,
+      comprobante_ids: ids_internos,
+      movimiento_ids: ids_movimientos,
+      metodo: "manual",
+      estado_revision: "aceptado",
+      decisiones: nuevo.decisiones ?? [],
+    });
+    if (error) {
+      console.error(`[manual] no se pudo guardar el par de ${jobId}:`, error);
+      return { ok: false, error: "No se pudo guardar la conciliación manual." };
+    }
+    revalidatePath(`/conciliacion/${jobId}`);
+    return { ok: true };
+  }
 
   return guardar(jobId, ctx.resultado);
 }
