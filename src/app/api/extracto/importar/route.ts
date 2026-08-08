@@ -237,6 +237,22 @@ export async function POST(request: Request) {
     );
   }
 
+  // ⚠️ Estadísticas frescas antes de que alguien concilie esto.
+  //
+  // Acabamos de meter cientos de miles de filas y el planificador aún cree que
+  // la tabla tiene el tamaño de antes. Con datos viejos elige planes que se
+  // pasan del `statement_timeout` en la MISMA consulta que iba bien —pasó con
+  // `residuo_internos`, de 1,68 s a cancelarse, sin que cambiara una línea de
+  // código. Autovacuum lo haría solo, pero tarda, y la ventana en la que no lo
+  // ha hecho es justo cuando se concilia lo recién importado.
+  //
+  // Si falla no se interrumpe la carga: los datos están, y lo peor que puede
+  // pasar es una conciliación lenta.
+  const { error: errAnalisis } = await admin.rpc("analizar_tablas_conciliacion");
+  if (errAnalisis) {
+    console.error("[extracto] no se pudieron refrescar las estadísticas:", errAnalisis);
+  }
+
   return NextResponse.json({
     ok: true,
     lote_id,

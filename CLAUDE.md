@@ -860,6 +860,28 @@ ventana mensual los recupera. Contradice la intuición de que trocear ayuda:
 trocear ayuda al *tamaño*, y perjudica al *resultado*. Con la capa exacta en SQL
 ya no hace falta trocear, así que la recomendación al cliente cambia.
 
+## ⚠️ Una tabla que cambia de tamaño de golpe necesita ANALYZE
+
+El planificador decide con estadísticas. Cuando una tabla crece medio millón de
+filas de una importación —o la reescribe una migración— esas estadísticas se
+quedan viejas y elige planes malos **para la misma consulta que antes iba bien**.
+
+Y el síntoma no apunta a esto. `residuo_internos` estaba medido en 1,68 s;
+después de que la `0029` reescribiera `comprobantes` para añadir `ref_norm`,
+empezó a pasarse del `statement_timeout` de 8 s sin que cambiara una línea de
+código. Un `vacuum analyze` lo devolvió a 1,5 s.
+
+Autovacuum acaba haciéndolo solo, pero tarda — y la ventana en la que no lo ha
+hecho es **exactamente** cuando alguien concilia lo que acaba de importar.
+
+- `analizar_tablas_conciliacion()` (`0030`) lo hace a petición. Va como
+  SECURITY DEFINER porque `ANALYZE` exige ser dueño de la tabla y `service_role`
+  no lo es.
+- Las dos ingestas la llaman al terminar. Si falla no se interrumpe la carga:
+  los datos están, y lo peor es una conciliación lenta.
+- **Regla: toda migración que reescriba una tabla grande termina con `analyze`.**
+  Añadir una columna `generated ... stored` la reescribe.
+
 ## ⚠️ RLS cuesta una llamada a función POR FILA (y a 450.000 se nota)
 
 El hallazgo más caro de dimensionar el cliente grande, y no estaba en ninguna

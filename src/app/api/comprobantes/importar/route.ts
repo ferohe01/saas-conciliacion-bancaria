@@ -249,6 +249,16 @@ export async function POST(request: Request) {
     );
   }
 
+  // Mismo motivo que en la ingesta del extracto: tras meter cientos de miles
+  // de filas, el planificador necesita saberlo antes de la primera
+  // conciliación. Ver `0030_analizar_tras_carga.sql`.
+  if (resumen.insertados > 1000) {
+    const { error: errAnalisis } = await admin.rpc("analizar_tablas_conciliacion");
+    if (errAnalisis) {
+      console.error("[comprobantes] no se pudieron refrescar las estadísticas:", errAnalisis);
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     ...resumen,
