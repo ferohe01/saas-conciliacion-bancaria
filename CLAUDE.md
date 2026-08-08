@@ -587,6 +587,14 @@ comprobantes fallaba con un escueto *"No se pudieron borrar los comprobantes"* �
 y antes fallaba en silencio la consulta de protegidos, porque `traerTodo` se
 traga el error. Por eso `enLotes` trocea de **100 en 100**.
 
+⚠️ **Y borrar medio millón tampoco cabe en una sentencia.** «Quitar esta carga»
+fallaba con un escueto *«No se pudo deshacer la importación»*: borrar 452.309
+comprobantes tarda ~13 s contra los 8 del `statement_timeout`, así que se
+cancelaba entera y no borraba nada. Va por lotes de 20.000
+(`borrar_comprobantes`, migración `0035`), y si se interrumpe a medias **se
+informa de cuántos sí se quitaron** — decir "no se pudo" cuando ya
+desaparecieron 300.000 filas sería mentir sobre el estado.
+
 **Y mejor todavía: no contar una por una lo que se va a borrar en bloque.**
 "Deshacer esta importación" con 100.000 comprobantes tardaba **4-5 minutos**
 porque pedía los 100.000 ids —cien peticiones— para al final lanzar un solo

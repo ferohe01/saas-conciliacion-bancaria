@@ -4,7 +4,6 @@ import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { traerTodo, enLotes } from "@/lib/supabase/paginado";
 import { getEmpresaActual } from "@/lib/auth";
 import {
@@ -175,36 +174,6 @@ export type BorradoResultado = {
   protegidos?: number;
 };
 
-/**
- * Comprobantes de la empresa que NO se pueden borrar porque una conciliación ya
- * les aplicó un cobro.
- *
- * Borrarlos dejaría un agujero en una conciliación aprobada: la
- * `aplicaciones_cobro` se iría en cascada y el resultado del job seguiría
- * diciendo que esa factura se cobró. Lo conciliado no se limpia; se anula.
- */
-async function idsConCobros(
-  supabase: ReturnType<typeof createAdminClient>,
-  empresaId: string,
-): Promise<string[]> {
-  // Se parte de las APLICACIONES, no de los comprobantes: son órdenes de
-  // magnitud menos. Enumerar los comprobantes para preguntar cuáles están
-  // protegidos costaba una petición por cada mil — con 100.000 comprobantes
-  // eran cien viajes antes de borrar una sola fila, y "Deshacer" tardaba
-  // cuatro minutos.
-  const filas = await traerTodo<{ comprobante_id: string }>((d, h) =>
-    supabase
-      .from("aplicaciones_cobro")
-      .select("comprobante_id")
-      // Con `admin` no hay RLS: sin este filtro se traerían las aplicaciones de
-      // otras empresas. No causaría un borrado indebido —protegería de más—
-      // pero sí conservaría comprobantes que sí podían borrarse.
-      .eq("empresa_id", empresaId)
-      .order("id", { ascending: true })
-      .range(d, h),
-  );
-  return [...new Set(filas.map((a) => String(a.comprobante_id)))];
-}
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
@@ -218,39 +187,46 @@ async function idsConCobros(
  * usaba cuando no había nada protegido.
  */
 async function borrarComprobantes(
-  supabase: ReturnType<typeof createAdminClient>,
-  empresaId: string,
-  filtrar: (q: any) => any,
+  lote: string | null,
   errorMsg: string,
 ): Promise<BorradoResultado> {
-  const { count: total } = await filtrar(
-    supabase.from("comprobantes").select("id", { count: "exact", head: true }),
-  );
-  if (!total) return { ok: true, borrados: 0, protegidos: 0 };
+  // ⚠️ Cliente de SESIÓN, no `admin`: `borrar_comprobantes` resuelve la empresa
+  // desde `auth.uid()`. Con `admin` no hay usuario y no borraría nada, sin
+  // error — el mismo fallo silencioso que ocultó "Cargas realizadas".
+  const supabase = await createClient();
 
-  // ¿Cuáles de los protegidos caen dentro de este filtro? Se pregunta con un
-  // `.in()` sobre los pocos protegidos, nunca sobre los miles a borrar.
-  const protegidosAqui: string[] = [];
-  for (const parte of enLotes(await idsConCobros(supabase, empresaId))) {
-    const { data } = await filtrar(
-      supabase.from("comprobantes").select("id").in("id", parte),
-    );
-    for (const c of (data ?? []) as { id: string }[]) protegidosAqui.push(String(c.id));
+  // Lo protegido se cuenta ANTES: después de borrar ya no se distingue de lo
+  // que nunca estuvo.
+  const { data: prot } = await supabase.rpc("comprobantes_protegidos", {
+    p_lote: lote,
+  });
+  const protegidos = Number(prot ?? 0);
+
+  // ⚠️ POR LOTES. Borrar 452.309 comprobantes en una sentencia tarda ~13 s y el
+  // `statement_timeout` es de 8: se cancelaba entera y no borraba nada, con un
+  // escueto "No se pudo deshacer la importación" como toda pista.
+  let borrados = 0;
+  for (let vuelta = 0; vuelta < 500; vuelta++) {
+    const { data, error } = await supabase.rpc("borrar_comprobantes", {
+      p_lote: lote,
+      p_limite: 20000,
+    });
+    if (error) {
+      console.error("[comprobantes] fallo al borrar:", error);
+      // Se informa de lo que SÍ se borró: dejarlo en "no se pudo" cuando ya
+      // desaparecieron 300.000 filas sería mentir sobre el estado.
+      return borrados > 0
+        ? { ok: false, borrados, protegidos, error: `${errorMsg} Se quitaron ${borrados.toLocaleString("es-PE")} antes de interrumpirse.` }
+        : { ok: false, error: errorMsg };
+    }
+    const n = Number(data ?? 0);
+    if (n === 0) break;
+    borrados += n;
   }
 
-  let borrado = filtrar(supabase.from("comprobantes").delete());
-  if (protegidosAqui.length > 0) {
-    borrado = borrado.not("id", "in", `(${protegidosAqui.join(",")})`);
-  }
-  const { error } = await borrado;
-  if (error) return { ok: false, error: errorMsg };
-
-  return {
-    ok: true,
-    borrados: total - protegidosAqui.length,
-    protegidos: protegidosAqui.length,
-  };
+  return { ok: true, borrados, protegidos };
 }
+
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 /** Deshace una carga de plantilla: borra los comprobantes intactos de ese lote. */
@@ -261,19 +237,7 @@ export async function deshacerImportacion(
   if (!empresa) return { ok: false, error: "Sesión no válida." };
   if (!lote) return { ok: false, error: "Falta indicar qué importación deshacer." };
 
-  // ⚠️ `admin` + filtro explícito de empresa. Con el cliente de RLS, Postgres
-  // evalúa `es_miembro(empresa_id)` fila a fila: sobre 452.309 comprobantes eso
-  // se pasa del `statement_timeout` de 8 s y el borrado no llega a hacerse.
-  // El acotado no se pierde — se hace aquí, con la empresa de la sesión.
-  const supabase = createAdminClient();
-  const res = await borrarComprobantes(
-    supabase,
-    empresa.empresa_id,
-    // El `empresa_id` NO sobra aunque el lote sea único: con `admin` no hay RLS
-    // detrás, y este filtro es lo único que impide tocar otra empresa.
-    (q) => q.eq("empresa_id", empresa.empresa_id).eq("lote_importacion", lote),
-    "No se pudo deshacer la importación.",
-  );
+  const res = await borrarComprobantes(lote, "No se pudo deshacer la importación.");
   if (res.ok) revalidatePath("/comprobantes");
   return res;
 }
@@ -298,24 +262,9 @@ export async function vaciarComprobantes(
   const empresa = await getEmpresaActual();
   if (!empresa) return { ok: false, error: "Sesión no válida." };
 
-  // ⚠️ `admin` + filtro explícito de empresa. Con el cliente de RLS, Postgres
-  // evalúa `es_miembro(empresa_id)` fila a fila: sobre 452.309 comprobantes eso
-  // se pasa del `statement_timeout` de 8 s y el borrado no llega a hacerse.
-  // El acotado no se pierde — se hace aquí, con la empresa de la sesión.
-  const supabase = createAdminClient();
-  const res = await borrarComprobantes(
-    supabase,
-    empresa.empresa_id,
-    // ⚠️⚠️ ESTE FILTRO ES LA FRONTERA. Antes decía `not("id","is",null)` y el
-    // comentario explicaba que "RLS ya acota" — cierto con el cliente anon,
-    // FALSO con `admin`. Al cambiar de cliente por rendimiento, esa línea
-    // pasaba a borrar los comprobantes de TODAS las empresas del sistema.
-    //
-    // Moraleja: cuando una consulta se mueve de RLS a `service_role`, hay que
-    // reescribir a mano cada condición que RLS estaba poniendo por debajo.
-    (q) => q.eq("empresa_id", empresa.empresa_id),
-    "No se pudieron borrar los comprobantes.",
-  );
+  // Sin lote = todos los de la empresa. El acotado lo hace la función con
+  // `auth.uid()`, así que no hay forma de pedir los de otra.
+  const res = await borrarComprobantes(null, "No se pudieron borrar los comprobantes.");
   if (res.ok) revalidatePath("/comprobantes");
   return res;
 }
