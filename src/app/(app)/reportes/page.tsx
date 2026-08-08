@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { conteoCategoriasDeJobs } from "@/lib/conciliacion/conteos";
 import { EncabezadoPagina, EstadoVacio, clasesBoton } from "@/components/ui";
 import { FiltrosReporte } from "@/components/reportes/FiltrosReporte";
 import { AvisoSinAprobar } from "@/components/conciliacion/AvisoSinAprobar";
@@ -64,7 +65,7 @@ export default async function ReportesPage({
       supabase
         .from("jobs_conciliacion")
         .select(
-          "id, periodo_desde, periodo_hasta, estado, cuenta_id, created_at, resultado, cuentas_bancarias(banco, numero_enmascarado)",
+          "id, periodo_desde, periodo_hasta, estado, cuenta_id, created_at, resultado, lote_extracto_id, cuentas_bancarias(banco, numero_enmascarado)",
         )
         // Solo lo APROBADO alimenta el reporte: es la conciliacion que rige.
         .eq("estado", "completado")
@@ -83,6 +84,14 @@ export default async function ReportesPage({
     banco: string;
     numero_enmascarado: string | null;
   }[];
+
+  // Los jobs de modo tabla no llevan sus pares en el JSONB: su desglose se
+  // cuenta en la base (ver `lib/conciliacion/conteos.ts`).
+  const categoriasPorJob = await conteoCategoriasDeJobs(
+    (jobsData ?? [])
+      .filter((j) => (j as { lote_extracto_id?: string | null }).lote_extracto_id)
+      .map((j) => (j as { id: string }).id),
+  );
 
   // Normalizar jobs a JobReporte (solo los que tienen resumen válido).
   const jobs: JobReporte[] = [];
@@ -108,7 +117,10 @@ export default async function ReportesPage({
       resumen,
       diferenciaCuadre: Number(j.resultado?.cuadre?.diferencia ?? 0),
       createdAt: j.created_at,
-      categorias: contarCategorias(j.resultado?.matches ?? []),
+      // El conteo de la base manda cuando existe: los jobs de modo tabla no
+      // llevan sus pares en el JSONB.
+      categorias:
+        categoriasPorJob[j.id] ?? contarCategorias(j.resultado?.matches ?? []),
     });
     jobsMeta.set(j.id, { periodo_desde: j.periodo_desde, banco, numero });
   }

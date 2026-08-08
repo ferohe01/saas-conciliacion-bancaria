@@ -1,5 +1,6 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
+import { hidratarJobsModoTabla } from "@/lib/conciliacion/historico";
 import {
   resumenAprendizaje,
   ejemplosActivos,
@@ -46,13 +47,19 @@ export async function getDatosAprendizaje(): Promise<DatosAprendizaje> {
   const supabase = await createClient(); // RLS: solo la empresa del usuario
   const { data } = await supabase
     .from("jobs_conciliacion")
-    .select("id, created_at, payload_entrada, resultado")
+    .select("id, created_at, payload_entrada, resultado, lote_extracto_id")
     .eq("estado", "completado")
     .not("resultado", "is", null)
     .order("created_at", { ascending: false })
     .limit(JOBS_METRICAS);
 
-  const jobs = (data ?? []) as JobMetrica[];
+  // ⚠️ En modo tabla los pares no están en `resultado.matches`, así que sin
+  // hidratar el pool saldría VACÍO justo en la empresa con medio millón de
+  // partidas — la que más criterio tiene que enseñar. Solo se traen los pares
+  // que revisó una persona: los `auto` no son ejemplo de nada.
+  const jobs = (await hidratarJobsModoTabla(
+    (data ?? []) as (JobMetrica & { lote_extracto_id?: string | null })[],
+  )) as unknown as JobMetrica[];
 
   const { data: filaEmpresa } = await supabase
     .from("empresas")

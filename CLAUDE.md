@@ -717,6 +717,7 @@ Cuatro etapas, cada una desplegable por su cuenta:
 | 3 | n8n recibe solo el **residuo** | ✅ `0024` |
 | 4 | La pantalla lee los matches de tabla en vez del JSONB | ✅ |
 | 5 | El reparto de cobros de la capa exacta, en SQL | ✅ `0025` |
+| 6 | Reportes y aprendizaje sobre los pares en tabla | ✅ `0026` |
 
 ### El reparto de cobros (etapa 5)
 
@@ -773,6 +774,27 @@ referencia distinta.
   equivoca en silencio. n8n vuelve a correr su capa exacta sobre el residuo.
 - **Céntimos CON SIGNO**, no valor absoluto: en absoluto, un cobro casaría con
   un pago del mismo importe.
+
+### Reportes y aprendizaje (etapa 6)
+
+Los dos leían `resultado.matches`, vacío en modo tabla. Sin esto, el pool de
+ejemplos habría salido a cero **justo en la empresa con medio millón de
+partidas** — la que más criterio tiene que enseñar.
+
+Necesitan cosas opuestas, y por eso son dos funciones:
+
+- **El aprendizaje quiere los pares que revisó una persona.** `matches_revisados`
+  deja fuera los `auto`: nadie los miró, y usarlos enseñaría a la IA un criterio
+  que ninguna persona aplicó — el mismo motivo por el que no entran en la tasa
+  de acierto. Eso además vuelve el problema pequeño: son decenas o cientos,
+  aunque detrás haya 447.795. `hidratarJobsModoTabla` los reconstruye en la
+  forma que `construirEjemplos` ya sabe leer, así que esa función no cambió.
+- **Los reportes quieren el recuento.** `conteo_matches` agrega en la base; traer
+  medio millón de filas para contarlas en Node es lo que la parte B vino a
+  eliminar.
+
+Los KPIs y el % de automatización salían ya bien: viven en `resultado.resumen`,
+que la absorción actualiza.
 
 ### Hallazgo de producto: el mes concilia mejor que el día
 

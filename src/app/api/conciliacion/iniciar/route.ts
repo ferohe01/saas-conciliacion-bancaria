@@ -7,6 +7,7 @@ import { getConfigEmpresa } from "@/lib/config";
 import { generarJobId } from "@/lib/jobs";
 import { enviarAN8n } from "@/lib/n8n/cliente";
 import { construirEjemplos, type JobHistorico } from "@/lib/aprendizaje";
+import { hidratarJobsModoTabla } from "@/lib/conciliacion/historico";
 import { criteriosParaIa } from "@/lib/criteriosIniciales";
 import { estadoSuscripcion } from "@/lib/suscripcion";
 import { bloqueaRelanzamiento } from "@/lib/jobsAtascados";
@@ -207,13 +208,19 @@ export async function POST(request: Request) {
   // empresa, para que la IA calibre su criterio con el historial real.
   const { data: historicos } = await admin
     .from("jobs_conciliacion")
-    .select("payload_entrada, resultado")
+    .select("id, payload_entrada, resultado, lote_extracto_id")
     .eq("empresa_id", empresa.empresa_id)
     .eq("estado", "completado")
     .not("resultado", "is", null)
     .order("completed_at", { ascending: false })
     .limit(30);
-  const ejemplos = construirEjemplos((historicos ?? []) as JobHistorico[]);
+  // Los jobs de modo tabla guardan sus pares fuera del JSONB: se hidratan los
+  // revisados por una persona, que son los únicos que enseñan algo.
+  const ejemplos = construirEjemplos(
+    (await hidratarJobsModoTabla(
+      (historicos ?? []) as { id: string; lote_extracto_id?: string | null }[],
+    )) as unknown as JobHistorico[],
+  );
 
   // Arranque en frío: el criterio que la empresa declaró. Va SIEMPRE, no solo
   // cuando faltan ejemplos — el prompt le dice al modelo que las decisiones

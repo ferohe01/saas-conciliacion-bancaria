@@ -40,7 +40,7 @@ export async function cargarReporteDetalle(): Promise<{
   const { data } = await supabase
     .from("jobs_conciliacion")
     .select(
-      "id, periodo_desde, periodo_hasta, cuenta_id, created_at, resultado, payload_entrada, cuentas_bancarias(banco, numero_enmascarado, moneda)",
+      "id, periodo_desde, periodo_hasta, cuenta_id, created_at, resultado, payload_entrada, lote_extracto_id, cuentas_bancarias(banco, numero_enmascarado, moneda)",
     )
     .eq("estado", "completado")
     .eq("estado_contable", "aprobada")
