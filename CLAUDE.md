@@ -1398,6 +1398,21 @@ disparar). Ya es el flujo real con SheetJS (import dinámico), normalización
 canónica al contrato y `POST /api/conciliacion/iniciar`. El mockup original
 (`interfaz.jpg`) sigue siendo la referencia de diseño.
 
+**Los dos lados de la pantalla son simétricos, y eso no es estética.** El Paso 1
+enfrenta *tus registros* contra *los del banco*, pero solo el banco tenía zona de
+carga: los comprobantes eran una tarjeta de texto cuyo botón de subir vivía en
+otro bloque, más abajo, bajo el título "¿No tienes sistema? Usa la plantilla".
+Había que leer la pantalla entera para descubrir dónde se cargan, y la lectura
+"esto contra esto" se perdía. `ZonaComprobantes` es el gemelo de `UploadZone`
+—mismo punteado vacío, misma tarjeta verde cargada— con la carga dentro y
+"Cancelar esta carga" junto a lo que cuenta.
+
+⚠️ **"Cancelar esta carga" quita los del PERÍODO, no la última importación.**
+Son dos cosas distintas y ambas existen a propósito: aquí se quita lo que la
+tarjeta acaba de contar (lo que el usuario ve), mientras que "Quitar esta carga"
+en `/comprobantes` opera por `lote_importacion`. Confundirlas haría que cancelar
+en el wizard se llevara filas de otros meses.
+
 **Origen de los registros internos: dos opciones, no tres.** "Subir archivo"
 existió como prueba de concepto y **se retiró**. Conciliaba igual y se veía
 idéntico en pantalla, pero los registros no tenían `comprobante_id`, así que

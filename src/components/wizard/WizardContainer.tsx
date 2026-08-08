@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { Stepper, type PasoWizard } from "./Stepper";
 import { UploadZone, type ArchivoResumen } from "./UploadZone";
-import { ImportadorComprobantes } from "./ImportadorComprobantes";
+import { ZonaComprobantes } from "./ZonaComprobantes";
 import { MapeoDataset } from "./MapeoDataset";
-import { CandadoIcon, ChevronIcon } from "./icons";
+import { CandadoIcon, ChevronIcon, DocumentoIcon } from "./icons";
 import { createClient } from "@/lib/supabase/client";
 import { mesesRecientes, periodoDeRango, VALOR_RANGO } from "@/lib/periodo";
 import { previsualizarArchivo, type ArchivoProcesado } from "@/lib/parsing/procesar";
@@ -19,7 +19,6 @@ import type { MapeoColumnas } from "@/lib/parsing/deteccion";
 import {
   guardarMapeoCuenta,
   resumenComprobantesPeriodo,
-  quitarComprobantesDelPeriodo,
   type ResumenComprobantes,
 } from "@/app/(app)/wizard/actions";
 import { Boton, CLASES_ENTRADA } from "@/components/ui";
@@ -225,8 +224,6 @@ export function WizardContainer({
   } | null>(null);
 
   const [aviso, setAviso] = useState<string | null>(null);
-  /** Confirmación en dos pasos para quitar los comprobantes del período. */
-  const [quitando, setQuitando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
   const [procesando, startTransition] = useTransition();
@@ -707,121 +704,31 @@ export function WizardContainer({
 
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div>
-              {fuente === "comprobantes" && (
-                <div className="rounded-2xl border border-neutral-200 bg-white p-5">
-                  <p className="font-semibold text-neutral-900">
-                    Comprobantes del período
+              {fuente === "comprobantes" ? (
+                <ZonaComprobantes
+                  resumen={comprobantesResumen}
+                  periodo={periodo}
+                  moneda={moneda}
+                  onCambio={() => setRecargaComprobantes((n) => n + 1)}
+                />
+              ) : (
+                // "Conectar sistema" todavía no produce registros. Aun así ocupa
+                // el mismo hueco: dejarlo vacío rompería la simetría de los dos
+                // lados, que es justo lo que esta pantalla tiene que enseñar.
+                <div className="flex h-full flex-col items-center justify-center rounded-2xl border-2 border-dashed border-neutral-300 bg-white px-6 py-8 text-center">
+                  <DocumentoIcon className="h-8 w-8 text-neutral-400" />
+                  <p className="mt-3 font-semibold text-neutral-700">
+                    Desde tu sistema
                   </p>
-                  {comprobantesResumen ? (
-                    <>
-                      <p className="mt-1 text-sm text-neutral-600">
-                        {comprobantesResumen.registros.toLocaleString("es-PE")}{" "}
-                        registros ·{" "}
-                        {comprobantesResumen.sumaParcial && "desde "}
-                        {formatearPEN(comprobantesResumen.suma, moneda)}
-                      </p>
-                      {/* Decir cuántos quedan fuera evita la alarma de "se
-                          perdieron mis datos" y avisa de que quizá el mes
-                          elegido no es el que el usuario tenía en mente. */}
-                      {comprobantesResumen.totalCargados >
-                        comprobantesResumen.registros && (
-                        <p className="mt-1 text-sm text-neutral-500">
-                          Tienes{" "}
-                          <span className="tabular-nums">
-                            {comprobantesResumen.totalCargados.toLocaleString("es-PE")}
-                          </span>{" "}
-                          comprobantes cargados en total; el resto es de otros
-                          períodos. Cambia el mes si buscabas esos.
-                        </p>
-                      )}
-                      {/* Lo ya cobrado se queda fuera a propósito. Callarlo
-                          haría pensar que faltan facturas; decirlo convierte
-                          una ausencia sospechosa en una decisión entendible. */}
-                      {comprobantesResumen.yaCobrados > 0 && (
-                        <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                          <span className="font-medium tabular-nums">
-                            {comprobantesResumen.yaCobrados.toLocaleString("es-PE")}
-                          </span>{" "}
-                          {comprobantesResumen.yaCobrados === 1
-                            ? "comprobante de este período ya está cobrado y no entra"
-                            : "comprobantes de este período ya están cobrados y no entran"}
-                          : se conciliaron antes. Así no se descuenta su saldo
-                          dos veces.
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <p className="mt-1 text-sm text-neutral-500">Cargando…</p>
-                  )}
-                  {comprobantesResumen?.registros === 0 && (
-                    <p className="mt-1 text-sm text-amber-600">
-                      No hay comprobantes en este período. Impórtalos abajo o
-                      elige otro mes.
-                    </p>
-                  )}
-
-                  {/* Quitar la carga SIN salir del flujo. Descubrir aquí que
-                      subiste el archivo equivocado y tener que irte a otra
-                      pantalla para arreglarlo es abandonar el wizard a medias.
-                      Quita los del período —los que la tarjeta acaba de
-                      contar—, no "la última carga": lo que se ve es lo que se
-                      quita. */}
-                  {(comprobantesResumen?.registros ?? 0) > 0 && periodo && (
-                    <div className="mt-3 border-t border-neutral-200 pt-3">
-                      {quitando ? (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm text-neutral-700">
-                            ¿Quitar los{" "}
-                            {comprobantesResumen!.registros.toLocaleString("es-PE")}{" "}
-                            de este período?
-                          </span>
-                          <Boton
-                            variante="peligro"
-                            tamano="sm"
-                            disabled={procesando}
-                            onClick={() => {
-                              setError(null);
-                              startTransition(async () => {
-                                const r = await quitarComprobantesDelPeriodo(
-                                  periodo.desde,
-                                  periodo.hasta,
-                                );
-                                if (!r.ok) {
-                                  setError(r.error ?? "No se pudieron quitar.");
-                                  return;
-                                }
-                                setQuitando(false);
-                                setAviso(
-                                  r.protegidos
-                                    ? `Se quitaron ${(r.borrados ?? 0).toLocaleString("es-PE")}. ${r.protegidos.toLocaleString("es-PE")} se conservaron porque ya tienen cobros aplicados.`
-                                    : `Se quitaron ${(r.borrados ?? 0).toLocaleString("es-PE")} comprobantes.`,
-                                );
-                                setRecargaComprobantes((n) => n + 1);
-                              });
-                            }}
-                          >
-                            {procesando ? "Quitando…" : "Sí, quitar"}
-                          </Boton>
-                          <Boton
-                            variante="secundario"
-                            tamano="sm"
-                            disabled={procesando}
-                            onClick={() => setQuitando(false)}
-                          >
-                            Cancelar
-                          </Boton>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setQuitando(true)}
-                          className="rounded text-sm font-medium text-neutral-600 underline-offset-2 transition-colors hover:text-red-700 hover:underline"
-                        >
-                          Cancelar esta carga
-                        </button>
-                      )}
-                    </div>
-                  )}
+                  <p className="mt-1 text-sm text-neutral-500">
+                    Todavía no podemos traer tus comprobantes automáticamente.
+                  </p>
+                  <Link
+                    href="/conexiones"
+                    className="mt-3 rounded text-sm font-medium text-blue-700 underline underline-offset-2 hover:text-blue-800"
+                  >
+                    Registrar tu sistema
+                  </Link>
                 </div>
               )}
             </div>
@@ -843,14 +750,6 @@ export function WizardContainer({
               )}
             </div>
           </div>
-
-          {fuente === "comprobantes" && (
-            <div className="mt-4">
-              <ImportadorComprobantes
-                onImportado={() => setRecargaComprobantes((n) => n + 1)}
-              />
-            </div>
-          )}
 
           <div className="mt-6 grid gap-4 sm:grid-cols-3">
             <label className="block">

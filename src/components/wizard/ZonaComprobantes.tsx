@@ -1,0 +1,292 @@
+"use client";
+
+import { useRef, useState, useTransition } from "react";
+import { DocumentoIcon, CheckIcon } from "./icons";
+import { Boton } from "@/components/ui";
+import { quitarComprobantesDelPeriodo } from "@/app/(app)/wizard/actions";
+import { formatearPEN } from "@/lib/parsing/resumen";
+import { descargarPlantilla } from "@/lib/plantilla";
+import type { ResumenComprobantes } from "@/app/(app)/wizard/actions";
+
+/**
+ * Comprobantes del período — el gemelo de `UploadZone`.
+ *
+ * ── Por qué existe ─────────────────────────────────────────────────────────
+ *
+ * Los dos lados de una conciliación son simétricos —tus registros y los del
+ * banco— pero la pantalla no lo era: el extracto tenía su zona de carga y los
+ * comprobantes eran una tarjeta de texto cuyo botón de subir vivía en OTRO
+ * bloque, más abajo, bajo el título "¿No tienes sistema? Usa la plantilla".
+ *
+ * Eso obligaba a leer toda la pantalla para descubrir dónde se cargan los
+ * comprobantes, y rompía la lectura de "esto contra esto". Aquí cada lado tiene
+ * su propia caja, con su carga dentro y la misma silueta.
+ *
+ * Comparte los dos estados de `UploadZone` —punteado cuando está vacío, verde
+ * cuando hay datos— para que la simetría se vea también cuando ya cargaste.
+ */
+
+/** Por encima de esto no hay previsualización: el servidor lo lee por lotes. */
+const AVISO_GRANDE = 8 * 1024 * 1024;
+
+export function ZonaComprobantes({
+  resumen,
+  periodo,
+  moneda,
+  onCambio,
+}: {
+  resumen: ResumenComprobantes | null;
+  periodo: { desde: string; hasta: string } | null;
+  moneda: string;
+  onCambio: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [subiendo, startSubida] = useTransition();
+  const [quitando, setQuitando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
+  const [arrastrando, setArrastrando] = useState(false);
+
+  const subir = (file: File | undefined) => {
+    if (!file) return;
+    setError(null);
+    setAviso(null);
+    startSubida(async () => {
+      const cuerpo = new FormData();
+      cuerpo.append("archivo", file);
+      try {
+        const r = await fetch("/api/comprobantes/importar", {
+          method: "POST",
+          body: cuerpo,
+        });
+        const res = (await r.json()) as {
+          ok?: boolean;
+          error?: string;
+          mensaje?: string;
+        };
+        if (!r.ok || !res.ok) {
+          setError(res.error ?? "No se pudo importar.");
+          return;
+        }
+        setAviso(res.mensaje ?? "Comprobantes importados.");
+        onCambio();
+      } catch {
+        setError(
+          "No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.",
+        );
+      }
+    });
+  };
+
+  const quitar = () => {
+    if (!periodo) return;
+    setError(null);
+    setAviso(null);
+    startSubida(async () => {
+      const r = await quitarComprobantesDelPeriodo(periodo.desde, periodo.hasta);
+      if (!r.ok) {
+        setError(r.error ?? "No se pudieron quitar.");
+        return;
+      }
+      setQuitando(false);
+      // Lo protegido se dice siempre: sin eso, un "se quitaron 900 de 1.000"
+      // parecería un fallo en vez de la regla que protege lo ya conciliado.
+      setAviso(
+        r.protegidos
+          ? `Se quitaron ${(r.borrados ?? 0).toLocaleString("es-PE")}. ${r.protegidos.toLocaleString("es-PE")} se conservaron porque ya tienen cobros aplicados.`
+          : `Se quitaron ${(r.borrados ?? 0).toLocaleString("es-PE")} comprobantes.`,
+      );
+      onCambio();
+    });
+  };
+
+  const input = (
+    <input
+      ref={inputRef}
+      type="file"
+      accept=".xlsx,.xls,.csv"
+      className="sr-only"
+      onChange={(e) => {
+        subir(e.target.files?.[0]);
+        e.target.value = "";
+      }}
+    />
+  );
+
+  const plantilla = (
+    <button
+      type="button"
+      onClick={() => void descargarPlantilla()}
+      className="text-xs font-medium text-blue-700 underline-offset-2 hover:underline"
+    >
+      Descargar plantilla
+    </button>
+  );
+
+  const mensajes = (
+    <>
+      {aviso && (
+        <p role="status" className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-900">
+          {aviso}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+          {error}
+        </p>
+      )}
+    </>
+  );
+
+  // ── Con datos: misma tarjeta verde que el extracto cargado ───────────────
+  if (resumen && resumen.registros > 0) {
+    return (
+      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <DocumentoIcon className="mt-0.5 h-6 w-6 text-emerald-600" />
+            <div>
+              <p className="font-semibold text-emerald-900">
+                Comprobantes del período
+              </p>
+              <p className="mt-1 text-sm tabular-nums text-emerald-800">
+                {resumen.registros.toLocaleString("es-PE")} registros ·{" "}
+                {resumen.sumaParcial && "desde "}
+                {formatearPEN(resumen.suma, moneda)}
+              </p>
+
+              {/* Decir cuántos quedan fuera evita la alarma de "se perdieron
+                  mis datos" y avisa de que quizá el mes no es el que el
+                  usuario tenía en mente. */}
+              {resumen.totalCargados > resumen.registros && (
+                <p className="mt-1 text-xs text-emerald-700">
+                  Tienes {resumen.totalCargados.toLocaleString("es-PE")} en
+                  total; el resto es de otros períodos.
+                </p>
+              )}
+
+              {/* Lo ya cobrado se queda fuera a propósito. Callarlo haría
+                  pensar que faltan facturas. */}
+              {resumen.yaCobrados > 0 && (
+                <p className="mt-1 text-xs text-emerald-700">
+                  {resumen.yaCobrados.toLocaleString("es-PE")} ya están cobrados
+                  y no entran: se conciliaron antes.
+                </p>
+              )}
+            </div>
+          </div>
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white">
+            <CheckIcon className="h-4 w-4" />
+          </span>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <button
+            type="button"
+            disabled={subiendo}
+            onClick={() => inputRef.current?.click()}
+            className="text-sm font-medium text-emerald-700 underline-offset-2 hover:underline disabled:opacity-50"
+          >
+            {subiendo ? "Trabajando…" : "Añadir más comprobantes"}
+          </button>
+
+          {quitando ? (
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-emerald-900">
+                ¿Quitar los {resumen.registros.toLocaleString("es-PE")} de este
+                período?
+              </span>
+              <Boton variante="peligro" tamano="sm" disabled={subiendo} onClick={quitar}>
+                {subiendo ? "Quitando…" : "Sí, quitar"}
+              </Boton>
+              <Boton
+                variante="secundario"
+                tamano="sm"
+                disabled={subiendo}
+                onClick={() => setQuitando(false)}
+              >
+                No
+              </Boton>
+            </span>
+          ) : (
+            // Confirmación en dos pasos y sin escribir nada: volver a subir el
+            // archivo deshace la operación.
+            <button
+              type="button"
+              disabled={subiendo}
+              onClick={() => setQuitando(true)}
+              className="text-sm font-medium text-emerald-700 underline-offset-2 hover:text-red-700 hover:underline disabled:opacity-50"
+            >
+              Cancelar esta carga
+            </button>
+          )}
+        </div>
+        {mensajes}
+        {input}
+      </div>
+    );
+  }
+
+  // ── Vacío: mismo punteado que el extracto ───────────────────────────────
+  return (
+    <div>
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setArrastrando(true);
+        }}
+        onDragLeave={() => setArrastrando(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setArrastrando(false);
+          subir(e.dataTransfer.files?.[0]);
+        }}
+        onClick={() => inputRef.current?.click()}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            inputRef.current?.click();
+          }
+        }}
+        className={[
+          "flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-8 text-center transition-colors",
+          arrastrando
+            ? "border-blue-400 bg-blue-50"
+            : "border-neutral-300 bg-white hover:border-neutral-400",
+        ].join(" ")}
+      >
+        <DocumentoIcon className="h-8 w-8 text-neutral-500" />
+        <p className="mt-3 font-semibold text-neutral-800">
+          Comprobantes del período
+        </p>
+        <p className="mt-1 text-sm text-neutral-600">
+          {subiendo
+            ? "Importando…"
+            : resumen === null
+              ? "Buscando los del período…"
+              : "Arrastra el archivo o haz clic para buscar"}
+        </p>
+        <span className="mt-4 inline-flex items-center rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 shadow-sm hover:bg-neutral-50">
+          Seleccionar archivo
+        </span>
+        <p className="mt-3 text-xs text-neutral-500">
+          Excel o CSV · tus cobranzas y pagos
+        </p>
+        {/* ⚠️ Con archivos grandes no hay previsualización: el navegador no
+            puede abrirlos y los lee el servidor por lotes. Decirlo aquí evita
+            que un minuto de espera parezca que se colgó. */}
+        <p className="mt-1 text-xs text-neutral-500">
+          Por encima de {Math.round(AVISO_GRANDE / 1024 / 1024)} MB se procesa en
+          el servidor y tarda un poco.
+        </p>
+        <span className="mt-2" onClick={(e) => e.stopPropagation()}>
+          {plantilla}
+        </span>
+      </div>
+      {mensajes}
+      {input}
+    </div>
+  );
+}
