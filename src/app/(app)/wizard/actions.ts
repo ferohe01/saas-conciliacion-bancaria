@@ -189,6 +189,7 @@ export type BorradoResultado = {
 async function borrarComprobantes(
   lote: string | null,
   errorMsg: string,
+  rango?: { desde: string; hasta: string },
 ): Promise<BorradoResultado> {
   // ⚠️ Cliente de SESIÓN, no `admin`: `borrar_comprobantes` resuelve la empresa
   // desde `auth.uid()`. Con `admin` no hay usuario y no borraría nada, sin
@@ -199,6 +200,8 @@ async function borrarComprobantes(
   // que nunca estuvo.
   const { data: prot } = await supabase.rpc("comprobantes_protegidos", {
     p_lote: lote,
+    p_desde: rango?.desde ?? null,
+    p_hasta: rango?.hasta ?? null,
   });
   const protegidos = Number(prot ?? 0);
 
@@ -210,6 +213,8 @@ async function borrarComprobantes(
     const { data, error } = await supabase.rpc("borrar_comprobantes", {
       p_lote: lote,
       p_limite: 20000,
+      p_desde: rango?.desde ?? null,
+      p_hasta: rango?.hasta ?? null,
     });
     if (error) {
       console.error("[comprobantes] fallo al borrar:", error);
@@ -424,3 +429,34 @@ type ResumenFila = {
   total_cargados: number | string;
   ya_cobrados: number | string;
 };
+
+
+/**
+ * Quita los comprobantes de un período, desde el propio wizard.
+ *
+ * ⚠️ Por PERÍODO y no "la última carga", aunque suene menos natural: la tarjeta
+ * del Paso 1 enseña un número concreto, y si el botón quitara el último lote
+ * podría llevarse otra cosa —o solo una parte— y dejar ahí un número que el
+ * usuario no esperaba. Lo que se ve es lo que se quita.
+ *
+ * Existe para no tener que abandonar el flujo a medias: si alguien subió el
+ * archivo equivocado, lo corrige donde lo descubre.
+ */
+export async function quitarComprobantesDelPeriodo(
+  desde: string,
+  hasta: string,
+): Promise<BorradoResultado> {
+  const empresa = await getEmpresaActual();
+  if (!empresa) return { ok: false, error: "Sesión no válida." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(desde) || !/^\d{4}-\d{2}-\d{2}$/.test(hasta)) {
+    return { ok: false, error: "El período no es válido." };
+  }
+
+  const res = await borrarComprobantes(
+    null,
+    "No se pudieron quitar los comprobantes del período.",
+    { desde, hasta },
+  );
+  if (res.ok) revalidatePath("/comprobantes");
+  return res;
+}

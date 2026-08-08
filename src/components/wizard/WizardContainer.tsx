@@ -19,6 +19,7 @@ import type { MapeoColumnas } from "@/lib/parsing/deteccion";
 import {
   guardarMapeoCuenta,
   resumenComprobantesPeriodo,
+  quitarComprobantesDelPeriodo,
   type ResumenComprobantes,
 } from "@/app/(app)/wizard/actions";
 import { Boton, CLASES_ENTRADA } from "@/components/ui";
@@ -224,6 +225,8 @@ export function WizardContainer({
   } | null>(null);
 
   const [aviso, setAviso] = useState<string | null>(null);
+  /** Confirmación en dos pasos para quitar los comprobantes del período. */
+  const [quitando, setQuitando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
   const [procesando, startTransition] = useTransition();
@@ -755,6 +758,69 @@ export function WizardContainer({
                       No hay comprobantes en este período. Impórtalos abajo o
                       elige otro mes.
                     </p>
+                  )}
+
+                  {/* Quitar la carga SIN salir del flujo. Descubrir aquí que
+                      subiste el archivo equivocado y tener que irte a otra
+                      pantalla para arreglarlo es abandonar el wizard a medias.
+                      Quita los del período —los que la tarjeta acaba de
+                      contar—, no "la última carga": lo que se ve es lo que se
+                      quita. */}
+                  {(comprobantesResumen?.registros ?? 0) > 0 && periodo && (
+                    <div className="mt-3 border-t border-neutral-200 pt-3">
+                      {quitando ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm text-neutral-700">
+                            ¿Quitar los{" "}
+                            {comprobantesResumen!.registros.toLocaleString("es-PE")}{" "}
+                            de este período?
+                          </span>
+                          <Boton
+                            variante="peligro"
+                            tamano="sm"
+                            disabled={procesando}
+                            onClick={() => {
+                              setError(null);
+                              startTransition(async () => {
+                                const r = await quitarComprobantesDelPeriodo(
+                                  periodo.desde,
+                                  periodo.hasta,
+                                );
+                                if (!r.ok) {
+                                  setError(r.error ?? "No se pudieron quitar.");
+                                  return;
+                                }
+                                setQuitando(false);
+                                setAviso(
+                                  r.protegidos
+                                    ? `Se quitaron ${(r.borrados ?? 0).toLocaleString("es-PE")}. ${r.protegidos.toLocaleString("es-PE")} se conservaron porque ya tienen cobros aplicados.`
+                                    : `Se quitaron ${(r.borrados ?? 0).toLocaleString("es-PE")} comprobantes.`,
+                                );
+                                setRecargaComprobantes((n) => n + 1);
+                              });
+                            }}
+                          >
+                            {procesando ? "Quitando…" : "Sí, quitar"}
+                          </Boton>
+                          <Boton
+                            variante="secundario"
+                            tamano="sm"
+                            disabled={procesando}
+                            onClick={() => setQuitando(false)}
+                          >
+                            Cancelar
+                          </Boton>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setQuitando(true)}
+                          className="rounded text-sm font-medium text-neutral-600 underline-offset-2 transition-colors hover:text-red-700 hover:underline"
+                        >
+                          Cancelar esta carga
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               )}

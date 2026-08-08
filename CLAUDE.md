@@ -506,7 +506,17 @@ carga". Sobrevive a la recarga porque sale de la base, no del estado.
   cero", que se lleva también lo que no se sabe de dónde salió.
 - El aviso dice **siempre** cuántos se conservaron por tener cobros aplicados,
   aunque sean cero: omitirlo haría que un "borrados 900 de 1.000" pareciera un
-  fallo en vez de la regla. Ninguna de las dos
+  fallo en vez de la regla.
+
+**Y también desde el wizard.** La tarjeta «Comprobantes del período» del Paso 1
+lleva un *Cancelar esta carga*: descubrir ahí que subiste el archivo equivocado
+y tener que irte a otra pantalla para arreglarlo es abandonar el flujo a medias.
+
+⚠️ Quita los del **período** —los que la tarjeta acaba de contar— y no "la
+última carga", aunque suene menos natural. La tarjeta enseña un número concreto;
+si el botón borrara el último lote podría llevarse otra cosa, o solo una parte, y
+dejar ahí un número que el usuario no esperaba. **Lo que se ve es lo que se
+quita.** Ninguna de las dos
 borra un comprobante **con cobros aplicados**: eso se iría en cascada y dejaría
 un agujero en una conciliación aprobada, que seguiría diciendo que esa factura
 se cobró. Lo conciliado no se limpia, se **anula** (ver `0016`).
