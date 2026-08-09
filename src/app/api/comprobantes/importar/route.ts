@@ -4,13 +4,19 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getEmpresaActual } from "@/lib/auth";
 import { enLotes } from "@/lib/supabase/paginado";
 import { LectorCsv, type FilaCsv } from "@/lib/parsing/csv";
-import { normalizarFecha } from "@/lib/normalizacion/fecha";
-import { normalizarMonto } from "@/lib/normalizacion/monto";
+import { z } from "zod";
 import {
   claveComprobante,
   mensajeImportacion,
   type ResumenImportacion,
 } from "@/lib/importacion";
+import {
+  aplicarMapeo,
+  esPlantilla,
+  MAPEO_PLANTILLA,
+  CAMPOS_COMPROBANTE,
+  type Config,
+} from "@/lib/parsing/mapeoComprobantes";
 
 /**
  * Ingesta de comprobantes EN SERVIDOR, por lotes.
@@ -56,37 +62,69 @@ type Preparada = {
   lote_importacion: string;
 };
 
-const texto = (v: unknown): string | null => {
-  const s = String(v ?? "").trim();
-  return s === "" ? null : s;
-};
-
-/** Aplica a una fila cruda las mismas reglas que usaba el cliente. */
+/**
+ * Aplica a una fila cruda el mapeo que corresponda.
+ *
+ * ⚠️ Sin `config` explícita se usa el de la plantilla, así que **el camino de
+ * siempre no cambia**: quien sube la plantilla no nota nada, ni siquiera si
+ * nunca configuró un mapeo.
+ */
 function preparar(
   f: Record<string, unknown>,
   empresaId: string,
   lote: string,
+  config: Config,
 ): Preparada | null {
-  const fecha = normalizarFecha(f["fecha"]);
-  const monto = normalizarMonto(f["monto"]);
-  const tipoRaw = String(f["tipo"] ?? "").trim().toLowerCase();
-  const tipo = tipoRaw === "cobranza" || tipoRaw === "pago" ? tipoRaw : null;
-  if (!fecha || monto == null || !tipo) return null;
+  const fila = aplicarMapeo(f, config);
+  if (!fila) return null;
 
   return {
     empresa_id: empresaId,
-    fecha,
-    fecha_vencimiento: normalizarFecha(f["fecha_vencimiento"]) ?? null,
-    monto,
-    tipo,
-    serie_numero: texto(f["referencia"]),
-    referencia_externa: texto(f["referencia_externa"]),
-    ruc_contraparte: texto(f["ruc_contraparte"]),
-    razon_social_contraparte: texto(f["razon_social"]),
-    descripcion: texto(f["descripcion"]),
+    fecha: fila.fecha,
+    fecha_vencimiento: fila.fecha_vencimiento,
+    monto: fila.monto,
+    tipo: fila.tipo,
+    serie_numero: fila.serie_numero,
+    referencia_externa: fila.referencia_externa,
+    ruc_contraparte: fila.ruc_contraparte,
+    razon_social_contraparte: fila.razon_social,
+    descripcion: fila.descripcion,
     origen: "plantilla",
     lote_importacion: lote,
   };
+}
+
+/**
+ * El mapeo, validado.
+ *
+ * ⚠️ Solo se admiten los nombres de campo conocidos. El valor viaja desde el
+ * navegador y acaba eligiendo QUÉ COLUMNA se lee para cada dato: sin cerrar la
+ * forma, una clave inesperada entraría hasta el `insert`.
+ */
+const ConfigMapeo = z.object({
+  mapeo: z
+    .object(
+      Object.fromEntries(
+        CAMPOS_COMPROBANTE.map((c) => [c, z.string().min(1).optional()]),
+      ) as Record<(typeof CAMPOS_COMPROBANTE)[number], z.ZodOptional<z.ZodString>>,
+    )
+    .strict(),
+  tipoFijo: z.enum(["cobranza", "pago"]).nullable().optional(),
+});
+
+/**
+ * De dónde sale el mapeo, en orden: lo que manda esta petición, lo que la
+ * empresa dejó configurado, y si no, la plantilla.
+ *
+ * El segundo escalón es el que hace que la carga rápida del wizard funcione con
+ * el formato del cliente sin volver a preguntar nada.
+ */
+function resolverConfig(crudo: unknown, guardado: unknown): Config {
+  const parsed = ConfigMapeo.safeParse(crudo);
+  if (parsed.success) return parsed.data;
+  const previo = ConfigMapeo.safeParse(guardado);
+  if (previo.success) return previo.data;
+  return { mapeo: MAPEO_PLANTILLA, tipoFijo: null };
 }
 
 export async function POST(request: Request) {
@@ -103,6 +141,22 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+
+  // El mapeo puede venir en esta petición (primera vez, o corregido) o estar
+  // guardado en la empresa. Sin ninguno de los dos, la plantilla.
+  let mapeoPeticion: unknown = undefined;
+  const crudoMapeo = form?.get("mapeo");
+  if (typeof crudoMapeo === "string" && crudoMapeo.trim() !== "") {
+    try {
+      mapeoPeticion = JSON.parse(crudoMapeo);
+    } catch {
+      return NextResponse.json(
+        { error: "El mapeo de columnas no se pudo leer." },
+        { status: 400 },
+      );
+    }
+  }
+  const config = resolverConfig(mapeoPeticion, empresa.mapeo_comprobantes);
 
   const admin = createAdminClient();
   const lote = randomUUID();
@@ -172,8 +226,25 @@ export async function POST(request: Request) {
     return null;
   };
 
+  /**
+   * ⚠️ La PLANTILLA gana sobre el mapeo guardado.
+   *
+   * Una empresa que configuró el formato de su ERP y luego sube la plantilla
+   * —para cargar cuatro facturas a mano, por ejemplo— vería fallar TODAS las
+   * filas: el mapeo guardado apunta a columnas que ese archivo no tiene, y el
+   * resultado sería "0 importados, 3.000 inválidos" sin ninguna pista.
+   *
+   * Se decide con las cabeceras reales del archivo, la primera vez que se ve
+   * una fila. Los dos caminos tienen que poder convivir sin configurar nada.
+   */
+  let configFila: Config | null = null;
   const admitir = (cruda: Record<string, unknown>) => {
-    const p = preparar(cruda, empresa.empresa_id, lote);
+    if (configFila === null) {
+      configFila = esPlantilla(Object.keys(cruda))
+        ? { mapeo: MAPEO_PLANTILLA, tipoFijo: null }
+        : config;
+    }
+    const p = preparar(cruda, empresa.empresa_id, lote, configFila);
     if (!p) {
       resumen.invalidas++;
       return;

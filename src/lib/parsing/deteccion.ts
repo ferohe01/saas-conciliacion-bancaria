@@ -119,11 +119,11 @@ function fraccion<T>(items: T[], pred: (x: T) => boolean): number {
   return items.filter(pred).length / items.length;
 }
 
-function puntajeNombre(campo: CampoCanonico, header: string): number {
+function puntajeConLista(lista: string[], header: string): number {
   const h = normalizarTexto(header);
   if (!h) return 0;
   let mejor = 0;
-  for (const kw of KEYWORDS[campo]) {
+  for (const kw of lista) {
     if (h === kw) mejor = Math.max(mejor, 3);
     else if (h.includes(kw)) mejor = Math.max(mejor, 2);
   }
@@ -159,26 +159,36 @@ function puntajeContenido(
   }
 }
 
-export function detectarColumnas(
+/**
+ * Núcleo de la detección, reutilizable con cualquier juego de campos.
+ *
+ * El extracto y los comprobantes se detectan con la MISMA maquinaria y
+ * distintas listas de palabras: son dos vocabularios, no dos algoritmos. Antes
+ * esto estaba pegado a los campos del extracto, y al mapear comprobantes habría
+ * salido un segundo detector que se separa del primero con el tiempo.
+ */
+export function detectarCon<C extends string>(
+  campos: readonly C[],
+  keywords: Record<C, string[]>,
+  contenido: (campo: C, valores: unknown[]) => number,
   headers: string[],
   muestras: Record<string, unknown>[],
-): MapeoColumnas {
-  // Matriz de puntajes campo×header.
-  type Celda = { campo: CampoCanonico; header: string; score: number };
+): Partial<Record<C, string>> {
+  type Celda = { campo: C; header: string; score: number };
   const celdas: Celda[] = [];
 
-  for (const campo of CAMPOS) {
+  for (const campo of campos) {
     for (const header of headers) {
       const valores = muestras.map((f) => f[header]);
       const score =
-        puntajeNombre(campo, header) + puntajeContenido(campo, valores);
+        puntajeConLista(keywords[campo], header) + contenido(campo, valores);
       if (score > 0) celdas.push({ campo, header, score });
     }
   }
 
   // Asignación greedy por puntaje descendente, sin reutilizar header ni campo.
   celdas.sort((a, b) => b.score - a.score);
-  const mapeo: MapeoColumnas = {};
+  const mapeo: Partial<Record<C, string>> = {};
   const headersUsados = new Set<string>();
 
   for (const c of celdas) {
@@ -189,4 +199,11 @@ export function detectarColumnas(
   }
 
   return mapeo;
+}
+
+export function detectarColumnas(
+  headers: string[],
+  muestras: Record<string, unknown>[],
+): MapeoColumnas {
+  return detectarCon(CAMPOS, KEYWORDS, puntajeContenido, headers, muestras);
 }

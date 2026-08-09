@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getEmpresaActual } from "@/lib/auth";
+import { ConfigMapeoGuardado } from "@/lib/parsing/mapeoComprobantes";
 import { ImportadorComprobantes } from "@/components/wizard/ImportadorComprobantes";
 import {
   CargasRealizadas,
@@ -74,6 +75,12 @@ export default async function ComprobantesPage({
   const empresa = await getEmpresaActual();
   if (!empresa) notFound();
 
+  // El formato del archivo del cliente, si ya lo confirmó alguna vez. Se pasa
+  // al importador para que no vuelva a preguntar.
+  const mapeoGuardado = ConfigMapeoGuardado.safeParse(
+    empresa.mapeo_comprobantes,
+  );
+
   // ⚠️ `admin` + filtro EXPLÍCITO de empresa, no el cliente de RLS.
   //
   // La política de `comprobantes` es `es_miembro(empresa_id)`: una función
@@ -142,7 +149,9 @@ export default async function ComprobantesPage({
         descripcion="Tus cobranzas y pagos. De aquí salen los registros internos de cada conciliación, y aquí se ve lo que ya cobraste."
       />
 
-      <ImportadorComprobantes />
+      <ImportadorComprobantes
+        mapeoGuardado={mapeoGuardado.success ? mapeoGuardado.data : null}
+      />
 
       <CargasRealizadas cargas={cargas} />
 

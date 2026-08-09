@@ -26,6 +26,19 @@ import { verificarCifras } from "@/lib/ia/verificacion";
 import type { MapeoColumnas } from "@/lib/parsing/deteccion";
 import type { RegistroInterno } from "@/lib/contract/payload";
 import type { ContadoresPrevios } from "@/lib/diagnosticoPrevio";
+import { CAMPOS_COMPROBANTE } from "@/lib/parsing/mapeoComprobantes";
+
+/** Mismo cierre que en la ruta de importación: solo campos conocidos. */
+const ConfigComprobantes = z.object({
+  mapeo: z
+    .object(
+      Object.fromEntries(
+        CAMPOS_COMPROBANTE.map((c) => [c, z.string().min(1).optional()]),
+      ) as Record<(typeof CAMPOS_COMPROBANTE)[number], z.ZodOptional<z.ZodString>>,
+    )
+    .strict(),
+  tipoFijo: z.enum(["cobranza", "pago"]).nullable().optional(),
+});
 
 /**
  * Importación de comprobantes desde la plantilla Excel (§6.4). El cliente ya
@@ -584,4 +597,42 @@ export async function explicarRevisionPrevia(
   }
 
   return { ok: true, texto: r.texto };
+}
+
+/**
+ * Recuerda con qué columnas viene el archivo de comprobantes de esta empresa.
+ *
+ * Es lo que convierte «transponer el export a la plantilla cada mes» en
+ * «confirmar las columnas una vez». A partir de aquí, la carga rápida del
+ * Paso 1 del wizard también entiende su formato sin preguntar nada.
+ *
+ * ⚠️ Cliente de SESIÓN: escribe una columna de `empresas` que la 0039 concede
+ * explícitamente a `authenticated`. Con `admin` funcionaría igual pero se
+ * saltaría RLS sin necesidad, y la regla del proyecto es no hacerlo cuando el
+ * camino con sesión existe.
+ */
+export async function guardarMapeoComprobantes(
+  config: unknown,
+): Promise<{ ok: boolean; error?: string }> {
+  const empresa = await getEmpresaActual();
+  if (!empresa) return { ok: false, error: "Sesión no válida." };
+
+  const parsed = ConfigComprobantes.safeParse(config);
+  if (!parsed.success) {
+    return { ok: false, error: "El mapeo de columnas no es válido." };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("empresas")
+    .update({ mapeo_comprobantes: parsed.data })
+    .eq("id", empresa.empresa_id);
+
+  if (error) {
+    console.error("[comprobantes] no se pudo guardar el mapeo:", error);
+    return { ok: false, error: "No se pudo guardar el formato." };
+  }
+
+  revalidatePath("/comprobantes");
+  return { ok: true };
 }

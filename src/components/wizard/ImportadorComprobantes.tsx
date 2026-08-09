@@ -2,11 +2,17 @@
 
 import { useRef, useState, useTransition } from "react";
 import { descargarPlantilla, COLUMNAS_PLANTILLA } from "@/lib/plantilla";
-import { leerArchivo } from "@/lib/parsing/leerArchivo";
+import { leerArchivo, leerCabecera } from "@/lib/parsing/leerArchivo";
+import { detectarColumnasComprobante } from "@/lib/parsing/deteccionComprobantes";
+import { esPlantilla, type Config } from "@/lib/parsing/mapeoComprobantes";
+import { MapeoComprobantesForm } from "@/components/comprobantes/MapeoComprobantesForm";
 import { normalizarFecha } from "@/lib/normalizacion/fecha";
 import { normalizarMonto } from "@/lib/normalizacion/monto";
 import { formatearFecha, formatearPEN } from "@/lib/parsing/resumen";
-import { deshacerImportacion } from "@/app/(app)/wizard/actions";
+import {
+  deshacerImportacion,
+  guardarMapeoComprobantes,
+} from "@/app/(app)/wizard/actions";
 
 /**
  * Por encima de esto no se previsualiza: el navegador no puede con ello.
@@ -73,8 +79,11 @@ function normalizarFilas(crudas: Record<string, unknown>[]): {
 
 export function ImportadorComprobantes({
   onImportado,
+  mapeoGuardado = null,
 }: {
   onImportado?: () => void;
+  /** El formato que esta empresa confirmó la última vez. */
+  mapeoGuardado?: Config | null;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [archivo, setArchivo] = useState<File | null>(null);
@@ -86,6 +95,12 @@ export function ImportadorComprobantes({
   /** Lote recién importado: mientras exista, se ofrece deshacerlo. */
   const [ultimoLote, setUltimoLote] = useState<string | null>(null);
   const [pendiente, startTransition] = useTransition();
+  /** Cuando el archivo no es la plantilla: qué columna es cada cosa. */
+  const [mapeando, setMapeando] = useState<{
+    headers: string[];
+    muestras: Record<string, unknown>[];
+    config: Config;
+  } | null>(null);
 
   /**
    * El archivo SIEMPRE lo procesa el servidor. Aquí solo se lee para enseñar
@@ -101,30 +116,72 @@ export function ImportadorComprobantes({
     setNombre(file.name);
     setFilas(null);
     setInvalidas(0);
+    setMapeando(null);
 
-    if (file.size > MAX_VISTA_PREVIA) return; // grande: sin previa, al servidor
+    // ── Las cabeceras se leen SIEMPRE, incluso de un archivo enorme ────────
+    //
+    // `leerCabecera` trae solo el principio (2 MB de CSV bastan para 500
+    // filas), así que se puede saber qué columnas trae un archivo de 450.000
+    // sin que el navegador lo sostenga entero. Sin esto, un cliente grande no
+    // podría mapear nunca: justo el que más lo necesita.
+    let cabeceras: string[] = [];
+    let muestras: Record<string, unknown>[] = [];
     try {
-      const { filas: crudas } = await leerArchivo(file);
-      const { validas, invalidas } = normalizarFilas(crudas);
-      setFilas(validas);
-      setInvalidas(invalidas);
-      if (validas.length === 0) {
-        setError(
-          "No se encontraron filas válidas. Revisa fecha, monto y tipo (cobranza/pago).",
-        );
-      }
+      const previa = await leerCabecera(file);
+      cabeceras = previa.headers;
+      muestras = previa.filas;
     } catch {
-      // Que falle la previa no impide importar: el servidor vuelve a leerlo.
-      setFilas(null);
+      // Si ni las cabeceras se pueden leer, que decida el servidor.
+      return;
     }
+
+    // Camino 1: es la plantilla. No se pregunta nada, como siempre.
+    if (esPlantilla(cabeceras)) {
+      if (file.size > MAX_VISTA_PREVIA) return; // grande: sin previa
+      try {
+        const { filas: crudas } = await leerArchivo(file);
+        const { validas, invalidas } = normalizarFilas(crudas);
+        setFilas(validas);
+        setInvalidas(invalidas);
+        if (validas.length === 0) {
+          setError(
+            "No se encontraron filas válidas. Revisa fecha, monto y tipo (cobranza/pago).",
+          );
+        }
+      } catch {
+        // Que falle la previa no impide importar: el servidor vuelve a leerlo.
+        setFilas(null);
+      }
+      return;
+    }
+
+    // Camino 2: es el archivo del cliente. Se propone un mapeo y se confirma.
+    const detectado = detectarColumnasComprobante(cabeceras, muestras);
+    const guardado = mapeoGuardado?.mapeo ?? {};
+    setMapeando({
+      headers: cabeceras,
+      muestras,
+      // Lo guardado MANDA donde diga algo, pero no borra lo detectado: es la
+      // misma regla que `elegirMapeo` del extracto, y por el mismo motivo —una
+      // memoria que solo puede quitar campos convierte un error en permanente.
+      config: {
+        mapeo: { ...detectado, ...guardado },
+        tipoFijo: mapeoGuardado?.tipoFijo ?? null,
+      },
+    });
   }
 
-  function confirmar() {
+  function confirmar(config?: Config) {
     if (!archivo) return;
     setError(null);
     startTransition(async () => {
+      // Se recuerda ANTES de importar: si la carga es larga y el usuario cierra
+      // la pestaña, el formato ya quedó aprendido y no hay que repetirlo.
+      if (config) await guardarMapeoComprobantes(config);
+
       const cuerpo = new FormData();
       cuerpo.append("archivo", archivo);
+      if (config) cuerpo.append("mapeo", JSON.stringify(config));
       try {
         const r = await fetch("/api/comprobantes/importar", {
           method: "POST",
@@ -143,6 +200,7 @@ export function ImportadorComprobantes({
         setArchivo(null);
         setFilas(null);
         setNombre("");
+        setMapeando(null);
         onImportado?.();
       } catch {
         setError(
@@ -173,12 +231,15 @@ export function ImportadorComprobantes({
 
   return (
     <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+      {/* Los dos caminos, dichos en voz alta. Antes solo se nombraba el de la
+          plantilla, así que quien SÍ tiene sistema no veía ninguna puerta. */}
       <p className="text-sm font-medium text-neutral-800">
-        ¿No tienes sistema? Usa la plantilla
+        Carga tus comprobantes
       </p>
       <p className="mt-1 text-sm text-neutral-500">
-        Descarga la plantilla, llénala con tus cobranzas/pagos y súbela para
-        registrarlos.
+        ¿Tu sistema exporta a Excel o CSV? <strong>Súbelo tal cual</strong> y
+        dinos una vez qué columna es cada cosa. ¿No tienes sistema? Descarga la
+        plantilla, llénala y súbela.
       </p>
 
       <div className="mt-3 flex flex-wrap gap-2">
@@ -196,7 +257,7 @@ export function ImportadorComprobantes({
           onClick={() => inputRef.current?.click()}
           className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
         >
-          Subir plantilla llena
+          Subir archivo
         </button>
         <input
           ref={inputRef}
@@ -211,7 +272,25 @@ export function ImportadorComprobantes({
         />
       </div>
 
-      {archivo && (
+      {/* Camino 2: el archivo del cliente. Se confirma el mapeo una vez y se
+          recuerda para las próximas cargas. */}
+      {mapeando && (
+        <MapeoComprobantesForm
+          headers={mapeando.headers}
+          muestras={mapeando.muestras}
+          config={mapeando.config}
+          ocupado={pendiente}
+          onCambio={(config) => setMapeando({ ...mapeando, config })}
+          onCancelar={() => {
+            setMapeando(null);
+            setArchivo(null);
+            setNombre("");
+          }}
+          onConfirmar={() => confirmar(mapeando.config)}
+        />
+      )}
+
+      {archivo && !mapeando && (
         <div className="mt-4">
           <p className="text-sm text-neutral-700">
             <span className="font-medium">{nombre}</span>
@@ -272,7 +351,7 @@ export function ImportadorComprobantes({
 
           <button
             type="button"
-            onClick={confirmar}
+            onClick={() => confirmar()}
             disabled={pendiente}
             className="mt-3 rounded-xl bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-neutral-800 disabled:bg-neutral-300"
           >

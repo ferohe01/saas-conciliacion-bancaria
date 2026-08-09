@@ -521,6 +521,62 @@ borra un comprobante **con cobros aplicados**: eso se iría en cascada y dejarí
 un agujero en una conciliación aprobada, que seguiría diciendo que esa factura
 se cobró. Lo conciliado no se limpia, se **anula** (ver `0016`).
 
+## Subir los comprobantes con el formato del CLIENTE
+
+El sistema trataba los dos lados con criterios opuestos, y al revés de como
+conviene:
+
+| | Extracto del banco | Comprobantes (antes) |
+|---|---|---|
+| Formato | el que traiga | el de la plantilla, exacto |
+| Columnas | mapeo + detección | `f["fecha"]` literal |
+| Memoria | `cuentas_bancarias.mapeo_columnas` | ninguna |
+
+Al banco nos adaptábamos nosotros; al cliente le pedíamos que se adaptara él.
+Y el archivo del banco es el que nadie puede cambiar, mientras que el export de
+un ERP tampoco lo elige el usuario: se le exigía justo donde menos margen tiene.
+
+Con 450.000 filas al mes eso no es esfuerzo de alta, es **trabajo recurrente que
+nadie repite el segundo mes** — y una columna corrida un puesto da una
+conciliación al 0 % que el cliente no atribuye a su copia, sino al producto.
+
+- **Un solo destino, dos caminos que convergen enseguida.** No hay pantalla
+  nueva: en `/comprobantes` se sube el archivo y, si las cabeceras no son las de
+  la plantilla, aparece «¿qué columna es cada cosa?» con detección previa
+  (`deteccionComprobantes.ts`) y vista previa interpretada. Todo lo de después
+  —validación, deduplicación por serie, lote, «ya estaban cargados», deshacer—
+  es exactamente el mismo código. Bifurcar eso sería bifurcar donde viven los
+  bugs caros.
+- **La plantilla deja de ser un mecanismo aparte y pasa a ser un atajo del
+  mismo**: sus cabeceras se reconocen y no se pregunta nada. Es menos
+  maquinaria, no más.
+- ⚠️⚠️ **Esto NO resucita el «Subir archivo» del wizard.** Aquello se retiró
+  porque sus registros no tenían `comprobante_id`: conciliaban bien, se veían
+  bien, y **ningún comprobante quedaba cobrado**. Aquí la flexibilidad de
+  formato produce filas reales en `comprobantes`, con su id y su saldo. Se
+  parece; no es lo mismo.
+- **El mapeo se recuerda** en `empresas.mapeo_comprobantes` (`0039`), así que la
+  carga rápida del Paso 1 del wizard entiende el formato del cliente sin volver
+  a preguntar. ⚠️ La `0039` lleva su `GRANT update` porque la `0005` revocó el
+  UPDATE amplio sobre `empresas`: toda columna nueva nace sin permiso de
+  escritura (ya pasó con `criterios_conciliacion`).
+- ⚠️ **La plantilla GANA sobre el mapeo guardado**, decidido con las cabeceras
+  reales de cada archivo. Una empresa que configuró su ERP y luego sube la
+  plantilla para cuatro facturas vería fallar todas las filas: el mapeo apunta a
+  columnas que ese archivo no tiene, y el resultado sería «0 importados» sin
+  ninguna pista.
+- ⚠️ **El tipo admite declararse para todo el archivo.** Un libro de ventas no
+  trae una columna que diga «cobranza» porque todo él lo es; sin esa salida, la
+  mitad de los exports reales serían inmapeables. Y lo declarado **manda sobre
+  la columna**: si el usuario dijo que todo son cobranzas, unos valores raros no
+  deben convertir algunas filas en pagos sin que se entere.
+- **Las cabeceras se leen incluso de un archivo enorme** (`leerCabecera` trae
+  solo el principio). Sin eso, el cliente grande —el que más lo necesita— no
+  podría mapear nunca.
+- Lógica pura en `src/lib/parsing/mapeoComprobantes.ts`, con tests sobre un
+  export real: el que comprueba que **`SERIE-NÚMERO` y `N° OPERACIÓN` no se
+  confunden** es el que más vale (ver la sección siguiente).
+
 ## El número de documento no es la referencia de emparejamiento
 
 Encontrado con datos reales de una recaudadora de telecom (450k movimientos/mes).
