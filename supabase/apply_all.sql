@@ -1736,3 +1736,2073 @@ grant insert (empresa_id, fecha, fecha_vencimiento, monto, tipo, serie_numero,
               referencia_externa, ruc_contraparte, razon_social_contraparte,
               descripcion, origen, lote_importacion)
   on public.comprobantes to authenticated;
+
+
+-- ============================================================================
+-- 0021_resumen_saldos.sql — Agregar la antigüedad de deuda EN LA BASE
+--
+-- Por cobrar / Por pagar traían todas las filas pendientes y las sumaban en
+-- Node. Con 452.309 comprobantes eso son ~453 peticiones paginadas de 1.000
+-- filas: varios minutos para pintar una tabla de cinco columnas.
+--
+-- Y el resultado es diminuto: lo que la pantalla enseña es un total por
+-- contraparte y tramo. Traer medio millón de filas para producir unas pocas
+-- decenas es el trabajo puesto en el sitio equivocado.
+--
+-- ⚠️ ESTA FUNCIÓN DUPLICA REGLAS QUE VIVEN EN TypeScript:
+--
+--   · qué cuenta como deuda viva  → `cuentaComoPendiente` (src/lib/aging.ts)
+--   · los tramos de antigüedad    → `tramoDe` + `diasVencido` (idem)
+--   · la normalización del buscador → `normalizar` (src/lib/filtrosComprobantes.ts)
+--
+-- Si se separan, la pantalla enseñará totales que no corresponden a sus filas
+-- y nadie sabrá cuál creer. Hay tests que fijan el lado TypeScript; al tocar
+-- cualquiera de los tres hay que tocar esto.
+-- ============================================================================
+
+-- Para reproducir el `normalize("NFD") + quitar diacríticos` de JS.
+create extension if not exists unaccent;
+
+-- ---------------------------------------------------------------------------
+-- resumen_saldos(tipo, tramo, solo_vencido, busca, hoy)
+--
+-- Devuelve una fila por (contraparte, tramo). SECURITY INVOKER —el modo por
+-- defecto— para que RLS siga aplicando: cada empresa solo agrega lo suyo.
+--
+-- `p_hoy` es un parámetro y no `current_date` para que los tests puedan fijar
+-- el día. Los tramos dependen de la fecha, y una función que solo se puede
+-- probar "hoy" no se puede probar.
+-- ---------------------------------------------------------------------------
+create or replace function public.resumen_saldos(
+  p_tipo         text,
+  p_tramo        text default 'todos',
+  p_solo_vencido boolean default false,
+  p_busca        text default '',
+  p_hoy          date default current_date
+)
+returns table (
+  contraparte text,
+  ruc         text,
+  tramo       text,
+  total       numeric,
+  documentos  bigint
+)
+language sql
+stable
+-- ⚠️⚠️ SECURITY DEFINER: RLS NO se aplica dentro. El control de acceso es la
+-- linea `c.empresa_id in (select ... where ue.usuario_id = auth.uid())` de mas
+-- abajo, y esa linea ES la frontera de seguridad — quitarla filtraria los
+-- saldos de unas empresas a otras.
+--
+-- No es una preferencia: medido contra los 452.309 comprobantes de un cliente
+-- real, la misma agregacion tarda 187 ms sin RLS y 9.500 ms con ella, por
+-- encima del statement_timeout de 8 s. El predicado de RLS es
+-- `es_miembro(empresa_id)`, una funcion sobre una COLUMNA, asi que Postgres la
+-- ejecuta una vez por fila. Aqui la pertenencia se resuelve UNA vez.
+--
+-- Mismo patron que `aprobar_conciliacion` (0013). La regla al tocar esto: la
+-- funcion NUNCA acepta un empresa_id por parametro; la empresa sale siempre de
+-- `auth.uid()`.
+security definer
+set search_path = public
+as $$
+  -- Las empresas del usuario, resueltas UNA vez. Esta CTE y el `in` de abajo
+  -- son el control de acceso de la funcion (ver la nota de SECURITY DEFINER).
+  with mias as (
+    select ue.empresa_id
+      from public.usuarios_empresa ue
+     where ue.usuario_id = auth.uid()
+  ),
+  base as (
+    select
+      -- Mismo criterio que el TypeScript: sin nombre, un cubo único. Si cada
+      -- factura sin identificar fuera su propia fila, la tabla sería inútil.
+      coalesce(nullif(btrim(c.razon_social_contraparte), ''), 'Sin identificar') as contraparte,
+      c.ruc_contraparte as ruc,
+      c.saldo,
+      -- diasVencido: se cuenta desde el vencimiento y, si no lo hay —muchas
+      -- ventas son al contado—, desde la emisión.
+      p_hoy - coalesce(c.fecha_vencimiento, c.fecha) as dias
+    from public.comprobantes c
+    -- ⚠️ FRONTERA DE SEGURIDAD. No tocar sin leer la nota de arriba.
+    where c.empresa_id in (select m.empresa_id from mias m)
+      and c.estado not in ('anulado', 'cobrado')
+      -- Por debajo de medio céntimo no hay deuda que gestionar.
+      and c.saldo > 0.005
+      and case
+            when p_tipo = 'pago' then c.tipo = 'pago'
+            -- Un comprobante SIN tipo se cuenta como cobranza, igual que en el
+            -- resto del sistema.
+            else c.tipo is null or c.tipo = 'cobranza'
+          end
+      -- ⚠️ El buscador se aplica AQUI y no despues, con el corte barato
+      -- delante. Calculando `unaccent(lower(...))` como columna se evaluaba
+      -- para las 452.309 filas aunque nadie hubiera escrito nada en la caja:
+      -- 9,2 s, por encima del statement_timeout de 8. Con el corte constante a
+      -- la izquierda, sin busqueda no se llama a unaccent ni una vez.
+      and (
+        btrim(p_busca) = ''
+        or unaccent(lower(
+             coalesce(c.serie_numero, '') || ' ' ||
+             coalesce(c.razon_social_contraparte, '') || ' ' ||
+             coalesce(c.ruc_contraparte, '')
+           )) like '%' || unaccent(lower(btrim(p_busca))) || '%'
+      )
+  ),
+  clasificado as (
+    select
+      b.contraparte, b.ruc, b.saldo,
+      case
+        -- Sin fecha no se puede saber si venció: se trata como por vencer, que
+        -- es lo prudente — no se reclama una deuda que quizá no lo esté.
+        when b.dias is null or b.dias <= 0 then 'por_vencer'
+        when b.dias <= 30 then 'd1_30'
+        when b.dias <= 60 then 'd31_60'
+        when b.dias <= 90 then 'd61_90'
+        else 'd90_mas'
+      end as tramo
+    from base b
+  )
+  select
+    c.contraparte,
+    -- Determinista a propósito. El TypeScript tomaba el RUC del primer
+    -- comprobante que veía; aquí manda el orden, que no depende del paginado.
+    min(c.ruc) as ruc,
+    c.tramo,
+    sum(c.saldo)::numeric as total,
+    count(*)::bigint as documentos
+  from clasificado c
+  where (p_tramo = 'todos' or c.tramo = p_tramo)
+    -- "Vencido" es todo lo que ya pasó su fecha: cualquier tramo menos el
+    -- primero, que es justamente el de lo que aún no vence.
+    and (not p_solo_vencido or c.tramo <> 'por_vencer')
+  group by c.contraparte, c.tramo;
+$$;
+
+-- ⚠️ Llamada con `service_role` (que salta RLS) devuelve VACÍO, porque
+-- `auth.uid()` es nulo y no hay empresa que resolver. Es lo correcto para esta
+-- función —la piden las pantallas en nombre del usuario— pero conviene saberlo
+-- antes de depurarla desde un script con la clave de servicio.
+
+comment on function public.resumen_saldos(text, text, boolean, text, date) is
+  'Antigüedad de deuda agregada por contraparte y tramo. Reemplaza el traer '
+  'medio millón de filas para sumarlas en la aplicación. SECURITY INVOKER: RLS '
+  'sigue acotando por empresa.';
+
+-- ⚠️ El REVOKE no sobra: Postgres concede EXECUTE a `public` por defecto en
+-- cada función nueva, así que sin esto `anon` podría invocar una función
+-- SECURITY DEFINER. Hoy no filtraría nada (sin `auth.uid()` no hay empresa que
+-- resolver y devuelve vacío), pero dejar una puerta abierta que depende de que
+-- el cuerpo se porte bien es exactamente lo que no se hace con `definer`.
+-- Mismo cierre que las funciones de la 0013.
+revoke all on function public.resumen_saldos(text, text, boolean, text, date)
+  from public, anon;
+grant execute on function public.resumen_saldos(text, text, boolean, text, date)
+  to authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- Índice de apoyo. La función escanea `comprobantes` filtrando por estado y
+-- saldo, que es justo lo que aquí se acota. Parcial para que ocupe lo que la
+-- deuda viva y no lo que la tabla entera: en una empresa con medio millón de
+-- comprobantes casi todos acaban cobrados.
+-- ---------------------------------------------------------------------------
+create index if not exists idx_comprobantes_saldo_vivo
+  on public.comprobantes (empresa_id, tipo)
+  where estado not in ('anulado', 'cobrado') and saldo > 0.005;
+
+
+-- ============================================================================
+-- 0022_movimientos_extracto.sql — El extracto bancario deja de vivir en el
+-- navegador (parte B, etapa 1)
+--
+-- Hasta aquí, el extracto se parseaba en el navegador y sus filas viajaban
+-- dentro del payload a n8n. Eso topa tres veces con un cliente grande:
+--
+--   1. el navegador tiene que abrir un Excel de 23 MB con 450.999 filas y
+--      construir un JSON de ~175 MB en memoria — no llega ni a enviarse;
+--   2. el payload supera el límite del webhook de n8n (64 MB);
+--   3. y aunque cupiera, `resultado` sería un JSONB de cientos de MB en UNA
+--      fila.
+--
+-- Esta migración resuelve (1) y prepara (2) y (3): los movimientos se guardan
+-- en una tabla, igual que los comprobantes, y se cargan por lotes desde el
+-- servidor leyendo el archivo a trozos.
+--
+-- ⚠️ No sustituye al payload todavía. La conciliación sigue enviando las
+-- partidas a n8n; lo que cambia es DÓNDE viven mientras tanto. Las etapas 2 a 4
+-- (capa exacta en SQL, n8n con el residuo, y la pantalla leyendo de tabla) van
+-- aparte para poder desplegar esto sin romper lo que ya funciona.
+-- ============================================================================
+
+create table if not exists public.movimientos_extracto (
+  id           uuid primary key default gen_random_uuid(),
+  empresa_id   uuid not null references public.empresas (id) on delete cascade,
+  cuenta_id    uuid not null references public.cuentas_bancarias (id) on delete cascade,
+  -- Una carga de extracto. Permite reemplazar lo subido sin tocar otras cuentas
+  -- ni otros períodos, igual que `lote_importacion` en comprobantes.
+  lote_id      uuid not null,
+  fecha        date not null,
+  -- Convención de signos ÚNICA del sistema: abonos +, cargos −. Se aplica al
+  -- normalizar y no se reinterpreta después.
+  monto        numeric(14,2) not null,
+  referencia_banco text,
+  glosa        text,
+  saldo        numeric(14,2),
+  -- Posición en el archivo. De aquí sale el `id_movimiento` sintético
+  -- ("BCO-0001") que usa el contrato: tiene que ser ESTABLE entre corridas, y
+  -- un uuid no se puede leer en pantalla.
+  orden        integer not null,
+  created_at   timestamptz not null default now()
+);
+
+-- Recorrido natural: los movimientos de una cuenta en un rango de fechas. Es
+-- lo que pedirá la capa exacta en SQL (etapa 2).
+create index if not exists idx_mov_extracto_cuenta_fecha
+  on public.movimientos_extracto (empresa_id, cuenta_id, fecha);
+
+-- Para reemplazar o deshacer una carga completa.
+create index if not exists idx_mov_extracto_lote
+  on public.movimientos_extracto (lote_id);
+
+-- El emparejamiento por referencia es el que resuelve el 88-100% en una cuenta
+-- recaudadora. Sin índice, la capa exacta en SQL sería un producto cartesiano.
+create index if not exists idx_mov_extracto_referencia
+  on public.movimientos_extracto (empresa_id, referencia_banco)
+  where referencia_banco is not null;
+
+-- ---------------------------------------------------------------------------
+-- RLS. Mismo criterio que el resto: la empresa ve y escribe lo suyo.
+--
+-- ⚠️ El INSERT lo hace el backend con `service_role` (la ingesta por lotes),
+-- pero la política de lectura tiene que existir igual para que las pantallas
+-- puedan mostrar lo cargado.
+-- ---------------------------------------------------------------------------
+alter table public.movimientos_extracto enable row level security;
+
+drop policy if exists mov_extracto_select on public.movimientos_extracto;
+create policy mov_extracto_select on public.movimientos_extracto
+  for select to authenticated
+  using (public.es_miembro(empresa_id));
+
+drop policy if exists mov_extracto_delete on public.movimientos_extracto;
+create policy mov_extracto_delete on public.movimientos_extracto
+  for delete to authenticated
+  using (public.es_miembro(empresa_id));
+
+comment on table public.movimientos_extracto is
+  'Movimientos del extracto bancario ya normalizados. Sustituyen al parseo en '
+  'el navegador para archivos grandes: se cargan por lotes desde el servidor.';
+
+-- ---------------------------------------------------------------------------
+-- El job apunta al lote de extracto que usó.
+--
+-- Nullable a propósito: las conciliaciones anteriores a esta migración llevan
+-- sus movimientos dentro de `payload_entrada` y tienen que seguir leyéndose.
+-- ---------------------------------------------------------------------------
+alter table public.jobs_conciliacion
+  add column if not exists lote_extracto_id uuid;
+
+comment on column public.jobs_conciliacion.lote_extracto_id is
+  'Lote de `movimientos_extracto` usado. Null en los jobs antiguos, que llevan '
+  'los movimientos dentro de payload_entrada.';
+
+
+-- ============================================================================
+-- 0023_capa_exacta_sql.sql — La capa exacta corre en la base (parte B, etapa 2)
+--
+-- El motor de n8n recibe las partidas por el payload y las empareja en
+-- JavaScript. A 2.000 partidas eso es instantáneo; a 900.000 no llega ni a
+-- enviarse. Pero la capa exacta —mismo monto y misma referencia— es
+-- literalmente un JOIN, y Postgres lo hace sobre medio millón de filas en
+-- segundos.
+--
+-- Con la recaudadora de junio eso significa resolver ~450.000 pares SIN que
+-- n8n vea una sola fila, y mandarle solo el residuo: miles, no cientos de
+-- miles.
+--
+-- ⚠️ SOLO EL PASS 1 (monto + referencia). El respaldo por monto + FECHA se
+-- queda en n8n a propósito: necesita la guarda de contradicción de referencias
+-- —sin ella emparejó 541 pares sin relación y los marcó `auto`, o sea
+-- conciliados sin que nadie los mirara— y esa lógica ya está escrita, probada y
+-- documentada en `n8n/01_exacta.js`. Reescribirla aquí sería duplicar el punto
+-- exacto donde el motor puede equivocarse en silencio.
+--
+-- n8n vuelve a correr su capa exacta sobre el residuo: el pass 1 no encontrará
+-- nada nuevo (ya lo hizo esta función) y el pass 2 hará su trabajo.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- matches_conciliacion — los pares, en una TABLA
+--
+-- `resultado` es un JSONB en una fila del job. A 2.000 partidas basta; con
+-- 450.000 pares serían cientos de MB que hay que leer enteros para pintar una
+-- pantalla. Aquí caben, se paginan y se actualizan de uno en uno.
+--
+-- Arrays en los dos lados porque un match puede ser 1:N o N:1 (la agrupación
+-- que ya detecta el motor). La capa exacta siempre escribe uno y uno.
+-- ---------------------------------------------------------------------------
+create table if not exists public.matches_conciliacion (
+  id                   uuid primary key default gen_random_uuid(),
+  job_id               text not null references public.jobs_conciliacion (id) on delete cascade,
+  empresa_id           uuid not null references public.empresas (id) on delete cascade,
+  comprobante_ids      uuid[] not null default '{}',
+  movimiento_ids       uuid[] not null default '{}',
+  metodo               text not null,
+  estado_revision      text not null,
+  confianza            numeric(4,3),
+  categoria_diferencia text,
+  diferencia_monto     numeric(14,2),
+  diferencia_dias      integer,
+  justificacion        text,
+  -- Cada decisión humana, con usuario y timestamp. Es la materia prima del
+  -- aprendizaje y no se pierde ninguna (mismo criterio que en el JSONB).
+  decisiones           jsonb not null default '[]'::jsonb,
+  excluido_aprendizaje boolean not null default false,
+  created_at           timestamptz not null default now(),
+  constraint matches_metodo_chk
+    check (metodo in ('exacta', 'difusa', 'ia', 'manual')),
+  constraint matches_estado_chk
+    check (estado_revision in ('auto', 'pendiente', 'aceptado', 'rechazado', 'modificado'))
+);
+
+create index if not exists idx_matches_job on public.matches_conciliacion (job_id);
+create index if not exists idx_matches_job_estado
+  on public.matches_conciliacion (job_id, estado_revision);
+-- Para saber si un comprobante ya está casado en este job sin recorrer la tabla.
+create index if not exists idx_matches_comprobantes
+  on public.matches_conciliacion using gin (comprobante_ids);
+
+alter table public.matches_conciliacion enable row level security;
+
+drop policy if exists matches_select on public.matches_conciliacion;
+create policy matches_select on public.matches_conciliacion
+  for select to authenticated
+  using (public.es_miembro(empresa_id));
+
+comment on table public.matches_conciliacion is
+  'Pares conciliados. Sustituye a resultado.matches (JSONB) cuando el volumen '
+  'no cabe en una fila. Arrays en ambos lados: soporta 1:N y N:1.';
+
+-- ---------------------------------------------------------------------------
+-- conciliar_exacta(job) — el JOIN
+--
+-- SECURITY DEFINER y concedida SOLO a `service_role`: la invoca el backend
+-- después de crear el job, nunca el navegador. No hay `auth.uid()` de por
+-- medio, así que la pertenencia sale del propio job.
+-- ---------------------------------------------------------------------------
+create or replace function public.conciliar_exacta(p_job_id text)
+returns table (pares bigint, internos bigint, movimientos bigint)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job public.jobs_conciliacion%rowtype;
+  v_pares bigint;
+  v_int   bigint;
+  v_mov   bigint;
+begin
+  select * into v_job from public.jobs_conciliacion where id = p_job_id;
+  if not found then
+    raise exception 'Conciliación no encontrada: %', p_job_id
+      using errcode = 'no_data_found';
+  end if;
+  if v_job.lote_extracto_id is null then
+    raise exception 'El job % no tiene extracto cargado en tabla', p_job_id
+      using errcode = 'check_violation';
+  end if;
+
+  -- Reentrante: volver a lanzarla no duplica pares.
+  delete from public.matches_conciliacion
+   where job_id = p_job_id and metodo = 'exacta';
+
+  with comps as (
+    select
+      c.id,
+      -- Misma convención de signos que el resto del sistema: cobranza +,
+      -- pago −. Y los MISMOS céntimos con signo que usa `01_exacta.js`; en
+      -- valor absoluto un cobro casaría con un pago del mismo importe.
+      round((case when c.tipo = 'pago' then -abs(c.monto) else abs(c.monto) end) * 100)::bigint as cent,
+      -- `referencia_externa` manda cuando existe; si no, el número de
+      -- documento. Igual que `getComprobantesCanonicos`.
+      upper(regexp_replace(coalesce(c.referencia_externa, c.serie_numero, ''), '[^A-Za-z0-9]', '', 'g')) as ref
+    from public.comprobantes c
+    where c.empresa_id = v_job.empresa_id
+      and c.fecha between v_job.periodo_desde and v_job.periodo_hasta
+      -- Lo ya cobrado y lo anulado no vuelve a conciliarse: es la primera de
+      -- las tres capas contra el doble cobro.
+      and c.estado not in ('cobrado', 'anulado')
+  ),
+  movs as (
+    select
+      m.id,
+      round(m.monto * 100)::bigint as cent,
+      upper(regexp_replace(coalesce(m.referencia_banco, ''), '[^A-Za-z0-9]', '', 'g')) as ref
+    from public.movimientos_extracto m
+    where m.lote_id = v_job.lote_extracto_id
+  ),
+  -- ⚠️ El `row_number` reproduce el "toma el siguiente libre" del JavaScript.
+  -- Con cientos de recibos del mismo importe y la misma referencia, un JOIN a
+  -- secas daría el producto cartesiano: 300 × 300 = 90.000 pares en vez de 300.
+  -- Numerando cada lado dentro de su grupo y casando por número, cada partida
+  -- se empareja UNA vez.
+  ci as (
+    select id, cent, ref,
+           row_number() over (partition by cent, ref order by id) as n
+      from comps where ref <> ''
+  ),
+  mi as (
+    select id, cent, ref,
+           row_number() over (partition by cent, ref order by id) as n
+      from movs where ref <> ''
+  ),
+  pares as (
+    insert into public.matches_conciliacion (
+      job_id, empresa_id, comprobante_ids, movimiento_ids,
+      metodo, estado_revision, diferencia_monto
+    )
+    select
+      p_job_id, v_job.empresa_id, array[ci.id], array[mi.id],
+      'exacta',
+      -- `auto` como en el motor: exigir un clic humano en cada match exacto
+      -- vaciaría de sentido el producto. Y `auto` descuenta saldo.
+      'auto',
+      0
+    from ci join mi on ci.cent = mi.cent and ci.ref = mi.ref and ci.n = mi.n
+    returning 1
+  )
+  select count(*) into v_pares from pares;
+
+  select count(*) into v_int from public.comprobantes c
+   where c.empresa_id = v_job.empresa_id
+     and c.fecha between v_job.periodo_desde and v_job.periodo_hasta
+     and c.estado not in ('cobrado', 'anulado');
+  select count(*) into v_mov from public.movimientos_extracto m
+   where m.lote_id = v_job.lote_extracto_id;
+
+  return query select v_pares, v_int, v_mov;
+end;
+$$;
+
+comment on function public.conciliar_exacta(text) is
+  'Capa exacta (monto + referencia) como JOIN. Escribe en matches_conciliacion '
+  'y deja el residuo para n8n. El respaldo por monto+fecha NO está aquí: vive '
+  'en n8n/01_exacta.js con su guarda de contradicción de referencias.';
+
+revoke all on function public.conciliar_exacta(text) from public, anon, authenticated;
+grant execute on function public.conciliar_exacta(text) to service_role;
+
+
+-- ============================================================================
+-- 0024_residuo_conciliacion.sql — Lo que queda para n8n (parte B, etapa 3)
+--
+-- Tras `conciliar_exacta` (0023), la inmensa mayoría de las partidas ya están
+-- casadas. Lo que el motor tiene que mirar es solo lo que sobró: con junio
+-- completo de la recaudadora, 4.382 internos y 3.204 movimientos de 903.176.
+--
+-- El backend NO puede calcular ese residuo trayéndose las partidas y restando:
+-- serían las 900.000 otra vez, que es justo lo que estamos evitando. Se lo pide
+-- a la base, que ya sabe cuáles casaron.
+--
+-- Las dos funciones devuelven las filas EN LA FORMA DEL CONTRATO
+-- (`RegistroInterno` / `MovimientoBancario` de src/lib/contract/payload.ts),
+-- para que el backend solo tenga que validarlas con zod y enviarlas.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- residuo_internos(job) — comprobantes del período que no casaron
+-- ---------------------------------------------------------------------------
+create or replace function public.residuo_internos(p_job_id text)
+returns table (
+  comprobante_id uuid,
+  fecha          date,
+  monto          numeric,
+  tipo           text,
+  referencia     text,
+  contraparte    text,
+  descripcion    text
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job public.jobs_conciliacion%rowtype;
+begin
+  select * into v_job from public.jobs_conciliacion where id = p_job_id;
+  if not found then
+    raise exception 'Conciliación no encontrada: %', p_job_id
+      using errcode = 'no_data_found';
+  end if;
+
+  return query
+  -- ⚠️ `materialized` y anti-union, NO `c.id = any(m.comprobante_ids)`.
+  --
+  -- Con `any(array)` Postgres recorre los 447.795 matches POR CADA uno de los
+  -- 452.177 comprobantes: la consulta no acabo en diez minutos. Desplegando los
+  -- arrays UNA vez a un conjunto de ids, el planificador hace un anti-join por
+  -- hash y baja a segundos. El indice GIN no salva esto: el problema es el
+  -- numero de veces que se pregunta, no como se busca.
+  with casados as materialized (
+    select unnest(m.comprobante_ids) as id
+      from public.matches_conciliacion m
+     where m.job_id = p_job_id
+  )
+  select
+    c.id,
+    c.fecha,
+    -- Convención de signos ÚNICA: cobranza +, pago −.
+    case when c.tipo = 'pago' then -abs(c.monto) else abs(c.monto) end,
+    case when c.tipo = 'pago' then 'pago' else 'cobranza' end,
+    -- `referencia_externa` manda cuando existe; si no, el número de documento.
+    coalesce(c.referencia_externa, c.serie_numero),
+    c.razon_social_contraparte,
+    c.descripcion
+  from public.comprobantes c
+  where c.empresa_id = v_job.empresa_id
+    and c.fecha between v_job.periodo_desde and v_job.periodo_hasta
+    and c.estado not in ('cobrado', 'anulado')
+    -- Lo que ya casó la capa exacta no vuelve a mirarse.
+    and not exists (select 1 from casados k where k.id = c.id)
+  -- Orden TOTAL: el id sintético del payload sale de la posición, y tiene que
+  -- ser el mismo si el backend vuelve a pedirlo.
+  order by c.fecha, c.id;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- residuo_movimientos(job) — movimientos del extracto que no casaron
+-- ---------------------------------------------------------------------------
+create or replace function public.residuo_movimientos(p_job_id text)
+returns table (
+  movimiento_id    uuid,
+  fecha            date,
+  monto            numeric,
+  tipo             text,
+  glosa            text,
+  referencia_banco text
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job public.jobs_conciliacion%rowtype;
+begin
+  select * into v_job from public.jobs_conciliacion where id = p_job_id;
+  if not found then
+    raise exception 'Conciliación no encontrada: %', p_job_id
+      using errcode = 'no_data_found';
+  end if;
+  if v_job.lote_extracto_id is null then
+    raise exception 'El job % no tiene extracto cargado en tabla', p_job_id
+      using errcode = 'check_violation';
+  end if;
+
+  return query
+  -- Misma razon que en `residuo_internos`: el conjunto de casados se despliega
+  -- una vez y se resta por hash.
+  with casados as materialized (
+    select unnest(mm.movimiento_ids) as id
+      from public.matches_conciliacion mm
+     where mm.job_id = p_job_id
+  )
+  select
+    m.id,
+    m.fecha,
+    m.monto,
+    case when m.monto < 0 then 'cargo' else 'abono' end,
+    m.glosa,
+    m.referencia_banco
+  from public.movimientos_extracto m
+  where m.lote_id = v_job.lote_extracto_id
+    and not exists (select 1 from casados k where k.id = m.id)
+  order by m.fecha, m.orden, m.id;
+end;
+$$;
+
+comment on function public.residuo_internos(text) is
+  'Comprobantes del período que la capa exacta no caso. Forma del contrato.';
+comment on function public.residuo_movimientos(text) is
+  'Movimientos del extracto que la capa exacta no caso. Forma del contrato.';
+
+-- Las invoca el backend con service_role, nunca el navegador.
+revoke all on function public.residuo_internos(text) from public, anon, authenticated;
+revoke all on function public.residuo_movimientos(text) from public, anon, authenticated;
+grant execute on function public.residuo_internos(text) to service_role;
+grant execute on function public.residuo_movimientos(text) to service_role;
+
+
+-- ============================================================================
+-- 0025_aplicar_cobros_exactos.sql — El reparto de cobros de la capa exacta,
+-- en SQL (parte B, cierre)
+--
+-- Aprobar una conciliación descuenta el saldo de cada comprobante cobrado. Eso
+-- se calculaba en Node y se escribía por lotes: con 32.170 cobros ya tardaba
+-- ~90 segundos, y con los 447.795 de un mes completo serían ~900 peticiones y
+-- un cuarto de hora. Inviable, y por eso el modo tabla no movía saldo.
+--
+-- ── Por qué SOLO las exactas ───────────────────────────────────────────────
+--
+-- El reparto general no es trivial: hay pagos parciales, agrupaciones 1:N donde
+-- un depósito se prorratea entre varias facturas, y diferencias absorbidas
+-- (comisión, redondeo) que dan la factura por cobrada entera. Esa lógica vive
+-- en `src/lib/cobranzas.ts`, es pura, tiene tests y **no conviene duplicarla**:
+-- es la que decide cuánto dinero se le descuenta a quién.
+--
+-- Pero las de la capa exacta no tienen nada de eso. Son 1:1 y con el MISMO
+-- importe en los dos lados por construcción (`conciliar_exacta` casa por
+-- céntimos con signo), así que el factor de reparto es exactamente 1 y lo único
+-- que queda es el tope por saldo disponible.
+--
+-- O sea: SQL donde el volumen es enorme y la aritmética trivial; Node donde la
+-- aritmética es sutil y el volumen son unos miles. El residuo sigue pasando por
+-- `calcularAplicaciones` como siempre.
+-- ============================================================================
+
+-- La version de un solo argumento existio brevemente durante el desarrollo.
+-- `create or replace` con otra firma NO la sustituye: crea una funcion nueva y
+-- deja la anterior viva, y con el parametro por defecto la llamada de un
+-- argumento queda ambigua entre las dos.
+drop function if exists public.aplicar_cobros_exactos(text);
+
+-- ⚠️ POR LOTES, y no por gusto. Escribir las 447.795 de una vez tarda 2 min 24 s
+-- —cada fila dispara el trigger que recalcula el saldo del comprobante (0008)—
+-- y el `statement_timeout` del rol con el que se conecta PostgREST es de 8 s:
+-- la llamada se cancelaria entera. Quien llama repite hasta que devuelva 0.
+create or replace function public.aplicar_cobros_exactos(
+  p_job_id text,
+  p_limite integer default 20000
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job public.jobs_conciliacion%rowtype;
+  v_n bigint;
+begin
+  select * into v_job from public.jobs_conciliacion where id = p_job_id;
+  if not found then
+    raise exception 'Conciliación no encontrada: %', p_job_id
+      using errcode = 'no_data_found';
+  end if;
+
+  with pares as (
+    select
+      m.comprobante_ids[1] as comp,
+      m.movimiento_ids[1]  as mov
+    from public.matches_conciliacion m
+    where m.job_id = p_job_id
+      and m.metodo = 'exacta'
+      -- Mismos estados que `ESTADOS_CONFIRMADOS` en src/lib/cobranzas.ts.
+      -- `auto` CUENTA: es lo que emite el motor, y exigir un clic humano en
+      -- cada match exacto vaciaría de sentido el producto.
+      and m.estado_revision in ('auto', 'aceptado', 'modificado')
+      and array_length(m.comprobante_ids, 1) = 1
+      and array_length(m.movimiento_ids, 1) = 1
+      -- Lo ya aplicado no se vuelve a mirar: es lo que hace que repetir la
+      -- llamada avance en vez de rehacer el mismo trabajo.
+      and not exists (
+        select 1 from public.aplicaciones_cobro a
+         where a.job_id = p_job_id
+           and a.comprobante_id = m.comprobante_ids[1]
+      )
+    limit p_limite
+  ),
+  -- Lo que aplicaron OTROS jobs. El propio no cuenta: sus aplicaciones se
+  -- borran y se rehacen en cada resincronización, así que incluirlas dejaría
+  -- la segunda pasada sin nada que aplicar.
+  otros as (
+    select a.comprobante_id, sum(a.monto_aplicado) as aplicado
+      from public.aplicaciones_cobro a
+      join pares p on p.comp = a.comprobante_id
+     where a.job_id <> p_job_id
+     group by a.comprobante_id
+  ),
+  -- Un cobro que el banco revirtió deja de ocupar sitio: la factura vuelve a
+  -- estar disponible.
+  revertidos as (
+    select r.comprobante_id, sum(r.monto_revertido) as revertido
+      from public.reversiones_cobro r
+      join pares p on p.comp = r.comprobante_id
+     where r.job_id <> p_job_id
+     group by r.comprobante_id
+  ),
+  calculo as (
+    select
+      p.comp,
+      p.mov,
+      abs(c.monto) as importe,
+      -- Tope por saldo disponible. Sin él, la misma factura conciliada desde
+      -- dos cuentas bancarias en el mismo período —que el sistema permite a
+      -- propósito, son extractos distintos— descontaría su importe COMPLETO
+      -- dos veces. La 0015 aborta si aun así se pasara.
+      greatest(
+        0,
+        abs(c.monto)
+          - coalesce(o.aplicado, 0)
+          + coalesce(rv.revertido, 0)
+      ) as disponible
+    from pares p
+    join public.comprobantes c on c.id = p.comp
+    left join otros o       on o.comprobante_id = p.comp
+    left join revertidos rv on rv.comprobante_id = p.comp
+  )
+  insert into public.aplicaciones_cobro
+    (job_id, empresa_id, usuario_id, comprobante_id, id_movimiento, monto_aplicado)
+  select
+    p_job_id,
+    v_job.empresa_id,
+    v_job.usuario_id,
+    k.comp,
+    k.mov::text,
+    least(k.importe, k.disponible)
+  from calculo k
+  -- Por debajo de medio céntimo no hay cobro que registrar, y una fila de 0
+  -- solo ensucia el historial del comprobante.
+  where least(k.importe, k.disponible) > 0.005
+  -- Reentrante: si por lo que sea ya existía esa aplicación, no se duplica.
+  on conflict (comprobante_id, job_id, id_movimiento) do nothing;
+
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+comment on function public.aplicar_cobros_exactos(text, integer) is
+  'Escribe las aplicaciones de cobro de los pares EXACTOS de un job. Son 1:1 y '
+  'con el mismo importe, así que el factor de reparto es 1: solo queda topar '
+  'por saldo disponible. El resto lo calcula src/lib/cobranzas.ts.';
+
+revoke all on function public.aplicar_cobros_exactos(text, integer) from public, anon, authenticated;
+grant execute on function public.aplicar_cobros_exactos(text, integer) to service_role;
+
+-- ---------------------------------------------------------------------------
+-- ⚠️ Índice imprescindible para que los lotes NO se degraden.
+--
+-- El filtro "lo ya aplicado no se vuelve a mirar" busca por (job_id,
+-- comprobante_id). El índice que existía (`idx_aplicaciones_job`) es solo por
+-- `job_id`, así que cada lote recorría TODAS las aplicaciones ya escritas de
+-- ese job: el primer lote de 20.000 tardó 10 s y el segundo 60 s, con el mismo
+-- trabajo por delante. La única pista de que algo iba mal era que empeoraba.
+--
+-- La clave única (comprobante_id, job_id, id_movimiento) no sirve: su columna
+-- principal es la equivocada para esta pregunta.
+-- ---------------------------------------------------------------------------
+create index if not exists idx_aplicaciones_job_comprobante
+  on public.aplicaciones_cobro (job_id, comprobante_id);
+
+-- ---------------------------------------------------------------------------
+-- limpiar_cobros_desconfirmados(job)
+--
+-- Quita las aplicaciones de este job cuyo par ya no está confirmado: alguien
+-- rechazó un match o lo devolvió a revisión, y su cobro tiene que desaparecer
+-- para que el saldo vuelva.
+--
+-- Sustituye al "borrar todo y rehacer" que hace la versión en Node. Con 447.795
+-- aplicaciones ese borrado tarda **90 segundos** —cada fila dispara el trigger
+-- de saldo— y encima obliga a reescribirlas todas después. Aquí se toca solo lo
+-- que cambió, que en régimen normal es nada.
+--
+-- ⚠️ El conjunto de comprobantes confirmados se despliega UNA vez con `unnest`.
+-- Con `comprobante_id = any(m.comprobante_ids)` Postgres recorrería todos los
+-- matches por cada aplicación, que es el mismo error que dejó `residuo_internos`
+-- sin terminar en diez minutos.
+-- ---------------------------------------------------------------------------
+create or replace function public.limpiar_cobros_desconfirmados(p_job_id text)
+returns bigint
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_n bigint;
+begin
+  with confirmados as materialized (
+    select unnest(m.comprobante_ids) as comprobante_id
+      from public.matches_conciliacion m
+     where m.job_id = p_job_id
+       and m.estado_revision in ('auto', 'aceptado', 'modificado')
+  )
+  delete from public.aplicaciones_cobro a
+   where a.job_id = p_job_id
+     and not exists (
+       select 1 from confirmados c where c.comprobante_id = a.comprobante_id
+     );
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+comment on function public.limpiar_cobros_desconfirmados(text) is
+  'Retira los cobros de los pares que dejaron de estar confirmados. Toca solo '
+  'lo que cambió: borrar y rehacer 447.795 aplicaciones tarda 90 s.';
+
+revoke all on function public.limpiar_cobros_desconfirmados(text) from public, anon, authenticated;
+grant execute on function public.limpiar_cobros_desconfirmados(text) to service_role;
+
+
+-- ============================================================================
+-- 0026_matches_para_reportes.sql — Reportes y aprendizaje sobre los pares en
+-- tabla (parte B, flanco pendiente)
+--
+-- Los reportes y el módulo de aprendizaje leen `resultado.matches`. En modo
+-- tabla ese array queda vacío tras la absorción, así que verían el desglose por
+-- método a cero y el pool de ejemplos vacío — justo en la empresa con medio
+-- millón de partidas, que es la que más tiene que enseñar.
+--
+-- Los dos necesitan cosas distintas, y por eso son dos funciones:
+--
+--   · el aprendizaje quiere los pares que REVISÓ UNA PERSONA. Son pocos por
+--     definición —nadie revisa 447.795 a mano— así que se devuelven enteros.
+--   · los reportes quieren el DESGLOSE. Traer medio millón de filas para
+--     contarlas en Node es exactamente lo que la parte B vino a eliminar, así
+--     que se cuentan aquí.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- matches_revisados(jobs) — los pares con decisión humana
+--
+-- `auto` queda fuera: nadie lo miró, y usarlo como ejemplo de aprendizaje sería
+-- enseñarle a la IA un criterio que ninguna persona aplicó. Es la misma razón
+-- por la que los `auto` no entran en la tasa de acierto (ver CLAUDE.md §
+-- "¿de verdad está aprendiendo?").
+-- ---------------------------------------------------------------------------
+create or replace function public.matches_revisados(p_job_ids text[])
+returns table (
+  job_id               text,
+  comprobante_ids      uuid[],
+  movimiento_ids       uuid[],
+  metodo               text,
+  estado_revision      text,
+  confianza            numeric,
+  categoria_diferencia text,
+  diferencia_monto     numeric,
+  decisiones           jsonb,
+  excluido_aprendizaje boolean
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    m.job_id, m.comprobante_ids, m.movimiento_ids, m.metodo, m.estado_revision,
+    m.confianza, m.categoria_diferencia, m.diferencia_monto, m.decisiones,
+    m.excluido_aprendizaje
+  from public.matches_conciliacion m
+  where m.job_id = any (p_job_ids)
+    and m.estado_revision <> 'auto';
+$$;
+
+-- ---------------------------------------------------------------------------
+-- conteo_matches(jobs) — el desglose, contado en la base
+--
+-- Una fila por (job, método, categoría, estado). Son unas pocas decenas por
+-- job aunque detrás haya medio millón de pares.
+-- ---------------------------------------------------------------------------
+create or replace function public.conteo_matches(p_job_ids text[])
+returns table (
+  job_id               text,
+  metodo               text,
+  categoria_diferencia text,
+  estado_revision      text,
+  n                    bigint
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select m.job_id, m.metodo, m.categoria_diferencia, m.estado_revision, count(*)
+    from public.matches_conciliacion m
+   where m.job_id = any (p_job_ids)
+   group by m.job_id, m.metodo, m.categoria_diferencia, m.estado_revision;
+$$;
+
+comment on function public.matches_revisados(text[]) is
+  'Pares con decisión humana. Los `auto` quedan fuera: nadie los miró.';
+comment on function public.conteo_matches(text[]) is
+  'Desglose por método/categoría/estado, contado en la base.';
+
+-- Las invoca el backend con service_role. El acotado por empresa lo hace quien
+-- llama, que solo pasa jobs de la empresa del usuario (leídos con RLS).
+revoke all on function public.matches_revisados(text[]) from public, anon, authenticated;
+revoke all on function public.conteo_matches(text[]) from public, anon, authenticated;
+grant execute on function public.matches_revisados(text[]) to service_role;
+grant execute on function public.conteo_matches(text[]) to service_role;
+
+
+-- ============================================================================
+-- 0027_resumen_comprobantes_periodo.sql — El contador del wizard, en la base
+--
+-- El Paso 1 dice cuántos comprobantes hay en el período elegido. Lo consultaba
+-- el NAVEGADOR con el cliente de RLS y sin filtrar por empresa, confiando en
+-- que la política acotara. Con 452.309 comprobantes eso no termina: la política
+-- es `es_miembro(empresa_id)`, una función sobre una COLUMNA que Postgres
+-- evalúa fila a fila, y la consulta se pasa del `statement_timeout` de 8 s.
+--
+-- El resultado en pantalla era el peor posible:
+--
+--     Comprobantes del período
+--     0 registros · S/ 0.00
+--     No hay comprobantes en este período.
+--
+-- O sea, una respuesta tranquilizadora y falsa sobre datos que sí estaban. El
+-- usuario no tiene forma de distinguir "no hay" de "no se pudo contar".
+--
+-- Mismo remedio que `resumen_saldos` (0021): la pertenencia se resuelve UNA vez
+-- y el filtro por `empresa_id` es una igualdad indexable.
+-- ============================================================================
+
+create or replace function public.resumen_comprobantes_periodo(
+  p_desde date,
+  p_hasta date
+)
+returns table (
+  registros      bigint,
+  suma           numeric,
+  total_cargados bigint,
+  ya_cobrados    bigint
+)
+language sql
+stable
+-- ⚠️ SECURITY DEFINER: RLS no aplica dentro, así que el `empresa_id in (...)`
+-- de cada consulta ES el control de acceso. La empresa sale siempre de
+-- `auth.uid()`; esta función NUNCA acepta un empresa_id por parámetro.
+security definer
+set search_path = public
+as $$
+  -- ⚠️ UN SOLO recorrido con `filter`, no cuatro subconsultas.
+  --
+  -- La primera versión hacía cuatro `select` independientes sobre la misma
+  -- tabla: 6,19 s con 452.309 comprobantes, demasiado cerca de los 8 s del
+  -- `statement_timeout` para dejarlo así. Los mismos cuatro números salen de
+  -- una pasada agregando con `filter`.
+  with mias as (
+    select ue.empresa_id
+      from public.usuarios_empresa ue
+     where ue.usuario_id = auth.uid()
+  )
+  select
+    -- Lo que entraría a conciliar: mismo criterio que
+    -- `getComprobantesCanonicos` y que la capa exacta en SQL.
+    count(*) filter (
+      where c.fecha between p_desde and p_hasta
+        and c.estado not in ('cobrado', 'anulado')
+    ),
+    -- Suma EXACTA, no la de las primeras mil filas. Antes salía de las que
+    -- alcanzara a traer PostgREST y la pantalla avisaba de que era parcial.
+    coalesce(sum(abs(c.monto)) filter (
+      where c.fecha between p_desde and p_hasta
+        and c.estado not in ('cobrado', 'anulado')
+    ), 0),
+    -- Todo lo cargado, sin filtrar por fecha: si alguien tiene 5 comprobantes
+    -- y en el período caen 2, decir solo "2" parece que se perdieron los otros.
+    count(*),
+    -- Del período pero ya saldados: se dejan fuera y hay que decirlo, o
+    -- parecerá que faltan.
+    count(*) filter (
+      where c.fecha between p_desde and p_hasta and c.estado = 'cobrado'
+    )
+  from public.comprobantes c
+  -- ⚠️ FRONTERA DE SEGURIDAD (ver la nota de SECURITY DEFINER).
+  where c.empresa_id in (select empresa_id from mias);
+$$;
+
+comment on function public.resumen_comprobantes_periodo(date, date) is
+  'Conteos y suma de comprobantes de un período para el Paso 1 del wizard. '
+  'Cuenta en la base: con medio millón de filas, hacerlo por PostgREST con RLS '
+  'se pasa del statement_timeout y la pantalla dice "0".';
+
+revoke all on function public.resumen_comprobantes_periodo(date, date)
+  from public, anon;
+grant execute on function public.resumen_comprobantes_periodo(date, date)
+  to authenticated, service_role;
+
+-- Apoya el filtro por período, que es el recorrido natural del wizard.
+create index if not exists idx_comprobantes_empresa_fecha
+  on public.comprobantes (empresa_id, fecha);
+
+
+-- ============================================================================
+-- 0028_conciliar_exacta_por_bloques.sql — La capa exacta, en trozos que caben
+--
+-- `conciliar_exacta` tarda ~32 s con junio completo (452.177 × 450.999). Medido
+-- en psql eso parecía aceptable; por PostgREST no lo es, porque el rol con el
+-- que se conecta lleva `statement_timeout = 8s` y la llamada se cancela entera:
+--
+--     No se pudo correr la capa exacta: canceling statement due to statement timeout
+--
+-- ⚠️ Y NO se puede ampliar desde dentro. `set local statement_timeout` en el
+-- cuerpo de la función no rearma el temporizador de la sentencia que ya está en
+-- marcha — probado: se cancela igual, a los 8,3 s.
+--
+-- ── Por qué se trocea por REFERENCIA y no por fecha ────────────────────────
+--
+-- Trocear por días sería lo intuitivo y arruinaría el resultado: un asiento del
+-- 30/06 puede cobrarse el 28, y el corte diario parte ese par. Es exactamente
+-- la diferencia entre el 88,44 % de un día y el 99,03 % del mes.
+--
+-- Pero un par SIEMPRE comparte referencia. Así que repartiendo las referencias
+-- en bloques por su hash, ningún par queda partido: los dos lados de cada
+-- emparejamiento caen en el mismo bloque, sea cual sea su fecha. El resultado es
+-- idéntico al de una sola pasada.
+-- ============================================================================
+
+-- La versión de dos argumentos se sustituye por la de tres. `create or replace`
+-- con otra firma deja viva la anterior y las llamadas quedan ambiguas.
+drop function if exists public.conciliar_exacta(text);
+
+create or replace function public.conciliar_exacta(
+  p_job_id  text,
+  p_bloque  integer default 0,
+  p_bloques integer default 1
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job public.jobs_conciliacion%rowtype;
+  v_pares bigint;
+begin
+  select * into v_job from public.jobs_conciliacion where id = p_job_id;
+  if not found then
+    raise exception 'Conciliación no encontrada: %', p_job_id
+      using errcode = 'no_data_found';
+  end if;
+  if v_job.lote_extracto_id is null then
+    raise exception 'El job % no tiene extracto cargado en tabla', p_job_id
+      using errcode = 'check_violation';
+  end if;
+
+  with comps as (
+    select
+      c.id,
+      -- Céntimos CON SIGNO, igual que `01_exacta.js`: en valor absoluto un
+      -- cobro casaría con un pago del mismo importe.
+      round((case when c.tipo = 'pago' then -abs(c.monto) else abs(c.monto) end) * 100)::bigint as cent,
+      upper(regexp_replace(coalesce(c.referencia_externa, c.serie_numero, ''), '[^A-Za-z0-9]', '', 'g')) as ref
+    from public.comprobantes c
+    where c.empresa_id = v_job.empresa_id
+      and c.fecha between v_job.periodo_desde and v_job.periodo_hasta
+      and c.estado not in ('cobrado', 'anulado')
+  ),
+  movs as (
+    select
+      m.id,
+      round(m.monto * 100)::bigint as cent,
+      upper(regexp_replace(coalesce(m.referencia_banco, ''), '[^A-Za-z0-9]', '', 'g')) as ref
+    from public.movimientos_extracto m
+    where m.lote_id = v_job.lote_extracto_id
+  ),
+  -- El bloque se decide por la REFERENCIA, así que los dos lados de un par
+  -- caen siempre juntos. `abs(hashtext(...))` reparte de forma pareja.
+  ci as (
+    select id, cent, ref,
+           row_number() over (partition by cent, ref order by id) as n
+      from comps
+     where ref <> ''
+       and mod(abs(hashtext(ref)), p_bloques) = p_bloque
+  ),
+  mi as (
+    select id, cent, ref,
+           row_number() over (partition by cent, ref order by id) as n
+      from movs
+     where ref <> ''
+       and mod(abs(hashtext(ref)), p_bloques) = p_bloque
+  ),
+  pares as (
+    insert into public.matches_conciliacion (
+      job_id, empresa_id, comprobante_ids, movimiento_ids,
+      metodo, estado_revision, diferencia_monto
+    )
+    select
+      p_job_id, v_job.empresa_id, array[ci.id], array[mi.id],
+      'exacta',
+      -- `auto` como en el motor: exigir un clic humano en cada match exacto
+      -- vaciaría de sentido el producto. Y `auto` descuenta saldo.
+      'auto',
+      0
+    from ci join mi on ci.cent = mi.cent and ci.ref = mi.ref and ci.n = mi.n
+    returning 1
+  )
+  select count(*) into v_pares from pares;
+
+  return v_pares;
+end;
+$$;
+
+comment on function public.conciliar_exacta(text, integer, integer) is
+  'Capa exacta (monto + referencia) como JOIN, troceada por hash de la '
+  'referencia para caber en el statement_timeout. Trocear por FECHA partiría '
+  'los pares cuyo asiento y cobro caen en días distintos.';
+
+revoke all on function public.conciliar_exacta(text, integer, integer)
+  from public, anon, authenticated;
+grant execute on function public.conciliar_exacta(text, integer, integer)
+  to service_role;
+
+-- ---------------------------------------------------------------------------
+-- totales_conciliacion(job) — cuántas partidas hay a cada lado
+--
+-- Antes lo devolvía `conciliar_exacta`. Al trocearla habría que contarlas en
+-- cada bloque, que es trabajo repetido; aquí se piden una vez.
+-- ---------------------------------------------------------------------------
+create or replace function public.totales_conciliacion(p_job_id text)
+returns table (internos bigint, movimientos bigint)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job public.jobs_conciliacion%rowtype;
+begin
+  select * into v_job from public.jobs_conciliacion where id = p_job_id;
+  if not found then
+    raise exception 'Conciliación no encontrada: %', p_job_id
+      using errcode = 'no_data_found';
+  end if;
+
+  return query
+  select
+    (select count(*) from public.comprobantes c
+      where c.empresa_id = v_job.empresa_id
+        and c.fecha between v_job.periodo_desde and v_job.periodo_hasta
+        and c.estado not in ('cobrado', 'anulado')),
+    (select count(*) from public.movimientos_extracto m
+      where m.lote_id = v_job.lote_extracto_id);
+end;
+$$;
+
+revoke all on function public.totales_conciliacion(text) from public, anon, authenticated;
+grant execute on function public.totales_conciliacion(text) to service_role;
+
+drop function if exists public._prueba_timeout();
+
+
+-- ============================================================================
+-- 0029_referencia_normalizada.sql — La referencia, ya normalizada en la fila
+--
+-- La capa exacta casa por `upper(regexp_replace(referencia, '[^A-Za-z0-9]',''))`
+-- y lo calculaba EN CADA CONCILIACIÓN, para las 903.176 partidas. Ese trabajo
+-- de cadenas es el grueso de los 32 s que tardaba, y no se puede indexar: el
+-- planificador tiene que leer y transformar cada fila antes de poder juntar
+-- nada.
+--
+-- Trocear no lo arregla. Se intentó repartir por bloques de hash de la
+-- referencia —correcto, porque un par siempre comparte referencia y así ninguno
+-- queda partido— pero cada bloque **vuelve a recorrer y normalizar las 900.000
+-- filas** y solo se reduce el join: 8 bloques de ~8 s cada uno, la mayoría
+-- cancelados por el `statement_timeout`. Trocear reparte el join, no el escaneo.
+--
+-- Aquí la normalización se hace UNA vez, al insertar, y queda en una columna
+-- indexable. El coste se mueve de "cada conciliación" a "cada fila, una vez".
+--
+-- ⚠️ La expresión tiene que ser EXACTAMENTE la de `n8n/01_exacta.js`
+-- (`normRef`), que es quien concilia el residuo. Si divergieran, un par casaría
+-- en SQL y no en el motor, o al revés, y la diferencia sería invisible.
+-- ============================================================================
+
+alter table public.comprobantes
+  add column if not exists ref_norm text
+  generated always as (
+    upper(regexp_replace(
+      coalesce(referencia_externa, serie_numero, ''), '[^A-Za-z0-9]', '', 'g'
+    ))
+  ) stored;
+
+alter table public.movimientos_extracto
+  add column if not exists ref_norm text
+  generated always as (
+    upper(regexp_replace(coalesce(referencia_banco, ''), '[^A-Za-z0-9]', '', 'g'))
+  ) stored;
+
+-- Índices parciales: las filas sin referencia no participan del emparejamiento
+-- por código, y en una empresa que factura sin número son la mayoría.
+create index if not exists idx_comprobantes_ref_norm
+  on public.comprobantes (empresa_id, ref_norm)
+  where ref_norm <> '';
+
+create index if not exists idx_mov_extracto_ref_norm
+  on public.movimientos_extracto (lote_id, ref_norm)
+  where ref_norm <> '';
+
+comment on column public.comprobantes.ref_norm is
+  'Referencia normalizada para emparejar (mayúsculas, sin separadores). Misma '
+  'expresión que `normRef` en n8n/01_exacta.js.';
+comment on column public.movimientos_extracto.ref_norm is
+  'Referencia del banco normalizada. Ver comprobantes.ref_norm.';
+
+-- ---------------------------------------------------------------------------
+-- La capa exacta, ahora sobre columnas ya normalizadas.
+--
+-- Se conservan los bloques: siguen siendo la red por si un cliente aún mayor
+-- vuelve a rozar el techo, y con `p_bloques = 1` (el valor por defecto) es una
+-- sola pasada.
+-- ---------------------------------------------------------------------------
+create or replace function public.conciliar_exacta(
+  p_job_id  text,
+  p_bloque  integer default 0,
+  p_bloques integer default 1
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job public.jobs_conciliacion%rowtype;
+  v_pares bigint;
+begin
+  select * into v_job from public.jobs_conciliacion where id = p_job_id;
+  if not found then
+    raise exception 'Conciliación no encontrada: %', p_job_id
+      using errcode = 'no_data_found';
+  end if;
+  if v_job.lote_extracto_id is null then
+    raise exception 'El job % no tiene extracto cargado en tabla', p_job_id
+      using errcode = 'check_violation';
+  end if;
+
+  with ci as (
+    select
+      c.id,
+      -- Céntimos CON SIGNO, igual que `01_exacta.js`: en valor absoluto un
+      -- cobro casaría con un pago del mismo importe.
+      round((case when c.tipo = 'pago' then -abs(c.monto) else abs(c.monto) end) * 100)::bigint as cent,
+      c.ref_norm as ref,
+      row_number() over (
+        partition by round((case when c.tipo = 'pago' then -abs(c.monto) else abs(c.monto) end) * 100), c.ref_norm
+        order by c.id
+      ) as n
+    from public.comprobantes c
+    where c.empresa_id = v_job.empresa_id
+      and c.fecha between v_job.periodo_desde and v_job.periodo_hasta
+      and c.estado not in ('cobrado', 'anulado')
+      and c.ref_norm <> ''
+      and (p_bloques = 1 or mod(abs(hashtext(c.ref_norm)), p_bloques) = p_bloque)
+  ),
+  mi as (
+    select
+      m.id,
+      round(m.monto * 100)::bigint as cent,
+      m.ref_norm as ref,
+      row_number() over (
+        partition by round(m.monto * 100), m.ref_norm order by m.id
+      ) as n
+    from public.movimientos_extracto m
+    where m.lote_id = v_job.lote_extracto_id
+      and m.ref_norm <> ''
+      and (p_bloques = 1 or mod(abs(hashtext(m.ref_norm)), p_bloques) = p_bloque)
+  ),
+  pares as (
+    insert into public.matches_conciliacion (
+      job_id, empresa_id, comprobante_ids, movimiento_ids,
+      metodo, estado_revision, diferencia_monto
+    )
+    select
+      p_job_id, v_job.empresa_id, array[ci.id], array[mi.id],
+      'exacta', 'auto', 0
+    from ci join mi on ci.cent = mi.cent and ci.ref = mi.ref and ci.n = mi.n
+    returning 1
+  )
+  select count(*) into v_pares from pares;
+
+  return v_pares;
+end;
+$$;
+
+revoke all on function public.conciliar_exacta(text, integer, integer)
+  from public, anon, authenticated;
+grant execute on function public.conciliar_exacta(text, integer, integer)
+  to service_role;
+
+
+-- ============================================================================
+-- 0030_analizar_tras_carga.sql — Estadísticas frescas después de cargar medio
+-- millón de filas
+--
+-- El planificador de Postgres decide con estadísticas. Cuando una tabla cambia
+-- de tamaño de golpe —una importación de 450.999 movimientos, o una migración
+-- que la reescribe— esas estadísticas se quedan viejas y elige planes malos
+-- para la MISMA consulta que antes iba bien.
+--
+-- Pasó, y el síntoma no apuntaba a esto: `residuo_internos` tardaba 1,68 s
+-- medido, y después de que la `0029` reescribiera `comprobantes` para añadir
+-- `ref_norm` empezó a pasarse del `statement_timeout` de 8 s. Nada en el código
+-- había cambiado. Un `vacuum analyze` lo devolvió a 1,5 s.
+--
+-- Autovacuum acaba haciéndolo solo, pero tarda — y la ventana en la que no lo
+-- ha hecho es exactamente cuando alguien concilia lo que acaba de importar.
+--
+-- ⚠️ Va como función SECURITY DEFINER porque `ANALYZE` exige ser dueño de la
+-- tabla, y `service_role` no lo es (lo es `supabase_admin`). Sin esto el
+-- backend no puede pedirlo.
+-- ============================================================================
+
+create or replace function public.analizar_tablas_conciliacion()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  analyze public.comprobantes;
+  analyze public.movimientos_extracto;
+  analyze public.matches_conciliacion;
+end;
+$$;
+
+comment on function public.analizar_tablas_conciliacion() is
+  'Refresca las estadísticas de las tablas que recorre la conciliación. Se '
+  'llama tras una importación grande: sin ello el planificador usa los tamaños '
+  'de antes y elige planes que se pasan del statement_timeout.';
+
+revoke all on function public.analizar_tablas_conciliacion() from public, anon, authenticated;
+grant execute on function public.analizar_tablas_conciliacion() to service_role;
+
+-- Y de paso, ahora: la 0029 reescribió `comprobantes` y la dejó sin analizar.
+analyze public.comprobantes;
+analyze public.movimientos_extracto;
+
+
+-- ============================================================================
+-- 0031_analizar_aplicaciones.sql — `aplicaciones_cobro` también necesita
+-- estadísticas frescas
+--
+-- Aprobar una conciliación de medio millón de pares llena `aplicaciones_cobro`
+-- de 0 a 447.795 filas en lotes. El anti-join que decide "lo ya aplicado no se
+-- vuelve a mirar" consulta esa misma tabla mientras crece: con las estadísticas
+-- de cuando estaba vacía, el planificador elige un plan pensado para cero filas
+-- y se pasa del `statement_timeout` de 8 s.
+--
+-- Ocurrió: la aprobación escribió 10.000 cobros y el tercer lote se canceló.
+-- Minutos después, el MISMO lote tardaba 3,2 s — autovacuum ya había analizado.
+-- Es la misma carrera que en `matches_conciliacion`, y por eso esa tabla entra
+-- ahora en la lista.
+-- ============================================================================
+
+create or replace function public.analizar_tablas_conciliacion()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  analyze public.comprobantes;
+  analyze public.movimientos_extracto;
+  analyze public.matches_conciliacion;
+  -- Crece durante la propia aprobación, que es cuando más importa.
+  analyze public.aplicaciones_cobro;
+end;
+$$;
+
+analyze public.aplicaciones_cobro;
+
+
+-- ============================================================================
+-- 0032_resumen_ejecutivo.sql — Las cifras que mira quien decide
+--
+-- No es "otro reporte". Los reportes existentes responden "¿cómo fue la
+-- conciliación?"; esto responde "¿cómo está la empresa?", que es otra pregunta
+-- y la hace otra persona.
+--
+-- ⚠️ DOS RELOJES, y confundirlos hace mentir al número:
+--
+--   · Lo CONCILIADO pertenece a un período: cuánto se procesó en junio.
+--   · Lo que te DEBEN es una foto de HOY: no tiene período, tiene antigüedad.
+--
+-- Un "por cobrar de junio" no significa nada — o son las facturas emitidas en
+-- junio (que quizá ya se cobraron) o el saldo vivo (que no es de junio). La
+-- función devuelve las dos cosas por separado y la pantalla lo dice con todas
+-- las letras.
+--
+-- Se agrega EN LA BASE por lo de siempre: con 452.309 comprobantes, traerlos
+-- para sumarlos en Node es lo que la parte B vino a eliminar.
+-- ============================================================================
+
+create or replace function public.resumen_ejecutivo(
+  p_desde date,
+  p_hasta date,
+  p_hoy   date default current_date
+)
+returns table (
+  -- ── Del período elegido ──────────────────────────────────────────────────
+  conciliaciones        bigint,
+  sin_aprobar           bigint,
+  partidas              bigint,
+  partidas_conciliadas  bigint,
+  cobrado               numeric,
+  pagado                numeric,
+  diferencia_cuadre     numeric,
+  -- ── Foto de hoy ──────────────────────────────────────────────────────────
+  por_cobrar            numeric,
+  por_cobrar_vencido    numeric,
+  por_cobrar_docs       bigint,
+  por_pagar             numeric,
+  por_pagar_vencido     numeric,
+  por_pagar_docs        bigint
+)
+language sql
+stable
+-- ⚠️ SECURITY DEFINER: RLS no aplica dentro, así que los `empresa_id in (...)`
+-- de abajo SON el control de acceso. La empresa sale siempre de `auth.uid()`;
+-- esta función nunca acepta un empresa_id por parámetro.
+security definer
+set search_path = public
+as $$
+  with mias as (
+    select ue.empresa_id from public.usuarios_empresa ue
+     where ue.usuario_id = auth.uid()
+  ),
+  -- Solo lo APROBADO cuenta. Un borrador con decisiones confirmadas no mueve un
+  -- céntimo, y presentarlo aquí como si contara sería el peor error posible en
+  -- una pantalla de dirección.
+  jobs as (
+    select j.id, j.resultado
+      from public.jobs_conciliacion j
+     where j.empresa_id in (select empresa_id from mias)
+       and j.estado = 'completado'
+       and j.estado_contable = 'aprobada'
+       and j.periodo_desde <= p_hasta
+       and j.periodo_hasta >= p_desde
+  ),
+  -- Terminadas y sin aprobar: no suman, pero hay que decir que existen. Si no,
+  -- parecería que ese trabajo se perdió.
+  pendientes_aprobar as (
+    select count(*) as n
+      from public.jobs_conciliacion j
+     where j.empresa_id in (select empresa_id from mias)
+       and j.estado = 'completado'
+       and j.estado_contable in ('borrador', 'en_proceso', 'observada')
+       and j.periodo_desde <= p_hasta
+       and j.periodo_hasta >= p_desde
+  ),
+  -- El dinero que de verdad se movió, por tipo de comprobante.
+  movido as (
+    select
+      coalesce(sum(a.monto_aplicado) filter (where c.tipo <> 'pago'), 0) as cobrado,
+      coalesce(sum(a.monto_aplicado) filter (where c.tipo = 'pago'), 0) as pagado
+    from public.aplicaciones_cobro a
+    join jobs on jobs.id = a.job_id
+    join public.comprobantes c on c.id = a.comprobante_id
+  ),
+  -- Saldo vivo HOY, con su antigüedad. Mismo criterio que Por cobrar / Por
+  -- pagar (`cuentaComoPendiente` en src/lib/aging.ts).
+  saldos as (
+    select
+      coalesce(sum(c.saldo) filter (where c.tipo <> 'pago'), 0) as cobrar,
+      coalesce(sum(c.saldo) filter (
+        where c.tipo <> 'pago' and coalesce(c.fecha_vencimiento, c.fecha) < p_hoy
+      ), 0) as cobrar_vencido,
+      count(*) filter (where c.tipo <> 'pago') as cobrar_docs,
+      coalesce(sum(c.saldo) filter (where c.tipo = 'pago'), 0) as pagar,
+      coalesce(sum(c.saldo) filter (
+        where c.tipo = 'pago' and coalesce(c.fecha_vencimiento, c.fecha) < p_hoy
+      ), 0) as pagar_vencido,
+      count(*) filter (where c.tipo = 'pago') as pagar_docs
+    from public.comprobantes c
+    where c.empresa_id in (select empresa_id from mias)
+      and c.estado not in ('cobrado', 'anulado')
+      and c.saldo > 0.005
+  )
+  select
+    (select count(*) from jobs),
+    (select n from pendientes_aprobar),
+    coalesce((select sum((j.resultado->'resumen'->>'total_internos')::bigint
+                       + (j.resultado->'resumen'->>'total_bancarios')::bigint) from jobs j), 0),
+    coalesce((select sum((j.resultado->'resumen'->>'total_internos')::bigint
+                       + (j.resultado->'resumen'->>'total_bancarios')::bigint
+                       - (j.resultado->'resumen'->>'sin_conciliar_internos')::bigint
+                       - (j.resultado->'resumen'->>'sin_conciliar_bancarios')::bigint) from jobs j), 0),
+    (select cobrado from movido),
+    (select pagado from movido),
+    -- La suma de lo que quedó SIN EXPLICAR en cada cuadre. Es la cifra que le
+    -- dice a un gerente si puede fiarse de sus saldos.
+    coalesce((select sum((j.resultado->'cuadre'->>'diferencia')::numeric) from jobs j), 0),
+    (select cobrar from saldos),
+    (select cobrar_vencido from saldos),
+    (select cobrar_docs from saldos),
+    (select pagar from saldos),
+    (select pagar_vencido from saldos),
+    (select pagar_docs from saldos);
+$$;
+
+comment on function public.resumen_ejecutivo(date, date, date) is
+  'Cifras consolidadas para dirección. Lo conciliado es del período; lo que te '
+  'deben es una foto de hoy — son dos relojes distintos y la pantalla lo dice.';
+
+revoke all on function public.resumen_ejecutivo(date, date, date) from public, anon;
+grant execute on function public.resumen_ejecutivo(date, date, date)
+  to authenticated, service_role;
+
+
+-- ============================================================================
+-- 0033_partidas_del_job.sql — Cuántas partidas cubrió una conciliación
+--
+-- ⚠️ El total de una conciliación NO puede depender del estado actual de sus
+-- comprobantes, y así estaba.
+--
+-- `totales_conciliacion` cuenta los comprobantes del período que no están
+-- cobrados ni anulados — correcto para decidir qué conciliar, y equivocado para
+-- decir qué se concilió. Al aprobar, 447.795 pasan a `cobrado` y ese total se
+-- desploma de 452.177 a 4.382. El resumen se degradaba solo, y como la pantalla
+-- recalcula en cada carga, el número empeoraba cada vez que alguien lo miraba.
+--
+-- Aquí se cuenta lo que la conciliación TOCÓ, que no cambia después: las
+-- partidas que entraron en algún par. Sumado a las que quedaron sin conciliar
+-- da el total del período, y es estable para siempre.
+-- ============================================================================
+
+create or replace function public.partidas_conciliadas_job(p_job_id text)
+returns table (internos bigint, movimientos bigint)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    -- `array_length` y no `count(*)`: un match puede ser 1:N, así que un par no
+    -- es una partida — son las que lleva dentro.
+    coalesce(sum(coalesce(array_length(m.comprobante_ids, 1), 0)), 0),
+    coalesce(sum(coalesce(array_length(m.movimiento_ids, 1), 0)), 0)
+  from public.matches_conciliacion m
+  where m.job_id = p_job_id
+    -- Un par rechazado no concilió nada: sus partidas cuentan como sueltas.
+    and m.estado_revision <> 'rechazado';
+$$;
+
+comment on function public.partidas_conciliadas_job(text) is
+  'Partidas que entraron en algún par. Estable: no cambia cuando los '
+  'comprobantes pasan a cobrado.';
+
+revoke all on function public.partidas_conciliadas_job(text) from public, anon, authenticated;
+grant execute on function public.partidas_conciliadas_job(text) to service_role;
+
+
+-- ============================================================================
+-- 0034_lotes_importacion.sql — Las cargas hechas, para poder deshacer una
+--
+-- Cada importación marca sus filas con `lote_importacion`, y `deshacerImportacion`
+-- ya sabía borrar una sin tocar las demás. Lo que faltaba era **verlas**: el
+-- botón de deshacer solo existía en el momento de subir, dentro del estado del
+-- componente. Al recargar la página desaparecía y la única salida era "Empezar
+-- de cero", que borra todo y exige escribir una palabra.
+--
+-- O sea: quitar la última carga para volver a subirla —lo más normal del mundo
+-- al preparar datos— obligaba a borrarlo TODO. Aquí se listan para que cada una
+-- tenga su propia salida.
+--
+-- Se agrupa en la base porque PostgREST no sabe agrupar, y contar por lote
+-- desde la aplicación exigiría traerse las 452.309 filas.
+-- ============================================================================
+
+create or replace function public.lotes_importacion()
+returns table (lote uuid, filas bigint, cargado timestamptz)
+language sql
+stable
+-- ⚠️ SECURITY DEFINER: el `empresa_id in (...)` de abajo ES el control de
+-- acceso. La empresa sale de `auth.uid()`, nunca de un parámetro.
+security definer
+set search_path = public
+as $$
+  with mias as (
+    select ue.empresa_id from public.usuarios_empresa ue
+     where ue.usuario_id = auth.uid()
+  )
+  select c.lote_importacion, count(*), min(c.created_at)
+    from public.comprobantes c
+   where c.empresa_id in (select empresa_id from mias)
+     and c.lote_importacion is not null
+   group by c.lote_importacion
+   order by min(c.created_at) desc
+   limit 50;
+$$;
+
+comment on function public.lotes_importacion() is
+  'Cargas de comprobantes hechas, para poder deshacer una sin borrarlo todo.';
+
+revoke all on function public.lotes_importacion() from public, anon;
+grant execute on function public.lotes_importacion() to authenticated, service_role;
+
+-- Sin este índice, agrupar por lote recorre la tabla entera.
+create index if not exists idx_comprobantes_lote
+  on public.comprobantes (empresa_id, lote_importacion)
+  where lote_importacion is not null;
+
+
+-- ============================================================================
+-- 0035_borrar_comprobantes_por_lotes.sql — Borrar medio millón de comprobantes
+-- sin pasarse del statement_timeout
+--
+-- "Quitar esta carga" fallaba con «No se pudo deshacer la importación». El
+-- borrado es UNA sentencia sobre 452.309 filas: ~13 s medidos, contra los 8 s
+-- del rol con el que se conecta PostgREST. Se cancelaba entera y no borraba
+-- nada.
+--
+-- Mismo remedio que en todo lo demás a este volumen: por lotes, y quien llama
+-- repite hasta que devuelva 0.
+--
+-- ⚠️ Lo que tiene cobros aplicados NO se borra. Se iría en cascada y dejaría un
+-- agujero en una conciliación aprobada, que seguiría diciendo que esa factura
+-- se cobró. Lo conciliado no se limpia: se ANULA (ver 0016).
+-- ============================================================================
+
+create or replace function public.borrar_comprobantes(
+  p_lote   uuid default null,
+  p_limite integer default 20000
+)
+returns bigint
+language plpgsql
+-- ⚠️ SECURITY DEFINER: el `empresa_id in (...)` ES el control de acceso, y la
+-- empresa sale de `auth.uid()`. Se llama con el cliente de SESIÓN, nunca con
+-- `admin` — con `admin` no hay usuario y no borraría nada, en silencio.
+security definer
+set search_path = public
+as $$
+declare
+  v_n bigint;
+begin
+  with mias as (
+    select ue.empresa_id from public.usuarios_empresa ue
+     where ue.usuario_id = auth.uid()
+  ),
+  candidatos as (
+    select c.id
+      from public.comprobantes c
+     where c.empresa_id in (select empresa_id from mias)
+       and (p_lote is null or c.lote_importacion = p_lote)
+       -- Protegidos: los que ya entraron en una conciliación.
+       and not exists (
+         select 1 from public.aplicaciones_cobro a where a.comprobante_id = c.id
+       )
+     limit p_limite
+  )
+  delete from public.comprobantes c
+   using candidatos k
+   where c.id = k.id;
+
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+comment on function public.borrar_comprobantes(uuid, integer) is
+  'Borra hasta p_limite comprobantes de la empresa del usuario, opcionalmente '
+  'de un lote. Salta los que tienen cobros aplicados. Por lotes: una sola '
+  'sentencia sobre medio millón de filas se pasa del statement_timeout.';
+
+-- Cuántos quedan protegidos, para poder informarlo al terminar.
+create or replace function public.comprobantes_protegidos(p_lote uuid default null)
+returns bigint
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with mias as (
+    select ue.empresa_id from public.usuarios_empresa ue
+     where ue.usuario_id = auth.uid()
+  )
+  select count(*)
+    from public.comprobantes c
+   where c.empresa_id in (select empresa_id from mias)
+     and (p_lote is null or c.lote_importacion = p_lote)
+     and exists (
+       select 1 from public.aplicaciones_cobro a where a.comprobante_id = c.id
+     );
+$$;
+
+revoke all on function public.borrar_comprobantes(uuid, integer) from public, anon;
+revoke all on function public.comprobantes_protegidos(uuid) from public, anon;
+grant execute on function public.borrar_comprobantes(uuid, integer) to authenticated, service_role;
+grant execute on function public.comprobantes_protegidos(uuid) to authenticated, service_role;
+
+
+-- ============================================================================
+-- 0036_borrar_comprobantes_periodo.sql — Quitar los comprobantes de un período
+--
+-- El Paso 1 del wizard muestra «Comprobantes del período · N registros» y hasta
+-- ahora la única forma de deshacer esa carga era irse a /comprobantes. Si
+-- alguien subió el archivo equivocado, tenía que abandonar el flujo a medias
+-- para arreglarlo y volver a empezar.
+--
+-- ⚠️ Se borra POR PERÍODO y no "la última carga", aunque suene menos natural.
+-- La tarjeta enseña un número concreto; si el botón quitara el último lote
+-- podría llevarse otra cosa —o solo una parte— y dejar la tarjeta con un número
+-- que el usuario no esperaba. Lo que se ve es lo que se quita.
+-- ============================================================================
+
+-- La firma de dos argumentos se sustituye por la de cuatro. `create or replace`
+-- con otra firma deja viva la anterior y, con parámetros por defecto, las
+-- llamadas quedan ambiguas (ya pasó con `aplicar_cobros_exactos`).
+drop function if exists public.borrar_comprobantes(uuid, integer);
+
+create or replace function public.borrar_comprobantes(
+  p_lote   uuid default null,
+  p_limite integer default 20000,
+  p_desde  date default null,
+  p_hasta  date default null
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_n bigint;
+begin
+  with mias as (
+    select ue.empresa_id from public.usuarios_empresa ue
+     where ue.usuario_id = auth.uid()
+  ),
+  candidatos as (
+    select c.id
+      from public.comprobantes c
+     where c.empresa_id in (select empresa_id from mias)
+       and (p_lote is null or c.lote_importacion = p_lote)
+       and (p_desde is null or c.fecha >= p_desde)
+       and (p_hasta is null or c.fecha <= p_hasta)
+       -- Lo que ya entró en una conciliación no se borra: se ANULA (ver 0016).
+       and not exists (
+         select 1 from public.aplicaciones_cobro a where a.comprobante_id = c.id
+       )
+     limit p_limite
+  )
+  delete from public.comprobantes c
+   using candidatos k
+   where c.id = k.id;
+
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+drop function if exists public.comprobantes_protegidos(uuid);
+
+create or replace function public.comprobantes_protegidos(
+  p_lote  uuid default null,
+  p_desde date default null,
+  p_hasta date default null
+)
+returns bigint
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with mias as (
+    select ue.empresa_id from public.usuarios_empresa ue
+     where ue.usuario_id = auth.uid()
+  )
+  select count(*)
+    from public.comprobantes c
+   where c.empresa_id in (select empresa_id from mias)
+     and (p_lote is null or c.lote_importacion = p_lote)
+     and (p_desde is null or c.fecha >= p_desde)
+     and (p_hasta is null or c.fecha <= p_hasta)
+     and exists (
+       select 1 from public.aplicaciones_cobro a where a.comprobante_id = c.id
+     );
+$$;
+
+comment on function public.borrar_comprobantes(uuid, integer, date, date) is
+  'Borra hasta p_limite comprobantes de la empresa del usuario, por lote o por '
+  'rango de fechas. Salta los que tienen cobros aplicados.';
+
+revoke all on function public.borrar_comprobantes(uuid, integer, date, date) from public, anon;
+revoke all on function public.comprobantes_protegidos(uuid, date, date) from public, anon;
+grant execute on function public.borrar_comprobantes(uuid, integer, date, date) to authenticated, service_role;
+grant execute on function public.comprobantes_protegidos(uuid, date, date) to authenticated, service_role;
+
+
+-- ============================================================================
+-- 0037_diagnostico_previo.sql — Comprobar la conciliación ANTES de correrla
+--
+-- Una conciliación de 450.999 movimientos terminó en 0 % porque la columna
+-- "Recibos" del extracto no se mapeó a *referencia*. Nada lo dijo hasta ver el
+-- resultado, media hora después. Hay un aviso ámbar en el Paso 2, pero avisa de
+-- una CAUSA sin medir su CONSECUENCIA — y un aviso que no se sabe ponderar se
+-- despacha sin leer, sobre todo cuando dice, con razón, que se puede conciliar
+-- igual.
+--
+-- Al llegar al Paso 3 los dos lados ya están en la base (el Paso 2 importa el
+-- extracto y devuelve `lote_id`) y el motor todavía no ha corrido. Ahí cabe una
+-- comprobación real en vez de una heurística sobre lo que se ve en pantalla.
+-- ============================================================================
+
+
+-- ---------------------------------------------------------------------------
+-- 1) La regla de emparejamiento exacto, extraída a UNA función
+--
+-- Estaba dentro de `conciliar_exacta`. Si el diagnóstico la copiara, tendríamos
+-- dos definiciones del mismo emparejamiento y nada que impidiera que
+-- divergieran: el Paso 3 prometería una cobertura que el motor luego no da, o
+-- al revés. Es el mismo riesgo que documenta la 0029 con `ref_norm` (tiene que
+-- ser EXACTAMENTE `normRef` de n8n/01_exacta.js), y aquí se puede evitar del
+-- todo porque las dos consultas viven en Postgres.
+--
+-- ⚠️ Deliberadamente SIN `security definer` y SIN `set search_path`: las dos
+-- cosas impiden que el planificador la incruste (inline) en la consulta que la
+-- llama, y esta función está en el camino caliente que empareja 450.000 filas.
+-- Todo va calificado con `public.` para que el search_path no importe, y el
+-- acceso queda cerrado con el `revoke` del final: solo se invoca desde las dos
+-- funciones `definer` de abajo.
+--
+-- ⚠️ Al desplegar sobre el cliente grande, VOLVER A MEDIR `conciliar_exacta`.
+-- Si el tiempo empeorase, la definición anterior (con el cuerpo en línea) está
+-- en 0029 y se puede restaurar sin tocar nada más.
+-- ---------------------------------------------------------------------------
+create or replace function public.pares_exactos(
+  p_empresa_id uuid,
+  p_lote_id    uuid,
+  p_desde      date,
+  p_hasta      date,
+  p_bloque     integer default 0,
+  p_bloques    integer default 1
+)
+returns table (comprobante_id uuid, movimiento_id uuid)
+language sql
+stable
+as $$
+  with ci as (
+    select
+      c.id,
+      -- Céntimos CON SIGNO, igual que `01_exacta.js`: en valor absoluto un
+      -- cobro casaría con un pago del mismo importe.
+      round((case when c.tipo = 'pago' then -abs(c.monto) else abs(c.monto) end) * 100)::bigint as cent,
+      c.ref_norm as ref,
+      -- row_number() en los dos lados, casando por número: con cientos de
+      -- recibos del mismo importe y la misma referencia, un join a secas da el
+      -- producto cartesiano (300 x 300 = 90.000 pares en vez de 300).
+      row_number() over (
+        partition by round((case when c.tipo = 'pago' then -abs(c.monto) else abs(c.monto) end) * 100), c.ref_norm
+        order by c.id
+      ) as n
+    from public.comprobantes c
+    where c.empresa_id = p_empresa_id
+      and c.fecha between p_desde and p_hasta
+      and c.estado not in ('cobrado', 'anulado')
+      and c.ref_norm <> ''
+      and (p_bloques = 1 or mod(abs(hashtext(c.ref_norm)), p_bloques) = p_bloque)
+  ),
+  mi as (
+    select
+      m.id,
+      round(m.monto * 100)::bigint as cent,
+      m.ref_norm as ref,
+      row_number() over (
+        partition by round(m.monto * 100), m.ref_norm order by m.id
+      ) as n
+    from public.movimientos_extracto m
+    where m.lote_id = p_lote_id
+      and m.ref_norm <> ''
+      and (p_bloques = 1 or mod(abs(hashtext(m.ref_norm)), p_bloques) = p_bloque)
+  )
+  select ci.id, mi.id
+    from ci
+    join mi on ci.cent = mi.cent and ci.ref = mi.ref and ci.n = mi.n
+$$;
+
+revoke all on function public.pares_exactos(uuid, uuid, date, date, integer, integer)
+  from public, anon, authenticated;
+grant execute on function public.pares_exactos(uuid, uuid, date, date, integer, integer)
+  to service_role;
+
+
+-- ---------------------------------------------------------------------------
+-- 2) La capa exacta, ahora sobre la función compartida
+--
+-- Mismo comportamiento que en 0029; lo único que cambia es de dónde sale el
+-- conjunto de pares.
+-- ---------------------------------------------------------------------------
+create or replace function public.conciliar_exacta(
+  p_job_id  text,
+  p_bloque  integer default 0,
+  p_bloques integer default 1
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job public.jobs_conciliacion%rowtype;
+  v_pares bigint;
+begin
+  select * into v_job from public.jobs_conciliacion where id = p_job_id;
+  if not found then
+    raise exception 'Conciliación no encontrada: %', p_job_id
+      using errcode = 'no_data_found';
+  end if;
+  if v_job.lote_extracto_id is null then
+    raise exception 'El job % no tiene extracto cargado en tabla', p_job_id
+      using errcode = 'check_violation';
+  end if;
+
+  with pares as (
+    insert into public.matches_conciliacion (
+      job_id, empresa_id, comprobante_ids, movimiento_ids,
+      metodo, estado_revision, diferencia_monto
+    )
+    select
+      p_job_id, v_job.empresa_id, array[p.comprobante_id], array[p.movimiento_id],
+      'exacta', 'auto', 0
+    from public.pares_exactos(
+      v_job.empresa_id, v_job.lote_extracto_id,
+      v_job.periodo_desde, v_job.periodo_hasta,
+      p_bloque, p_bloques
+    ) p
+    returning 1
+  )
+  select count(*) into v_pares from pares;
+
+  return v_pares;
+end;
+$$;
+
+revoke all on function public.conciliar_exacta(text, integer, integer)
+  from public, anon, authenticated;
+grant execute on function public.conciliar_exacta(text, integer, integer)
+  to service_role;
+
+
+-- ---------------------------------------------------------------------------
+-- 3) El diagnóstico previo
+--
+-- Devuelve CONTADORES, no prosa: qué hacer con ellos lo decide
+-- `src/lib/diagnosticoPrevio.ts`, que es puro y tiene tests. Aquí solo se
+-- cuenta, que es lo que Postgres hace bien y lo que a esta escala no se puede
+-- hacer en Node.
+--
+-- ⚠️ `security definer` con la empresa resuelta desde `auth.uid()`, NUNCA por
+-- parámetro: un `empresa_id` recibido de fuera sería un `?empresa_id=` en manos
+-- de cualquiera. Mismo patrón que `resumen_saldos` (0021).
+--
+-- ⚠️ `pares_estimados` puede salir NULL, y eso no es un fallo: emparejar medio
+-- millón contra medio millón tarda más que el `statement_timeout` de 8 s, así
+-- que por encima de `p_limite_estimacion` no se intenta. La señal que de
+-- verdad diagnostica el caso del 0 % es `refs_compartidas` —cuántos códigos de
+-- operación aparecen en LOS DOS lados—, que es un join sobre columnas indexadas
+-- y cuesta casi nada. Devolver null y decirlo es mejor que colgar la pantalla o
+-- que inventar un número.
+-- ---------------------------------------------------------------------------
+create or replace function public.diagnostico_previo(
+  p_lote_id           uuid,
+  p_desde             date,
+  p_hasta             date,
+  p_limite_estimacion integer default 60000
+)
+returns table (
+  internos                 bigint,
+  internos_con_ref         bigint,
+  internos_ref_repetida    bigint,
+  movimientos              bigint,
+  movimientos_con_ref      bigint,
+  movimientos_ref_repetida bigint,
+  movimientos_abono        bigint,
+  movimientos_cargo        bigint,
+  movimientos_fuera        bigint,
+  movimientos_dia_bajo     bigint,
+  refs_compartidas         bigint,
+  pares_estimados          bigint
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_empresa uuid;
+  v_int bigint;
+  v_mov bigint;
+  v_pares bigint := null;
+begin
+  select ue.empresa_id into v_empresa
+    from public.usuarios_empresa ue
+   where ue.usuario_id = auth.uid()
+   limit 1;
+  if v_empresa is null then
+    return; -- sin sesión no hay empresa, y por tanto no hay nada que contar
+  end if;
+
+  -- El lote tiene que ser de ESTA empresa. Sin esta línea, un uuid ajeno
+  -- devolvería el diagnóstico del extracto de otro cliente. Se devuelve vacío
+  -- en vez de error: tampoco se confirma que el lote exista.
+  perform 1
+     from public.movimientos_extracto m
+    where m.lote_id = p_lote_id
+      and m.empresa_id = v_empresa
+    limit 1;
+  if not found then
+    return;
+  end if;
+
+  select count(*) into v_int
+    from public.comprobantes c
+   where c.empresa_id = v_empresa
+     and c.fecha between p_desde and p_hasta
+     and c.estado not in ('cobrado', 'anulado');
+
+  select count(*) into v_mov
+    from public.movimientos_extracto m
+   where m.lote_id = p_lote_id
+     and m.empresa_id = v_empresa;
+
+  -- La estimación va en un IF y no en un CASE dentro del select: así queda
+  -- fuera de toda duda que la consulta cara NO se evalúa cuando se decide
+  -- saltarla. Un CASE se lo dejaría a criterio del planificador.
+  if v_int <= p_limite_estimacion and v_mov <= p_limite_estimacion then
+    select count(*) into v_pares
+      from public.pares_exactos(v_empresa, p_lote_id, p_desde, p_hasta);
+  end if;
+
+  return query
+  with ci as materialized (
+    select c.ref_norm as ref
+      from public.comprobantes c
+     where c.empresa_id = v_empresa
+       and c.fecha between p_desde and p_hasta
+       and c.estado not in ('cobrado', 'anulado')
+  ),
+  mi as materialized (
+    select m.ref_norm as ref, m.monto, m.fecha
+      from public.movimientos_extracto m
+     where m.lote_id = p_lote_id
+       and m.empresa_id = v_empresa
+  ),
+  ci_refs as materialized (
+    select ref, count(*) as k from ci where ref <> '' group by ref
+  ),
+  mi_refs as materialized (
+    select ref, count(*) as k from mi where ref <> '' group by ref
+  )
+  select
+    v_int,
+    (select count(*) from ci where ref <> ''),
+    (select coalesce(sum(k), 0) from ci_refs where k > 1),
+    v_mov,
+    (select count(*) from mi where ref <> ''),
+    (select coalesce(sum(k), 0) from mi_refs where k > 1),
+    (select count(*) from mi where monto > 0),
+    (select count(*) from mi where monto < 0),
+    (select count(*) from mi where fecha < p_desde or fecha > p_hasta),
+    (select count(*) from mi where extract(day from fecha) <= 12),
+    (select count(*) from ci_refs a join mi_refs b on b.ref = a.ref),
+    v_pares;
+end;
+$$;
+
+revoke all on function public.diagnostico_previo(uuid, date, date, integer)
+  from public, anon;
+grant execute on function public.diagnostico_previo(uuid, date, date, integer)
+  to authenticated, service_role;
+
+comment on function public.diagnostico_previo(uuid, date, date, integer) is
+  'Contadores para revisar una conciliación antes de dispararla (Paso 3). '
+  'La empresa sale de auth.uid(); nunca por parámetro. Ver '
+  'src/lib/diagnosticoPrevio.ts para la interpretación.';
