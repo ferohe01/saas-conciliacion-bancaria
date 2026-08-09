@@ -5,6 +5,7 @@ import {
   type JobRow,
 } from "@/components/conciliacion/ProgresoConciliacion";
 import { ResultadoReview } from "@/components/conciliacion/ResultadoReview";
+import { asistenteDisponible } from "@/lib/ia/cliente";
 import { formatearFecha } from "@/lib/parsing/resumen";
 import { ResultadoConciliacion } from "@/lib/contract/resultado";
 import { absorberResultado } from "@/lib/conciliacion/absorber";
@@ -157,6 +158,7 @@ export default async function ConciliacionPage({
             moneda={payloadParsed.data.metadata.cuenta.moneda}
             precedentes={precedentes}
             totalPares={vista?.totalPares}
+            asistente={asistenteDisponible()}
           />
         </>
       ) : (

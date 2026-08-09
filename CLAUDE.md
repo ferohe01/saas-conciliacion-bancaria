@@ -1073,6 +1073,51 @@ de siete diagnósticos con la evidencia concreta.
 - Solo el **lado interno** (las facturas del cliente). El simétrico se añade
   después sin tocar nada de esto.
 
+### El asistente: por qué se le puede dejar hablar
+
+Fases 3 y 4: el modelo **sintetiza** los dos análisis anteriores y responde
+repreguntas. Es la primera vez que la app llama a un LLM directamente (el motor
+lo hace desde n8n).
+
+- **Va SIEMPRE debajo de un panel determinístico.** El análisis correcto está en
+  pantalla antes y sigue estando si el modelo falla: lo que se pierde es un
+  extra, no el contenido. En un producto donde el error caro es *el número
+  plausible y equivocado*, la explicación generada no puede ser lo único que se
+  ve.
+- ⚠️⚠️ **`verificarCifras` es el control, no el prompt.** Pedirle que no invente
+  es una esperanza; comprobarlo es un control. Toda cifra de la respuesta tiene
+  que aparecer en el texto que se le mandó (se aceptan redondeos y enteros ≤12
+  como prosa). Si aparece una que nadie le dio, **la respuesta no se muestra**.
+- ⚠️ **Por eso NO hay streaming**: hace falta la respuesta entera para poder
+  verificarla, y enseñarla mientras llega sería enseñar texto sin comprobar.
+  Son 2-3 frases; no había nada que ganar.
+- ⚠️⚠️ **El contexto lo reconstruye el SERVIDOR.** El cliente manda ids
+  (`loteId`, `jobId`, `partidaId`), nunca hallazgos: si el navegador pudiera
+  enviar el texto contra el que se verifica, controlaría qué cifras se admiten y
+  la comprobación dejaría de comprobar nada.
+- ⚠️ **El prompt no crece con los datos del cliente.** Solo entran hallazgos ya
+  agregados: un cliente 400 veces mayor da un prompt casi idéntico. Hay test.
+  (Contrástese con `ia_llm_01_candidatos.js`, que llegó a 4,7 MB y 1,2 millones
+  de tokens por meter filas.)
+- **Sin `OPENAI_API_KEY` el asistente no existe** y la interfaz no lo ofrece —
+  no hay botón roto. Mismo proveedor que n8n (`lmChatOpenAi`): una credencial y
+  una factura.
+- **Se pide al pulsar, no al cargar**: cada llamada cuesta y casi siempre el
+  panel basta.
+- **Las repreguntas están acotadas al análisis que se ve** (`MAX_TURNOS` 6). Un
+  asistente que solo sabe de lo que tienes delante acierta siempre; uno que
+  promete saberlo todo falla el primer día y ya no se vuelve a abrir.
+
+⚠️ **Y NO genera SQL.** Se evaluó y se descartó: las reglas de negocio no viven
+en el esquema (solo cuenta lo `aprobada`, los abonos son + y los cargos −, `auto`
+descuenta saldo pero queda fuera de la tasa de acierto, el saldo real es
+`importe − (aplicado − revertido)`…), así que una consulta generada correría,
+devolvería un número y estaría mal. Además el filtro de empresa no está en el
+esquema sino en el criterio —`admin` + `.eq("empresa_id")`— y con RLS puesto una
+agregación libre se pasa del `statement_timeout`. Cuando una pregunta se repita
+y ninguna herramienta la responda, el camino es **escribir esa función con
+tests**, no dejar que el modelo la improvise.
+
 Diseño de las cuatro fases en `docs/diseno-diagnostico-ia.md`.
 
 ### Hallazgo de producto: el mes concilia mejor que el día

@@ -1,9 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { porQueNoSeConcilio } from "@/app/(app)/conciliacion/[jobId]/actions";
+import {
+  porQueNoSeConcilio,
+  explicarPartida,
+} from "@/app/(app)/conciliacion/[jobId]/actions";
 import type { Diagnostico } from "@/lib/diagnosticoPartida";
 import { formatearFecha, formatearPEN } from "@/lib/parsing/resumen";
+import { Asistente } from "@/components/ia/Asistente";
 
 /**
  * «¿Por qué?» de una partida sin conciliar.
@@ -23,10 +27,13 @@ export function PorQueNoSeConcilio({
   jobId,
   partidaId,
   moneda,
+  asistente = false,
 }: {
   jobId: string;
   partidaId: string;
   moneda: string;
+  /** Si el despliegue tiene modelo configurado. Sin él no se ofrece nada. */
+  asistente?: boolean;
 }) {
   const [abierto, setAbierto] = useState(false);
   const [cargando, setCargando] = useState(false);
@@ -88,6 +95,17 @@ export function PorQueNoSeConcilio({
                     </li>
                   ))}
                 </ul>
+              )}
+
+              {/* El asistente va DEBAJO del análisis, nunca en su lugar: si
+                  falla se pierde un extra, no la información. */}
+              {asistente && (
+                <Asistente
+                  compacto
+                  preguntar={(historial, pregunta) =>
+                    explicarPartida(jobId, partidaId, historial, pregunta)
+                  }
+                />
               )}
             </>
           )}

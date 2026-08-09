@@ -314,8 +314,8 @@ son las que más valor entregan.
 |---|---|---|---|
 | 1 | `diagnostico_previo` + los avisos del Paso 3 | No | ✅ `0037` |
 | 2 | `candidatos_partida` + el «¿Por qué?» en cada fila | No | ✅ `0038` |
-| 3 | Narración: los hallazgos redactados en lenguaje natural | Sí, una llamada | pendiente |
-| 4 | Repreguntas acotadas al diagnóstico que se está viendo | Sí, conversación | pendiente |
+| 3 | Síntesis: el modelo explica los hallazgos y qué hacer | Sí, una llamada | ✅ |
+| 4 | Repreguntas acotadas al diagnóstico que se está viendo | Sí, conversación | ✅ |
 
 ⚠️ **Recomiendo no saltarse el orden.** Si la fase 1 se entrega sola y el cliente
 deja de perder media hora por un mapeo mal puesto, el valor ya está cobrado. Y si

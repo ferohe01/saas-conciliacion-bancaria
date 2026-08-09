@@ -1,4 +1,5 @@
 import type { Hallazgo, Severidad } from "@/lib/diagnosticoPrevio";
+import { Asistente, type Preguntar } from "@/components/ia/Asistente";
 
 /**
  * Lo que se ha comprobado antes de conciliar.
@@ -43,9 +44,12 @@ const ESTILO: Record<
 export function RevisionPrevia({
   hallazgos,
   cargando,
+  preguntar,
 }: {
   hallazgos: Hallazgo[] | null;
   cargando: boolean;
+  /** Sin esto no se ofrece asistente (despliegue sin modelo configurado). */
+  preguntar?: Preguntar;
 }) {
   if (cargando) {
     return (
@@ -92,6 +96,10 @@ export function RevisionPrevia({
           );
         })}
       </ul>
+
+      {/* Debajo de la lista, nunca en su lugar: el panel de arriba es el que
+          manda y sigue estando aunque el modelo falle. */}
+      {preguntar && <Asistente preguntar={preguntar} />}
     </section>
   );
 }

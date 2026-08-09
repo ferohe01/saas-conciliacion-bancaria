@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getEmpresaActual } from "@/lib/auth";
 import { estadoSuscripcion } from "@/lib/suscripcion";
+import { asistenteDisponible } from "@/lib/ia/cliente";
 import { getConexionErp } from "@/lib/conexiones-servidor";
 import { nombreSistema, estadoConexion } from "@/lib/conexiones";
 import { PruebaVencida } from "@/components/app/AvisoPrueba";
@@ -90,7 +91,11 @@ export default async function WizardPage() {
         </p>
       </div>
       <div className="flex justify-center">
-        <WizardContainer cuentas={cuentas} conexion={resumenConexion} />
+        <WizardContainer
+          cuentas={cuentas}
+          conexion={resumenConexion}
+          asistente={asistenteDisponible()}
+        />
       </div>
     </div>
   );

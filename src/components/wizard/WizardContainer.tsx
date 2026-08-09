@@ -21,6 +21,7 @@ import {
   guardarMapeoCuenta,
   resumenComprobantesPeriodo,
   diagnosticarAntesDeConciliar,
+  explicarRevisionPrevia,
   type ResumenComprobantes,
 } from "@/app/(app)/wizard/actions";
 import {
@@ -178,9 +179,12 @@ export type ResumenConexion = { sistema: string; estadoLabel: string };
 export function WizardContainer({
   cuentas,
   conexion = null,
+  asistente = false,
 }: {
   cuentas: CuentaOpcion[];
   conexion?: ResumenConexion | null;
+  /** Si el despliegue tiene modelo configurado (lo decide el servidor). */
+  asistente?: boolean;
 }) {
   const router = useRouter();
   const [paso, setPaso] = useState<PasoWizard>(1);
@@ -1037,7 +1041,22 @@ export function WizardContainer({
 
             {/* La comprobación real, hecha con los dos lados ya en la base y
                 antes de gastar la corrida. Ver `lib/diagnosticoPrevio.ts`. */}
-            <RevisionPrevia hallazgos={hallazgos} cargando={revisando} />
+            <RevisionPrevia
+              hallazgos={hallazgos}
+              cargando={revisando}
+              preguntar={
+                asistente && lote && periodo
+                  ? (historial, pregunta) =>
+                      explicarRevisionPrevia(
+                        lote.lote_id,
+                        periodo.desde,
+                        periodo.hasta,
+                        historial,
+                        pregunta,
+                      )
+                  : undefined
+              }
+            />
 
             {!puedeIniciar && (lote?.insertados ?? 0) === 0 && (
               <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700">

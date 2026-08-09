@@ -17,6 +17,9 @@ import {
   type CandidatoPartida,
   type Diagnostico,
 } from "@/lib/diagnosticoPartida";
+import { asistenteDisponible, preguntarAlModelo } from "@/lib/ia/cliente";
+import { promptPartida, promptSeguimiento, type Mensaje } from "@/lib/ia/prompts";
+import { verificarCifras } from "@/lib/ia/verificacion";
 import {
   calcularAplicaciones,
   type RegistroPayload,
@@ -1065,4 +1068,56 @@ export async function porQueNoSeConcilio(
       internos.filter((r) => r.id_interno !== partida.id_interno).map(comoSuelta),
     ),
   };
+}
+
+/**
+ * El asistente explica un diagnóstico de partida, y responde repreguntas.
+ *
+ * ⚠️⚠️ **El contexto lo reconstruye el servidor.** El cliente manda ids, nunca
+ * hallazgos: si el navegador pudiera enviar el texto sobre el que se verifica,
+ * controlaría la lista de cifras admitidas y `verificarCifras` dejaría de
+ * comprobar nada. Es el mismo principio por el que el frontend no habla con
+ * n8n ni conoce el `service_role`.
+ *
+ * ⚠️ El historial SÍ viene del cliente, pero solo como turnos de conversación:
+ * el system y el contexto se rearman aquí en cada llamada, así que lo peor que
+ * puede hacer alguien manipulándolo es confundirse a sí mismo.
+ */
+export async function explicarPartida(
+  jobId: string,
+  partidaId: string,
+  historial: Mensaje[] = [],
+  pregunta?: string,
+): Promise<
+  | { ok: true; texto: string }
+  | { ok: false; error: string }
+> {
+  if (!asistenteDisponible()) {
+    return { ok: false, error: "El asistente no está disponible." };
+  }
+
+  const base = await porQueNoSeConcilio(jobId, partidaId);
+  if (!base.ok) return base;
+
+  const { mensajes, contexto } = promptPartida(base.diagnostico);
+  const conversacion = pregunta
+    ? promptSeguimiento(mensajes, historial, pregunta)
+    : mensajes;
+
+  const r = await preguntarAlModelo(conversacion);
+  if (!r.ok) return r;
+
+  // ⚠️ Ninguna cifra que no se le haya dado. Ver `lib/ia/verificacion.ts`.
+  const v = verificarCifras(r.texto, contexto + "\n" + historial.map((m) => m.content).join("\n"));
+  if (!v.ok) {
+    console.error("[asistente] cifras no verificadas", v.intrusas);
+    return {
+      ok: false,
+      error:
+        "El asistente dio una respuesta con cifras que no cuadran, así que no " +
+        "se muestra. El análisis de arriba sí es correcto.",
+    };
+  }
+
+  return { ok: true, texto: r.texto };
 }

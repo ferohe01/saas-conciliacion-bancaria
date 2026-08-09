@@ -64,9 +64,12 @@ export function ResultadoReview({
   bancarios,
   moneda,
   precedentes = {},
+  asistente = false,
   totalPares,
 }: Props & {
   precedentes?: Record<string, Precedente>;
+  /** Si el despliegue tiene modelo configurado (lo decide el servidor). */
+  asistente?: boolean;
   /**
    * Pares que existen de verdad. En modo tabla la pantalla solo carga mil, así
    * que contarlos aquí subestimaría el trabajo hecho por dos órdenes de
@@ -476,6 +479,7 @@ export function ResultadoReview({
               onMas={() => setTopeSin((t) => t + PAGINA)}
               moneda={moneda}
               jobId={jobId}
+              asistente={asistente}
               seleccion={selInt}
               onToggle={(id) =>
                 setSelInt((s) => {
@@ -1050,6 +1054,7 @@ function PanelSinConciliar({
   seleccion,
   onToggle,
   jobId,
+  asistente,
 }: {
   titulo: string;
   items: ItemLado[];
@@ -1065,6 +1070,7 @@ function PanelSinConciliar({
    * importa. El lado del banco se puede añadir después sin tocar esto.
    */
   jobId?: string;
+  asistente?: boolean;
 }) {
   const filtrados = items.filter((it) => coincide(it, busqueda));
   const visibles = filtrados.slice(0, tope);
@@ -1126,6 +1132,7 @@ function PanelSinConciliar({
                         jobId={jobId}
                         partidaId={it.id}
                         moneda={moneda}
+                        asistente={asistente}
                       />
                     </div>
                   )}

@@ -15,6 +15,14 @@ import {
 } from "@/lib/importacion";
 import { FechaISO } from "@/lib/contract/primitives";
 import { maxFilasConciliacion } from "@/lib/limites";
+import { evaluarDiagnostico } from "@/lib/diagnosticoPrevio";
+import { asistenteDisponible, preguntarAlModelo } from "@/lib/ia/cliente";
+import {
+  promptRevisionPrevia,
+  promptSeguimiento,
+  type Mensaje,
+} from "@/lib/ia/prompts";
+import { verificarCifras } from "@/lib/ia/verificacion";
 import type { MapeoColumnas } from "@/lib/parsing/deteccion";
 import type { RegistroInterno } from "@/lib/contract/payload";
 import type { ContadoresPrevios } from "@/lib/diagnosticoPrevio";
@@ -521,4 +529,59 @@ export async function diagnosticarAntesDeConciliar(
     },
     maxFilas: maxFilasConciliacion(),
   };
+}
+
+/**
+ * El asistente explica la revisión previa del Paso 3, y responde repreguntas.
+ *
+ * ⚠️⚠️ **El contexto se reconstruye aquí, en el servidor.** El cliente manda el
+ * lote y las fechas, nunca los hallazgos: si el navegador pudiera enviar el
+ * texto contra el que se verifica, controlaría qué cifras se admiten y
+ * `verificarCifras` dejaría de comprobar nada.
+ */
+export async function explicarRevisionPrevia(
+  loteId: string,
+  desde: string,
+  hasta: string,
+  historial: Mensaje[] = [],
+  pregunta?: string,
+): Promise<{ ok: true; texto: string } | { ok: false; error: string }> {
+  if (!asistenteDisponible()) {
+    return { ok: false, error: "El asistente no está disponible." };
+  }
+
+  const datos = await diagnosticarAntesDeConciliar(loteId, desde, hasta);
+  if (!datos) {
+    return { ok: false, error: "No se pudo revisar tus datos." };
+  }
+
+  const hallazgos = evaluarDiagnostico(datos.contadores, datos.maxFilas);
+  if (hallazgos.length === 0) {
+    return { ok: false, error: "No hay nada que explicar todavía." };
+  }
+
+  const { mensajes, contexto } = promptRevisionPrevia(hallazgos);
+  const conversacion = pregunta
+    ? promptSeguimiento(mensajes, historial, pregunta)
+    : mensajes;
+
+  const r = await preguntarAlModelo(conversacion);
+  if (!r.ok) return r;
+
+  // ⚠️ Ninguna cifra que no se le haya dado. Ver `lib/ia/verificacion.ts`.
+  const v = verificarCifras(
+    r.texto,
+    contexto + "\n" + historial.map((m) => m.content).join("\n"),
+  );
+  if (!v.ok) {
+    console.error("[asistente] cifras no verificadas", v.intrusas);
+    return {
+      ok: false,
+      error:
+        "El asistente dio una respuesta con cifras que no cuadran, así que no " +
+        "se muestra. La revisión de arriba sí es correcta.",
+    };
+  }
+
+  return { ok: true, texto: r.texto };
 }
