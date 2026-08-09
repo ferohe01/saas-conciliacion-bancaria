@@ -19,6 +19,7 @@ import type {
 import { clavePrecedente, type Precedente } from "@/lib/precedentes";
 import { FichaPrecedente } from "./FichaPrecedente";
 import { SelectorMotivo } from "./SelectorMotivo";
+import { PorQueNoSeConcilio } from "./PorQueNoSeConcilio";
 import type { MotivoRechazo } from "@/lib/motivosRechazo";
 import { Boton, Tarjeta, BadgeMetodo, BadgeAgrupacion } from "@/components/ui";
 
@@ -474,6 +475,7 @@ export function ResultadoReview({
               tope={topeSin}
               onMas={() => setTopeSin((t) => t + PAGINA)}
               moneda={moneda}
+              jobId={jobId}
               seleccion={selInt}
               onToggle={(id) =>
                 setSelInt((s) => {
@@ -1047,6 +1049,7 @@ function PanelSinConciliar({
   moneda,
   seleccion,
   onToggle,
+  jobId,
 }: {
   titulo: string;
   items: ItemLado[];
@@ -1056,6 +1059,12 @@ function PanelSinConciliar({
   moneda: string;
   seleccion: Set<string>;
   onToggle: (id: string) => void;
+  /**
+   * Con `jobId`, cada fila puede explicar por qué no se concilió. Solo lo
+   * recibe el lado interno: son las facturas del cliente, que es lo que le
+   * importa. El lado del banco se puede añadir después sin tocar esto.
+   */
+  jobId?: string;
 }) {
   const filtrados = items.filter((it) => coincide(it, busqueda));
   const visibles = filtrados.slice(0, tope);
@@ -1108,6 +1117,18 @@ function PanelSinConciliar({
                       </span>
                     </span>
                   </label>
+                  {/* FUERA del <label> a propósito: dentro, pulsar el botón
+                      activaría también la casilla y seleccionaría la partida
+                      sin querer. */}
+                  {jobId && (
+                    <div className="pl-10">
+                      <PorQueNoSeConcilio
+                        jobId={jobId}
+                        partidaId={it.id}
+                        moneda={moneda}
+                      />
+                    </div>
+                  )}
                 </li>
               );
             })}

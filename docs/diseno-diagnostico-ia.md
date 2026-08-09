@@ -96,11 +96,18 @@ Justifican la función por sí solos:
 
 ### Cómo se calcula
 
-Una función SQL, **una partida por llamada**:
+Una función SQL, **una partida por llamada** (`0038`):
 
 ```sql
-public.diagnosticar_partida(p_job_id text, p_partida_id uuid, p_lado text)
+public.candidatos_partida(p_job_id text, p_comprobante_id uuid, p_dias int, p_max int)
 ```
+
+⚠️ **Solo BUSCA; decidir es de TypeScript.** Las partidas viven en dos sitios
+según el tamaño del job —tablas o el JSONB `payload_entrada`—, así que con la
+decisión en SQL habría que escribir el diagnóstico dos veces, y una misma
+partida podría explicarse de dos maneras según por dónde entrara. SQL hace lo
+que hace bien (buscar por índice) y `src/lib/diagnosticoPartida.ts` decide, en
+un solo sitio y con tests.
 
 La búsqueda que es prohibitiva para 4.382 partidas es **trivial para una**: los
 índices `idx_comprobantes_ref_norm`, `idx_mov_extracto_ref_norm` y
@@ -306,7 +313,7 @@ son las que más valor entregan.
 | Fase | Qué | Lleva LLM | Estado |
 |---|---|---|---|
 | 1 | `diagnostico_previo` + los avisos del Paso 3 | No | ✅ `0037` |
-| 2 | `diagnosticar_partida` + el «¿Por qué?» en cada fila | No | pendiente |
+| 2 | `candidatos_partida` + el «¿Por qué?» en cada fila | No | ✅ `0038` |
 | 3 | Narración: los hallazgos redactados en lenguaje natural | Sí, una llamada | pendiente |
 | 4 | Repreguntas acotadas al diagnóstico que se está viendo | Sí, conversación | pendiente |
 

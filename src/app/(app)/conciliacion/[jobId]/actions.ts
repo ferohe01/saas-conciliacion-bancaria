@@ -13,6 +13,11 @@ import {
 import { PayloadConciliacion } from "@/lib/contract/payload";
 import { cargarVistaResultado } from "@/lib/conciliacion/vista";
 import {
+  diagnosticarPartida,
+  type CandidatoPartida,
+  type Diagnostico,
+} from "@/lib/diagnosticoPartida";
+import {
   calcularAplicaciones,
   type RegistroPayload,
   type MovimientoPayload,
@@ -933,5 +938,131 @@ export async function reintentarCobros(
     ok: res.ok,
     aplicadas: res.aplicadas,
     error: res.ok ? undefined : "El reparto volvió a interrumpirse. Vuelve a intentarlo.",
+  };
+}
+
+/**
+ * «¿Por qué no se concilió esta partida?»
+ *
+ * Los datos salen de dos sitios según el tamaño del job —tablas o el JSONB
+ * `payload_entrada`— pero **la decisión la toma una sola función**
+ * (`diagnosticarPartida`, pura y con tests). Con la lógica duplicada por modo,
+ * la misma partida podría explicarse de dos maneras según por dónde entrara.
+ *
+ * ⚠️ Cliente de SESIÓN: `candidatos_partida` es `security definer` y resuelve
+ * la empresa desde `auth.uid()`. Con `admin` devolvería cero filas sin error.
+ */
+export async function porQueNoSeConcilio(
+  jobId: string,
+  partidaId: string,
+): Promise<{ ok: true; diagnostico: Diagnostico } | { ok: false; error: string }> {
+  const usuario = await getUsuarioActual();
+  if (!usuario) return { ok: false, error: "No autenticado." };
+
+  const supabase = await createClient(); // RLS: solo jobs de su empresa
+  const { data } = await supabase
+    .from("jobs_conciliacion")
+    .select("payload_entrada, lote_extracto_id")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (!data) return { ok: false, error: "Conciliación no encontrada." };
+
+  const payload = PayloadConciliacion.safeParse(data.payload_entrada);
+  if (!payload.success) {
+    return { ok: false, error: "No se pudo leer el detalle de esta conciliación." };
+  }
+  const cfg = {
+    tolerancia_dias: payload.data.config.tolerancia_dias,
+    ventana_ia_dias: payload.data.config.ventana_ia_dias,
+    max_combinacion: payload.data.config.max_combinacion,
+  };
+
+  // La partida y sus hermanas salen SIEMPRE del payload: es lo que la pantalla
+  // está enseñando, y así los ids del diagnóstico son los que el usuario ve.
+  const internos = payload.data.registros_internos;
+  const partida = internos.find(
+    (r) => r.id_interno === partidaId || r.comprobante_id === partidaId,
+  );
+  if (!partida) {
+    return {
+      ok: false,
+      error:
+        "Esta partida no viaja en el detalle de la conciliación, así que no se " +
+        "puede analizar.",
+    };
+  }
+
+  const comoSuelta = (r: (typeof internos)[number]) => ({
+    id: r.id_interno,
+    fecha: r.fecha,
+    monto: r.monto,
+    texto: r.contraparte ?? r.descripcion ?? "",
+    referencia: r.referencia ?? "",
+  });
+
+  let candidatos: CandidatoPartida[];
+
+  if (data.lote_extracto_id && partida.comprobante_id) {
+    // Modo tabla: el extracto no cabe en el payload, así que se buscan los
+    // candidatos por índice. Ver `candidatos_partida` (migración 0038).
+    const { data: filas, error } = await supabase.rpc("candidatos_partida", {
+      p_job_id: jobId,
+      p_comprobante_id: partida.comprobante_id,
+      p_dias: cfg.ventana_ia_dias,
+    });
+    if (error) {
+      return { ok: false, error: "No se pudo analizar esta partida." };
+    }
+    candidatos = (filas ?? []).map(
+      (m: {
+        id: string;
+        fecha: string;
+        monto: number | string;
+        glosa: string;
+        referencia: string;
+        ocupado_por: string | null;
+      }) => ({
+        id: m.id,
+        fecha: m.fecha,
+        monto: Number(m.monto),
+        texto: m.glosa,
+        referencia: m.referencia,
+        ocupadoPor: m.ocupado_por,
+      }),
+    );
+  } else {
+    // Modo payload: los dos lados están aquí. Son como mucho unos miles.
+    const resultado = await supabase
+      .from("jobs_conciliacion")
+      .select("resultado")
+      .eq("id", jobId)
+      .maybeSingle();
+    const parsed = ResultadoConciliacion.safeParse(resultado.data?.resultado);
+    const ocupados = new Map<string, string>();
+    if (parsed.success) {
+      for (const m of parsed.data.matches) {
+        for (const idm of m.ids_movimientos) {
+          ocupados.set(idm, m.ids_internos[0] ?? "otra partida");
+        }
+      }
+    }
+    candidatos = payload.data.movimientos_bancarios.map((m) => ({
+      id: m.id_movimiento,
+      fecha: m.fecha,
+      monto: m.monto,
+      texto: m.glosa ?? "",
+      referencia: m.referencia_banco ?? "",
+      ocupadoPor: ocupados.get(m.id_movimiento) ?? null,
+    }));
+  }
+
+  return {
+    ok: true,
+    diagnostico: diagnosticarPartida(
+      comoSuelta(partida),
+      candidatos,
+      cfg,
+      internos.filter((r) => r.id_interno !== partida.id_interno).map(comoSuelta),
+    ),
   };
 }

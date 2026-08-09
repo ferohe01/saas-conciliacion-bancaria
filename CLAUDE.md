@@ -1028,8 +1028,52 @@ real en vez de una heurística sobre lo que se ve en pantalla.
   aviso y el endpoint que rechaza: con dos números, el wizard diría que cabe algo
   que luego falla al iniciarse.
 
-Diseño completo (y la fase 2, el «¿por qué no se concilió?» por partida) en
-`docs/diseno-diagnostico-ia.md`.
+### «¿Por qué no se concilió esta partida?»
+
+`04_ensamblar.js` etiqueta cada pendiente por su signo (*"Posible depósito en
+tránsito"* / *"Posible cheque no cobrado"*), o sea que dice lo mismo de las
+4.382 partidas del residuo. El usuario ve *sin conciliar* y no tiene por dónde
+empezar — mientras el sistema **sí sabe** por qué.
+
+Cada fila de "Tus registros" sin conciliar lleva un **«¿Por qué?»** que da uno
+de siete diagnósticos con la evidencia concreta.
+
+- ⚠️⚠️ **Lo que se afirma es más modesto de lo que parece, y es deliberado.**
+  El diagnóstico **no dice** "el motor lo rechazó porque X": dice *"lo más
+  parecido en tu extracto es esto, y se diferencia en esto"*. Es una observación
+  sobre los datos, no una reconstrucción del motor, así que **no puede divergir
+  de él porque no está hablando de él**. Reimplementar los criterios de
+  `n8n/*.js` habría creado un segundo motor que se separa en silencio.
+  (Mismo criterio que `precedentes.ts`: se afirma lo comprobable.)
+- Las dos excepciones son **hechos consultables**: `ya_emparejado` (el
+  movimiento está en `matches_conciliacion` con otro comprobante) y
+  `referencia_contradice` (las dos referencias existen y difieren).
+- **Los tres hallazgos que hoy eran invisibles** justifican la función solos:
+  **`ya_emparejado`** (la capa exacta numera los dos lados y empareja por
+  número; que a *esta* factura le tocara quedarse fuera es correcto e
+  inexplicable desde la pantalla), **`referencia_contradice`** (el motor lo
+  descartó a propósito —la guarda de los 541 pares falsos— y parecía un olvido)
+  y **`agrupacion_posible`**.
+- ⚠️ **SQL busca, TypeScript decide.** Las partidas viven en dos sitios según el
+  tamaño del job —tablas o el JSONB `payload_entrada`—, así que decidir en SQL
+  obligaría a escribir el diagnóstico dos veces. `candidatos_partida` (`0038`)
+  solo devuelve candidatos por índice; `src/lib/diagnosticoPartida.ts` decide, es
+  puro y tiene tests. Una partida no puede explicarse de dos maneras según por
+  dónde entre.
+- **`sin_candidato` es el resultado más común y NO es un fallo**: en una
+  recaudadora la mayoría se cobró por otro banco. Se muestra lo más cercano
+  encontrado — un "no encontré nada" a secas parece que no se miró.
+- ⚠️ **La agrupación exige identidad compartida** (misma referencia o una
+  palabra del nombre) antes de sumar. Sin ese prefiltro, un subset-sum empareja
+  partidas sin relación cuya suma cuadra por azar y el resultado parece
+  correcto. Hay test de las dos caras.
+- **Bajo demanda, de una en una, y no se guarda.** Nadie lee 4.382
+  explicaciones, y un diagnóstico congelado envejecería mintiendo: una
+  conciliación manual ocupa un movimiento y cambia la respuesta.
+- Solo el **lado interno** (las facturas del cliente). El simétrico se añade
+  después sin tocar nada de esto.
+
+Diseño de las cuatro fases en `docs/diseno-diagnostico-ia.md`.
 
 ### Hallazgo de producto: el mes concilia mejor que el día
 
