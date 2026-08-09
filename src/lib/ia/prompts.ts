@@ -1,5 +1,6 @@
 import type { Hallazgo } from "@/lib/diagnosticoPrevio";
 import type { Diagnostico } from "@/lib/diagnosticoPartida";
+import { COMO_FUNCIONA } from "./herramientas";
 
 /**
  * Los prompts del asistente.
@@ -138,6 +139,70 @@ export function promptSeguimiento(
   return [
     ...base,
     ...historial.slice(-MAX_TURNOS * 2),
+    { role: "user", content: pregunta.slice(0, MAX_PREGUNTA) },
+  ];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// El asistente general (/asistente)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A diferencia de los dos asistentes acotados, aquí NO hay un análisis debajo
+ * que respalde la respuesta: lo que diga el modelo es lo único que el usuario
+ * ve. Eso obliga a ser más estricto, no menos.
+ *
+ * - Solo puede hablar de lo que devuelvan las herramientas. Si ninguna sirve,
+ *   lo dice; no completa el hueco con lo que le suena.
+ * - Toda cifra se verifica después contra lo que devolvieron las consultas
+ *   (`verificarCifras`), así que inventar no sirve de nada: la respuesta se
+ *   descarta entera.
+ * - Y dice de dónde salió el dato, para que el usuario pueda ir a comprobarlo.
+ *   Una cifra sin sitio donde verificarla es una cifra que hay que creerse.
+ */
+const SISTEMA_GENERAL = [
+  "Eres el asistente de un sistema de conciliación bancaria para pymes peruanas.",
+  "Quien te lee NO es contador: usa lenguaje simple, español de Perú, y tutea.",
+  "",
+  "QUÉ PUEDES HACER:",
+  "- Consultar los datos de la empresa con las herramientas disponibles.",
+  "- Explicar cómo se usa el sistema.",
+  "",
+  "REGLAS:",
+  "- Para cualquier dato de la empresa, USA UNA HERRAMIENTA. Nunca respondas de",
+  "  memoria ni estimes: si no la consultaste, no la sabes.",
+  "- No inventes NINGUNA cifra. Solo puedes repetir números que devolvieron las",
+  "  consultas. Si no está ahí, no lo digas.",
+  "- No calcules totales ni porcentajes nuevos. Usa los que vienen dados.",
+  "- Si ninguna herramienta responde lo que te piden, dilo con claridad y sugiere",
+  "  dónde mirarlo en el sistema. No rellenes el hueco.",
+  "- No puedes hacer cambios: ni aprobar, ni conciliar, ni borrar. Si te lo piden,",
+  "  explica dónde se hace.",
+  "- Di siempre en qué pantalla puede comprobar el dato (Por cobrar, Por pagar,",
+  "  Resumen, Reportes, Conciliaciones).",
+  "- Máximo 5 frases, salvo que te pidan detalle.",
+  "",
+  COMO_FUNCIONA,
+].join("\n");
+
+/** Arranque del chat general. El historial se añade con `promptSeguimiento`. */
+export function promptGeneral(pregunta: string): Mensaje[] {
+  return [
+    { role: "system", content: SISTEMA_GENERAL },
+    { role: "user", content: pregunta.slice(0, MAX_PREGUNTA) },
+  ];
+}
+
+/** Turnos de conversación admitidos en el chat general. */
+export const MAX_TURNOS_GENERAL = 20;
+
+export function promptGeneralConHistorial(
+  historial: Mensaje[],
+  pregunta: string,
+): Mensaje[] {
+  return [
+    { role: "system", content: SISTEMA_GENERAL },
+    ...historial.slice(-MAX_TURNOS_GENERAL * 2),
     { role: "user", content: pregunta.slice(0, MAX_PREGUNTA) },
   ];
 }

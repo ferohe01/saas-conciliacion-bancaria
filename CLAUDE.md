@@ -1118,6 +1118,36 @@ agregación libre se pasa del `statement_timeout`. Cuando una pregunta se repita
 y ninguna herramienta la responda, el camino es **escribir esa función con
 tests**, no dejar que el modelo la improvise.
 
+### El asistente general (`/asistente`)
+
+Convive con los dos acotados y **no los sustituye**: aquellos explican algo que
+ya está calculado en pantalla; este consulta. Son garantías distintas, y por eso
+aquí aprietan más.
+
+- **No hay análisis debajo que lo respalde**: la respuesta es lo único que el
+  usuario ve. De ahí que el system le prohíba responder de memoria — *«si no la
+  consultaste, no la sabes»*— y que las cifras se verifiquen contra **lo que
+  devolvieron las consultas**, no contra un texto preparado.
+- **Cinco herramientas, lista cerrada** (`lib/ia/herramientas.ts`): por cobrar,
+  por pagar, resumen de un período, últimas conciliaciones y estado de la
+  cuenta. Todas se apoyan en funciones que ya existían y ya tenían tests.
+- ⚠️ **Ninguna acepta `empresa_id`**: usan el cliente de sesión, así que la
+  empresa sale de `auth.uid()`. Y aquí "fuera" incluye al propio modelo, que es
+  quien compone los argumentos. Hay test que lo fija.
+- ⚠️ **Ninguna escribe.** El asistente no aprueba, no concilia y no borra. Una
+  acción destructiva disparada por una frase mal entendida no tiene arreglo, y
+  la comodidad no lo compensa. También hay test.
+- **Las listas llevan tope** (10 contrapartes, 5 conciliaciones): sin él el
+  prompt volvería a crecer con los datos del cliente.
+- **`MAX_RONDAS = 3`** de consulta, y la última fuerza `tool_choice: "none"`:
+  un modelo indeciso agotaría el tope y dejaría al usuario sin respuesta.
+- **Arranca con sugerencias, no con un campo vacío.** Un chat en blanco le pasa
+  al usuario el trabajo de adivinar qué sabe responder, y la primera pregunta
+  que se le ocurre a cualquiera suele ser justo la que no puede. Las sugerencias
+  son el contrato.
+- **Dice qué consultó** («Consultado en: Por cobrar»). Una cifra sin sitio donde
+  comprobarla es una cifra que hay que creerse.
+
 Diseño de las cuatro fases en `docs/diseno-diagnostico-ia.md`.
 
 ### Hallazgo de producto: el mes concilia mejor que el día

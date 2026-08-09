@@ -5,9 +5,13 @@ import {
   promptPartida,
   promptSeguimiento,
   contextoRevisionPrevia,
+  promptGeneral,
+  promptGeneralConHistorial,
   MAX_TURNOS,
+  MAX_TURNOS_GENERAL,
   MAX_PREGUNTA,
 } from "../src/lib/ia/prompts";
+import { HERRAMIENTAS, herramientaValida } from "../src/lib/ia/herramientas";
 import { evaluarDiagnostico, type ContadoresPrevios } from "../src/lib/diagnosticoPrevio";
 import type { Diagnostico } from "../src/lib/diagnosticoPartida";
 
@@ -180,5 +184,103 @@ describe("repreguntas acotadas (fase 4)", () => {
     const larga = "a".repeat(MAX_PREGUNTA + 500);
     const m = promptSeguimiento(base, [], larga);
     expect(m[m.length - 1]!.content.length).toBe(MAX_PREGUNTA);
+  });
+});
+
+describe("herramientas del asistente general", () => {
+  it("los nombres no se repiten: el modelo elige por nombre", () => {
+    const n = HERRAMIENTAS.map((h) => h.nombre);
+    expect(new Set(n).size).toBe(n.length);
+  });
+
+  it("ninguna acepta empresa_id — sería un ?empresa_id= en manos de cualquiera", () => {
+    for (const h of HERRAMIENTAS) {
+      const props = Object.keys(h.parametros.properties);
+      expect(props).not.toContain("empresa_id");
+      expect(props.join(",")).not.toMatch(/empresa/i);
+    }
+  });
+
+  it("ninguna promete escribir: el asistente consulta, no ejecuta", () => {
+    const verbos = /\b(aprob|concili[ae]|borr|elimin|crea|actualiz|modific)/i;
+    for (const h of HERRAMIENTAS) {
+      expect(h.nombre).not.toMatch(verbos);
+    }
+  });
+
+  it("todas cierran su esquema: un argumento inventado no pasa", () => {
+    for (const h of HERRAMIENTAS) {
+      expect(h.parametros.additionalProperties).toBe(false);
+      expect(h.parametros.type).toBe("object");
+    }
+  });
+
+  it("cada una explica CUÁNDO usarla, no solo qué devuelve", () => {
+    for (const h of HERRAMIENTAS) {
+      expect(h.descripcion.length).toBeGreaterThan(60);
+    }
+  });
+
+  it("herramientaValida rechaza un nombre inventado por el modelo", () => {
+    expect(herramientaValida("cuentas_por_cobrar")).toBe(true);
+    expect(herramientaValida("borrar_todo")).toBe(false);
+  });
+});
+
+describe("prompt del chat general", () => {
+  it("obliga a consultar en vez de responder de memoria", () => {
+    const sistema = promptGeneral("hola")[0]!.content;
+    expect(sistema).toContain("USA UNA HERRAMIENTA");
+    expect(sistema).toContain("si no la consultaste, no la sabes");
+  });
+
+  it("le prohíbe rellenar el hueco cuando no puede responder", () => {
+    const sistema = promptGeneral("hola")[0]!.content;
+    expect(sistema).toContain("No rellenes el hueco");
+  });
+
+  it("le exige decir dónde comprobar el dato", () => {
+    expect(promptGeneral("hola")[0]!.content).toContain("en qué pantalla");
+  });
+
+  it("recorta el historial y la pregunta, como el acotado", () => {
+    const historial = Array.from({ length: 100 }, (_, i) => ({
+      role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+      content: `t${i}`,
+    }));
+    const m = promptGeneralConHistorial(historial, "x".repeat(MAX_PREGUNTA + 99));
+    expect(m.length).toBeLessThanOrEqual(1 + MAX_TURNOS_GENERAL * 2 + 1);
+    expect(m[m.length - 1]!.content.length).toBe(MAX_PREGUNTA);
+  });
+
+  it("el system NO crece con los datos: es fijo", () => {
+    expect(promptGeneral("a")[0]!.content).toBe(promptGeneral("b")[0]!.content);
+  });
+});
+
+describe("verificación sobre resultados de herramientas", () => {
+  // Lo que devolvería `cuentas_por_cobrar`.
+  const SALIDA =
+    "Cuentas por cobrar (foto de hoy):\n" +
+    "Total: S/ 19,221.00 en 340 documentos.\n" +
+    "Vencido: S/ 8,004.50.";
+
+  it("deja pasar lo que la consulta devolvió", () => {
+    expect(
+      verificarCifras("Te deben S/ 19,221.00, y S/ 8,004.50 está vencido.", SALIDA)
+        .ok,
+    ).toBe(true);
+  });
+
+  it("⚠️ atrapa un total inventado, que es el peor fallo posible aquí", () => {
+    const r = verificarCifras("Te deben S/ 25,000.00 en total.", SALIDA);
+    expect(r.ok).toBe(false);
+    expect(r.intrusas).toContain("25,000.00");
+  });
+
+  it("atrapa también un porcentaje calculado por su cuenta", () => {
+    // 8004.50 / 19221 = 41,6 %, correcto pero NO viene dado: el modelo no
+    // calcula, y si lo hace no se le cree.
+    expect(verificarCifras("El 41.6 % está vencido.", SALIDA).ok).toBe(false);
   });
 });

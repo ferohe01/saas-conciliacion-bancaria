@@ -85,6 +85,14 @@ const IconoAprendizaje = (p: IconProps) => (
   />
 );
 
+/** Bocadillo: se le pregunta, no ejecuta nada. */
+const IconoAsistente = (p: IconProps) => (
+  <Ico
+    {...p}
+    d={["M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"]}
+  />
+);
+
 const IconoConexion = (p: IconProps) => (
   <Ico
     {...p}
@@ -129,6 +137,10 @@ const ENLACES: Enlace[] = [
   // Núcleo, no módulo contratable: es el diferenciador del producto y no debe
   // vivir detrás de una puerta.
   { href: "/aprendizaje", label: "Aprendizaje IA", Icono: IconoAprendizaje },
+  // Justo debajo del aprendizaje porque son las dos caras de lo mismo: allí se
+  // ve qué aprendió el sistema, aquí se le pregunta. Y por encima de los
+  // ajustes, que se tocan dos veces al año.
+  { href: "/asistente", label: "Asistente", Icono: IconoAsistente },
   { href: "/cuentas", label: "Cuentas", Icono: IconoCuentas },
   { href: "/conexiones", label: "Conectar sistema", Icono: IconoConexion },
   { href: "/configuracion", label: "Configuración", Icono: IconoConfig },
