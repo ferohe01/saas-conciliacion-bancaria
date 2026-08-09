@@ -13,6 +13,7 @@ import { estadoSuscripcion } from "@/lib/suscripcion";
 import { bloqueaRelanzamiento } from "@/lib/jobsAtascados";
 import { construirResiduo } from "@/lib/conciliacion/residuo";
 import { calcularCuadre } from "@/lib/conciliacion/cuadre";
+import { maxFilasConciliacion } from "@/lib/limites";
 import type { EstadoJob } from "@/lib/contract/enums";
 import {
   PayloadConciliacion,
@@ -52,11 +53,12 @@ import { ConfigConciliacion } from "@/lib/contract/config";
  * necesite más lo sube **junto con** el de n8n, y nadie hereda una combinación
  * rota por defecto. Un despliegue de gran volumen (p. ej. una recaudadora que
  * concilia por día con picos de 36.000) pone 50.000 aquí y 64 MB allá.
+ *
+ * El valor vive en `lib/limites.ts` porque el diagnóstico previo del Paso 3
+ * avisa de este mismo tope antes de que este endpoint lo aplique: con dos
+ * números distintos, el wizard diría que cabe algo que luego se rechaza.
  */
-const MAX_FILAS = Math.max(
-  1000,
-  Math.min(200_000, Number(process.env.MAX_FILAS_CONCILIACION) || 20_000),
-);
+const MAX_FILAS = maxFilasConciliacion();
 
 /**
  * Dos formas de iniciar, y la diferencia es de dónde salen las partidas.

@@ -984,6 +984,53 @@ PyME que concilia por importe, y ruinoso para quien concilia por número de
 operación. La diferencia entre "opcional" y "opcional pero decisivo" tiene que
 verse en pantalla.
 
+### Y avisar de la causa no basta: hay que medir la consecuencia
+
+El aviso ámbar del Paso 2 señala la causa correcta, pero **un aviso que el
+usuario no sabe ponderar se despacha sin leer** — más aún cuando aclara, con
+razón, que se puede conciliar igual. *«No mapeaste la referencia»* se ignora;
+*«casarían 12 de 450.999 movimientos»* no.
+
+`diagnostico_previo` (migración `0037`) corre en el **Paso 3**, que es el único
+momento en que los dos lados ya están en la base —el Paso 2 importa el extracto
+y devuelve `lote_id`— y el motor todavía no ha corrido. Ahí cabe la comprobación
+real en vez de una heurística sobre lo que se ve en pantalla.
+
+- ⚠️⚠️ **La estimación COMPARTE la sentencia con la capa exacta, no la copia.**
+  La regla de emparejamiento se extrajo a `pares_exactos(...)` y la usan las
+  dos: `conciliar_exacta` para insertar y el diagnóstico para contar. Con dos
+  definiciones, el Paso 3 prometería una cobertura que el motor luego no da —y
+  nadie lo notaría—. Es el mismo riesgo que la `0029` documenta con `ref_norm`,
+  y aquí se puede eliminar del todo porque las dos consultas viven en Postgres.
+- ⚠️ `pares_exactos` va **sin `security definer` y sin `set search_path`** a
+  propósito: las dos cosas impiden que el planificador la incruste, y está en el
+  camino que empareja 450.000 filas. Todo va calificado con `public.` y el
+  acceso se cierra con `revoke`. **Al desplegar sobre el cliente grande hay que
+  volver a medir `conciliar_exacta`**; si empeorase, la definición con el cuerpo
+  en línea sigue en la `0029`.
+- ⚠️ **`pares_estimados` puede ser `null`, y eso NO es cero.** Emparejar medio
+  millón contra medio millón se pasa del `statement_timeout`, así que por encima
+  de 60.000 por lado no se intenta y la pantalla dice que no se estimó. La señal
+  que de verdad diagnostica el caso del 0 % es **`refs_compartidas`** —cuántos
+  códigos aparecen en los dos lados—, que es un join sobre columnas indexadas y
+  cuesta casi nada. Devolver null y decirlo es mejor que colgar la pantalla.
+- **Detecta el caso traicionero**: las dos columnas mapeadas y aun así ni una
+  referencia en común (recibos `SR11-02748951` contra operaciones
+  `00000001300486`). Un aviso de "falta mapear" mandaría al sitio equivocado.
+- **No bloquea; cambia cuál es el botón negro.** Con un hallazgo crítico,
+  *«Revisar el mapeo»* pasa a primario y *«Conciliar de todas formas»* queda a un
+  clic. Prohibirlo cerraría un caso de uso legítimo (extractos sin referencia).
+- **Cuando todo está bien también se dice** (*«casarían 980 de 1.000»*). Un panel
+  que solo aparece con problemas deja sin saber si el silencio significa
+  "correcto" o "no se miró".
+- Interpretación en `src/lib/diagnosticoPrevio.ts` (puro, con tests); la base
+  solo cuenta. El tope de filas vive en `lib/limites.ts` porque lo comparten el
+  aviso y el endpoint que rechaza: con dos números, el wizard diría que cabe algo
+  que luego falla al iniciarse.
+
+Diseño completo (y la fase 2, el «¿por qué no se concilió?» por partida) en
+`docs/diseno-diagnostico-ia.md`.
+
 ### Hallazgo de producto: el mes concilia mejor que el día
 
     corte del 30/06  → 88,44 %

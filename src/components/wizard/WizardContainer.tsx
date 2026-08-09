@@ -7,6 +7,7 @@ import { Stepper, type PasoWizard } from "./Stepper";
 import { UploadZone, type ArchivoResumen } from "./UploadZone";
 import { ZonaComprobantes, AyudaPlantilla } from "./ZonaComprobantes";
 import { MapeoDataset } from "./MapeoDataset";
+import { RevisionPrevia } from "./RevisionPrevia";
 import { CandadoIcon, ChevronIcon, DocumentoIcon } from "./icons";
 import { createClient } from "@/lib/supabase/client";
 import { mesesRecientes, periodoDeRango, VALOR_RANGO } from "@/lib/periodo";
@@ -19,8 +20,14 @@ import type { MapeoColumnas } from "@/lib/parsing/deteccion";
 import {
   guardarMapeoCuenta,
   resumenComprobantesPeriodo,
+  diagnosticarAntesDeConciliar,
   type ResumenComprobantes,
 } from "@/app/(app)/wizard/actions";
+import {
+  evaluarDiagnostico,
+  debeRevisar,
+  type Hallazgo,
+} from "@/lib/diagnosticoPrevio";
 import { Boton, CLASES_ENTRADA } from "@/components/ui";
 
 export type CuentaOpcion = {
@@ -227,6 +234,14 @@ export function WizardContainer({
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
   const [procesando, startTransition] = useTransition();
+
+  /**
+   * Revisión previa del Paso 3. `null` = todavía no se sabe (o no se pudo
+   * comprobar), que NO es lo mismo que "todo bien" — por eso no se inicializa
+   * a lista vacía.
+   */
+  const [hallazgos, setHallazgos] = useState<Hallazgo[] | null>(null);
+  const [revisando, setRevisando] = useState(false);
 
   const esRango = periodoValor === VALOR_RANGO;
 
@@ -449,6 +464,46 @@ export function WizardContainer({
     (comprobantesResumen?.registros ?? 0) > 0 &&
     Boolean(cuentaId) &&
     periodo != null;
+
+  /**
+   * Revisión previa: qué va a pasar si se concilia con estos datos.
+   *
+   * Se lanza al entrar al Paso 3, que es el único momento en que los dos lados
+   * ya están en la base y el motor todavía no ha corrido. Antes de esto, una
+   * conciliación de 450.999 movimientos podía terminar en 0 % por una columna
+   * sin mapear y no había forma de saberlo hasta media hora después.
+   *
+   * Si falla no se interrumpe nada: `hallazgos` queda en `null` y el Paso 3
+   * funciona como siempre. Una comprobación es una ayuda, no un requisito.
+   */
+  useEffect(() => {
+    if (paso !== 3 || !lote || !periodo) return;
+    let vigente = true;
+    setRevisando(true);
+    diagnosticarAntesDeConciliar(lote.lote_id, periodo.desde, periodo.hasta)
+      .then((r) => {
+        if (!vigente) return;
+        setHallazgos(r ? evaluarDiagnostico(r.contadores, r.maxFilas) : null);
+      })
+      .catch(() => {
+        if (vigente) setHallazgos(null);
+      })
+      .finally(() => {
+        if (vigente) setRevisando(false);
+      });
+    return () => {
+      vigente = false;
+    };
+  }, [paso, lote, periodo]);
+
+  /**
+   * Con algo grave detectado, "Iniciar conciliación" deja de ser el botón
+   * negro. No se deshabilita: hay extractos que legítimamente no traen
+   * referencia, y prohibirlo cerraría un caso de uso válido. Lo que se hace es
+   * poner delante la acción que casi siempre corresponde —volver a mirar el
+   * mapeo— y dejar la otra a un clic.
+   */
+  const convieneRevisar = hallazgos != null && debeRevisar(hallazgos);
   const saldoExtractoFaltante =
     normalizarMonto(saldoExtFin) == null && normalizarMonto(saldoExtIni) == null;
 
@@ -980,6 +1035,10 @@ export function WizardContainer({
               </dl>
             </div>
 
+            {/* La comprobación real, hecha con los dos lados ya en la base y
+                antes de gastar la corrida. Ver `lib/diagnosticoPrevio.ts`. */}
+            <RevisionPrevia hallazgos={hallazgos} cargando={revisando} />
+
             {!puedeIniciar && (lote?.insertados ?? 0) === 0 && (
               <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700">
                 No hay movimientos bancarios para conciliar (¿el extracto es un
@@ -1003,17 +1062,34 @@ export function WizardContainer({
             )}
           </div>
 
+          {/* Con algo grave detectado se invierten las prioridades: revisar el
+              mapeo pasa a ser el botón negro y conciliar queda a un clic, en
+              secundario. No se deshabilita nada — hay extractos que no traen
+              referencia y para ellos conciliar por monto y fecha es legítimo—;
+              lo que se hace es obligar a mirar. */}
           <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
             <Boton variante="secundario" tamano="lg" onClick={() => setPaso(2)}>
               Atrás
             </Boton>
-            <Boton
-              tamano="lg"
-              disabled={!puedeIniciar || procesando}
-              onClick={iniciarConciliacion}
-            >
-              {procesando ? "Iniciando…" : "Iniciar conciliación"}
-            </Boton>
+            <div className="flex flex-wrap items-center gap-3">
+              {convieneRevisar && (
+                <Boton tamano="lg" onClick={() => setPaso(2)}>
+                  Revisar el mapeo
+                </Boton>
+              )}
+              <Boton
+                tamano="lg"
+                variante={convieneRevisar ? "secundario" : "primario"}
+                disabled={!puedeIniciar || procesando}
+                onClick={iniciarConciliacion}
+              >
+                {procesando
+                  ? "Iniciando…"
+                  : convieneRevisar
+                    ? "Conciliar de todas formas"
+                    : "Iniciar conciliación"}
+              </Boton>
+            </div>
           </div>
         </>
       )}

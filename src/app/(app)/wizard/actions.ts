@@ -14,8 +14,10 @@ import {
   CONFIRMACION_VACIAR,
 } from "@/lib/importacion";
 import { FechaISO } from "@/lib/contract/primitives";
+import { maxFilasConciliacion } from "@/lib/limites";
 import type { MapeoColumnas } from "@/lib/parsing/deteccion";
 import type { RegistroInterno } from "@/lib/contract/payload";
+import type { ContadoresPrevios } from "@/lib/diagnosticoPrevio";
 
 /**
  * Importación de comprobantes desde la plantilla Excel (§6.4). El cliente ya
@@ -459,4 +461,64 @@ export async function quitarComprobantesDelPeriodo(
   );
   if (res.ok) revalidatePath("/comprobantes");
   return res;
+}
+
+/**
+ * Diagnóstico previo del Paso 3: qué va a pasar si se concilia con estos datos.
+ *
+ * Los dos lados ya están en la base cuando se llega aquí (el Paso 2 importa el
+ * extracto y devuelve `lote_id`), así que esto no es una heurística sobre lo
+ * que se ve en pantalla: es la comprobación real, hecha antes de gastar la
+ * corrida. Ver `lib/diagnosticoPrevio.ts`.
+ *
+ * ⚠️ Cliente de SESIÓN, no `admin`: `diagnostico_previo` es `security definer`
+ * y resuelve la empresa desde `auth.uid()`. Con `admin` no hay usuario y
+ * devolvería CERO FILAS SIN ERROR — el mismo fallo silencioso que escondió las
+ * "Cargas realizadas" en /comprobantes.
+ *
+ * Si algo falla no se interrumpe nada: se devuelve `null` y el Paso 3 sigue
+ * funcionando como antes. Un diagnóstico es una ayuda, no un requisito.
+ */
+export async function diagnosticarAntesDeConciliar(
+  loteId: string,
+  desde: string,
+  hasta: string,
+): Promise<{ contadores: ContadoresPrevios; maxFilas: number } | null> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(desde) || !/^\d{4}-\d{2}-\d{2}$/.test(hasta)) {
+    return null;
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .rpc("diagnostico_previo", {
+      p_lote_id: loteId,
+      p_desde: desde,
+      p_hasta: hasta,
+    })
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  const c = data as Record<string, number | null>;
+  const n = (k: string) => Number(c[k] ?? 0);
+
+  return {
+    contadores: {
+      internos: n("internos"),
+      internos_con_ref: n("internos_con_ref"),
+      internos_ref_repetida: n("internos_ref_repetida"),
+      movimientos: n("movimientos"),
+      movimientos_con_ref: n("movimientos_con_ref"),
+      movimientos_ref_repetida: n("movimientos_ref_repetida"),
+      movimientos_abono: n("movimientos_abono"),
+      movimientos_cargo: n("movimientos_cargo"),
+      movimientos_fuera: n("movimientos_fuera"),
+      movimientos_dia_bajo: n("movimientos_dia_bajo"),
+      refs_compartidas: n("refs_compartidas"),
+      // null significa "no se estimó por volumen", que NO es lo mismo que cero.
+      pares_estimados:
+        c["pares_estimados"] == null ? null : Number(c["pares_estimados"]),
+    },
+    maxFilas: maxFilasConciliacion(),
+  };
 }
