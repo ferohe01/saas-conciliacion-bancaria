@@ -3,7 +3,7 @@ import { AppSidebar } from "@/components/app/AppSidebar";
 import { ScrollAlInicio } from "@/components/app/ScrollAlInicio";
 import { getEmpresaActual } from "@/lib/auth";
 import { estadoSuscripcion } from "@/lib/suscripcion";
-import { getSuscripcionesModulo } from "@/lib/modulos-servidor";
+import { getSuscripcionesModulo, getAccesoCuenta } from "@/lib/modulos-servidor";
 import { MODULOS, tieneModulo } from "@/lib/modulos";
 
 /**
@@ -25,12 +25,16 @@ export default async function AppLayout({
 
   if (!empresa) redirect("/login");
 
-  // Módulos contratados y vigentes: la barra lateral solo muestra lo que la
-  // empresa tiene. Cada pantalla vuelve a comprobarlo por su cuenta —esto
-  // orienta, no protege.
-  const suscripciones = await getSuscripcionesModulo();
+  // Módulos a la vista. Con la cuenta al día —de pago o en prueba— salen
+  // TODOS: el sistema se vende entero (ver `estadoModulo`). Cada pantalla
+  // vuelve a comprobarlo por su cuenta —esto orienta, no protege.
+  const [suscripciones, cuenta] = await Promise.all([
+    getSuscripcionesModulo(),
+    getAccesoCuenta(),
+  ]);
+  const ahora = new Date();
   const modulosActivos = MODULOS.filter((m) =>
-    tieneModulo(m.id, suscripciones),
+    tieneModulo(m.id, suscripciones, ahora, cuenta),
   ).map((m) => m.id as string);
 
   return (

@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { traerResumenSaldos } from "@/lib/comprobantesSaldo";
-import { empresaTieneModulo } from "@/lib/modulos-servidor";
-import { buscarModulo } from "@/lib/modulos";
-import { CONTACTO_SUSCRIPCION, montoPEN } from "@/lib/suscripcion";
+import { accesoModulo } from "@/lib/modulos-servidor";
+import { ModuloBloqueado } from "@/components/app/ModuloBloqueado";
 import { VistaAging } from "@/components/app/VistaAging";
 import { FiltrosSaldo } from "@/components/comprobantes/FiltrosSaldo";
 import {
@@ -12,7 +11,7 @@ import {
   hayFiltroSaldo,
 } from "@/lib/filtrosSaldo";
 import { EncabezadoPagina, EstadoVacio, clasesBoton } from "@/components/ui";
-import { DocumentoIcon, CandadoIcon } from "@/components/wizard/icons";
+import { DocumentoIcon } from "@/components/wizard/icons";
 
 
 export default async function CobranzasPage({
@@ -23,26 +22,16 @@ export default async function CobranzasPage({
   const sp = await searchParams;
   // El límite se hace cumplir AQUÍ, en el servidor. Ocultar el enlace en la
   // barra lateral orienta, pero no protege: esta ruta se alcanza escribiéndola.
-  const permitido = await empresaTieneModulo("cobranzas");
-  const modulo = buscarModulo("cobranzas")!;
+  // Durante la prueba gratuita el módulo está abierto (ver `estadoModulo`).
+  const acceso = await accesoModulo("cobranzas");
 
-  if (!permitido) {
+  if (!acceso.permitido) {
     return (
-      <div className="space-y-6">
-        <EncabezadoPagina titulo="Cuentas por cobrar" />
-        <EstadoVacio
-          icono={<CandadoIcon className="h-6 w-6" />}
-          titulo="Este módulo no está contratado"
-          texto={modulo.descripcion}
-          accion={
-            <a href={CONTACTO_SUSCRIPCION} className={clasesBoton("primario", "md")}>
-              {modulo.precioMensual === null
-                ? "Consúltanos"
-                : `Activar por ${montoPEN(modulo.precioMensual)}/mes`}
-            </a>
-          }
-        />
-      </div>
+      <ModuloBloqueado
+        titulo="Cuentas por cobrar"
+        modulo="cobranzas"
+        pruebaVencida={acceso.pruebaVencida}
+      />
     );
   }
 

@@ -762,6 +762,54 @@ portada. Desde la migración `0005` es real:
   alcance.
 - ⚠️ `CONTACTO_SUSCRIPCION` en `suscripcion.ts` es un **placeholder**: hay que
   cambiarlo por el canal comercial real.
+- **Para verlo vencido sin esperar 30 días** (demostraciones): los `update`
+  están listos en `ops/simular-prueba.sql`, que se ejecuta desde el SQL Editor
+  de Studio. No hay pantalla para esto **a propósito** — es justo lo que la
+  `0005` revoca.
+
+### El sistema se vende ENTERO: no hay módulos que contratar aparte
+
+Cuentas por cobrar / por pagar nació como módulo contratable
+(`suscripciones_modulo`, `0009`) y estaba cerrado **en los dos extremos**:
+durante la prueba, y también para quien ya pagaba el plan. Las dos cosas eran
+un error, y la segunda peor que la primera.
+
+- **Al que paga**, encontrarse una pantalla cerrada le hace preguntarse qué
+  compró. Un cliente que ya soltó el dinero es el peor momento para pedirle más:
+  la conversación deja de ser sobre el producto y pasa a ser sobre la factura.
+- **Al que prueba**, el candado no protege ningún ingreso —nadie está pagando
+  todavía— y le esconde justo el motivo por el que pagaría. Quien no usó las
+  cobranzas en 30 días no puede echarlas de menos el día 31, que es exactamente
+  donde se juega la conversión.
+
+Así que el **único** estado que cierra un módulo es la **prueba vencida sin
+activar la cuenta** — el mismo que impide conciliar. Un solo límite en todo el
+producto, fácil de explicar y de recordar.
+
+- `estadoModulo` recibe un cuarto argumento, `AccesoCuenta`
+  (`motivo: "plan" | "prueba"`): con cualquiera de los dos, **todos** los
+  módulos salen activos. Sigue puro y con tests; el dato lo arma
+  `modulos-servidor.ts` desde `estadoSuscripcion`. Hay un test que fija la
+  promesa: *pagar y probar dan el mismo acceso*.
+- **`MODULOS` ya no lleva `precioMensual`**, y `PanelModulos` (ahora *«Qué
+  incluye tu cuenta»*) no tiene precios ni botones de "Activar" por módulo:
+  ofrecer una compra que no existe dejaría al cliente esperando una factura
+  aparte. Lo que se ofrece, y solo cuando la prueba venció, es **activar la
+  cuenta**.
+- ⚠️ **Durante la prueba la pantalla no dice "Activo" a secas**, dice *«Incluido
+  · lo tienes hasta el dd/mm, cuando termina tu prueba»*. Un "Activo" haría
+  creer que ya está pagado y convertiría el vencimiento en una sorpresa.
+- ⚠️ **Y al vencer, el bloqueo cambia de texto**: quien llega ahí NO está
+  descubriendo una función nueva, la estuvo usando y acaba de perderla.
+  `ModuloBloqueado` (una sola copia para Por cobrar y Por pagar) lo dice así, y
+  recuerda que comprobantes y conciliaciones se siguen consultando.
+  `accesoModulo` devuelve `pruebaVencida` justo para eso.
+- **`suscripciones_modulo` sobrevive como concesión suelta** —cortesía, acuerdo
+  puntual, dar acceso sin activar la cuenta entera— y sigue abriendo el módulo
+  por su cuenta. Ya **no es el camino por el que nadie obtiene acceso**, y en
+  condiciones normales la tabla está vacía.
+- El control se sigue haciendo cumplir **en el servidor**, en cada página. Lo
+  que cambió es el criterio, no dónde se aplica.
 
 ## Revisión de resultados: deshacer y paginar
 
@@ -1613,10 +1661,12 @@ que otro sistema en abstracto, concilia como **esta** empresa. Por eso dejó de
 vivir repartido —un panel en `/reportes`, una tarjeta en `/dashboard`, ambos
 hospedados dentro de `ReporteVista.tsx`— y tiene su propia ruta.
 
-- **Es núcleo, NO un módulo contratable.** No pasa por `suscripciones_modulo` ni
-  se puede desactivar: poner detrás de una puerta la razón por la que alguien
-  compra el sistema debilita el argumento principal. (Contrástese con
-  `cobranzas`, que sí es un añadido.)
+- **Es núcleo y no se puede desactivar**: poner detrás de una puerta la razón
+  por la que alguien compra el sistema debilita el argumento principal. (Hoy
+  esto ya no distingue a nada: **el sistema entero se vende junto** y tampoco
+  `cobranzas` se contrata aparte — ver "El sistema se vende ENTERO". La nota se
+  conserva porque explica por qué el aprendizaje nunca pasó por
+  `suscripciones_modulo` ni siquiera cuando esa tabla decidía accesos.)
 - **En el panel de control queda un gancho de una línea**, no el detalle.
   Borrarlo del todo habría vuelto el aprendizaje *menos* visible —el panel se
   mira a diario, la sección dos veces al mes—, justo lo contrario del objetivo.

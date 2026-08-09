@@ -1,6 +1,13 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
-import { tieneModulo, type ModuloId, type SuscripcionModulo } from "@/lib/modulos";
+import { getEmpresaActual } from "@/lib/auth";
+import { estadoSuscripcion, type EstadoSuscripcion } from "@/lib/suscripcion";
+import {
+  tieneModulo,
+  type AccesoCuenta,
+  type ModuloId,
+  type SuscripcionModulo,
+} from "@/lib/modulos";
 
 /**
  * Lectura de módulos contratados (solo servidor).
@@ -18,6 +25,25 @@ export async function getSuscripcionesModulo(): Promise<SuscripcionModulo[]> {
 }
 
 /**
+ * Qué incluye la cuenta hoy: el plan de pago, la prueba en curso, o nada
+ * (prueba vencida sin activar).
+ *
+ * En los dos primeros casos **el sistema está abierto entero** — ver la nota de
+ * `estadoModulo`: no hay nada que comprar por separado.
+ */
+export async function getAccesoCuenta(): Promise<AccesoCuenta | null> {
+  const empresa = await getEmpresaActual();
+  return empresa ? accesoDe(estadoSuscripcion(empresa)) : null;
+}
+
+/** Traduce el estado de suscripción a lo que `estadoModulo` necesita saber. */
+function accesoDe(e: EstadoSuscripcion): AccesoCuenta | null {
+  if (e.plan === "activo") return { motivo: "plan", fin: null, diasRestantes: null };
+  if (e.expirada) return null;
+  return { motivo: "prueba", fin: e.fin, diasRestantes: e.diasRestantes };
+}
+
+/**
  * Control de acceso a un módulo, para usar en server actions y route handlers.
  *
  * Es el punto donde el límite se hace cumplir. Ocultar un enlace en la
@@ -28,5 +54,32 @@ export async function getSuscripcionesModulo(): Promise<SuscripcionModulo[]> {
  *     if (!permitido) return { ok: false, error: "Módulo no contratado." };
  */
 export async function empresaTieneModulo(id: ModuloId): Promise<boolean> {
-  return tieneModulo(id, await getSuscripcionesModulo());
+  return (await accesoModulo(id)).permitido;
+}
+
+export type AccesoModulo = {
+  permitido: boolean;
+  /**
+   * El acceso se perdió al vencer la prueba (no es que nunca lo tuviera).
+   * Cambia lo que hay que decirle al usuario: durante la prueba SÍ lo usó.
+   */
+  pruebaVencida: boolean;
+};
+
+/**
+ * Igual que `empresaTieneModulo`, pero además dice **por qué** no hay acceso.
+ * Lo usan las pantallas para redactar el bloqueo; el control en sí es el mismo.
+ */
+export async function accesoModulo(id: ModuloId): Promise<AccesoModulo> {
+  const [suscripciones, empresa] = await Promise.all([
+    getSuscripcionesModulo(),
+    getEmpresaActual(),
+  ]);
+
+  const s = empresa ? estadoSuscripcion(empresa) : null;
+
+  return {
+    permitido: tieneModulo(id, suscripciones, new Date(), s ? accesoDe(s) : null),
+    pruebaVencida: s?.expirada === true,
+  };
 }
