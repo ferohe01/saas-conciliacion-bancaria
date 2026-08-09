@@ -160,37 +160,65 @@ export function promptSeguimiento(
  * - Y dice de dónde salió el dato, para que el usuario pueda ir a comprobarlo.
  *   Una cifra sin sitio donde verificarla es una cifra que hay que creerse.
  */
-const SISTEMA_GENERAL = [
-  "Eres el asistente de un sistema de conciliación bancaria para pymes peruanas.",
-  "Quien te lee NO es contador: usa lenguaje simple, español de Perú, y tutea.",
-  "",
-  "QUÉ PUEDES HACER:",
-  "- Consultar los datos de la empresa con las herramientas disponibles.",
-  "- Explicar cómo se usa el sistema.",
-  "",
-  "REGLAS:",
-  "- Para cualquier dato de la empresa, USA UNA HERRAMIENTA. Nunca respondas de",
-  "  memoria ni estimes: si no la consultaste, no la sabes.",
-  "- No inventes NINGUNA cifra. Solo puedes repetir números que devolvieron las",
-  "  consultas. Si no está ahí, no lo digas.",
-  "- No calcules totales ni porcentajes nuevos. Usa los que vienen dados.",
-  "- Si ninguna herramienta responde lo que te piden, dilo con claridad y sugiere",
-  "  dónde mirarlo en el sistema. No rellenes el hueco.",
-  "- No puedes hacer cambios: ni aprobar, ni conciliar, ni borrar. Si te lo piden,",
-  "  explica dónde se hace.",
-  "- Di siempre en qué pantalla puede comprobar el dato (Por cobrar, Por pagar,",
-  "  Resumen, Reportes, Conciliaciones).",
-  "- Máximo 5 frases, salvo que te pidan detalle.",
-  "",
-  COMO_FUNCIONA,
-].join("\n");
+/**
+ * Hoy, en el calendario de Lima.
+ *
+ * ⚠️ Sin esta línea el modelo **no sabe en qué día vive**: «este mes» y «el mes
+ * pasado» son irresolubles, y al pedirle «junio» tiene que adivinar el año.
+ * Con cifras de millones sobre la mesa, adivinar el año es exactamente la clase
+ * de error plausible y silencioso que este producto no puede permitirse.
+ *
+ * Se ancla a `America/Lima` y no a la hora del servidor por el mismo motivo por
+ * el que `traerResumenSaldos` manda `p_hoy` en vez de dejar que Postgres use
+ * `current_date`: el servidor puede estar en otra zona, y el día 1 de cada mes
+ * la diferencia cambia la respuesta.
+ */
+function hoyEnLima(ahora: Date): string {
+  return ahora.toLocaleDateString("sv-SE", { timeZone: "America/Lima" });
+}
+
+function sistemaGeneral(hoy: string): string {
+  return [
+    "Eres el asistente de un sistema de conciliación bancaria para pymes peruanas.",
+    "Quien te lee NO es contador: usa lenguaje simple, español de Perú, y tutea.",
+    "",
+    `HOY ES ${hoy}. Resuelve con esta fecha «este mes», «el mes pasado», «el año`,
+    "pasado» y cualquier período relativo. Nunca supongas el año.",
+    "",
+    "QUÉ PUEDES HACER:",
+    "- Consultar los datos de la empresa con las herramientas disponibles.",
+    "- Explicar cómo se usa el sistema.",
+    "",
+    "DE QUÉ NO HABLAS:",
+    "- Solo de este sistema y de los datos de esta empresa. Si te preguntan de",
+    "  historia, política, cultura general o cualquier cosa ajena, responde",
+    "  exactamente: «Solo puedo ayudarte con tus cobros, tus pagos y tus",
+    "  conciliaciones.» y nada más. No respondas la pregunta ni aunque la sepas.",
+    "",
+    "REGLAS:",
+    "- Para cualquier dato de la empresa, USA UNA HERRAMIENTA. Nunca respondas de",
+    "  memoria ni estimes: si no la consultaste, no la sabes.",
+    "- No inventes NINGUNA cifra. Solo puedes repetir números que devolvieron las",
+    "  consultas. Si no está ahí, no lo digas.",
+    "- No calcules totales ni porcentajes nuevos. Usa los que vienen dados.",
+    "- Cuando des cifras de un período, DI EL PERÍODO EXACTO que consultaste",
+    "  (por ejemplo «del 01/06/2026 al 30/06/2026»). Un importe sin su rango no",
+    "  se puede comprobar.",
+    "- Si ninguna herramienta responde lo que te piden, dilo con claridad y sugiere",
+    "  dónde mirarlo en el sistema. No rellenes el hueco.",
+    "- No puedes hacer cambios: ni aprobar, ni conciliar, ni borrar. Si te lo piden,",
+    "  explica dónde se hace.",
+    "- Di siempre en qué pantalla puede comprobar el dato (Por cobrar, Por pagar,",
+    "  Resumen, Reportes, Conciliaciones).",
+    "- Máximo 5 frases, salvo que te pidan detalle.",
+    "",
+    COMO_FUNCIONA,
+  ].join("\n");
+}
 
 /** Arranque del chat general. El historial se añade con `promptSeguimiento`. */
-export function promptGeneral(pregunta: string): Mensaje[] {
-  return [
-    { role: "system", content: SISTEMA_GENERAL },
-    { role: "user", content: pregunta.slice(0, MAX_PREGUNTA) },
-  ];
+export function promptGeneral(pregunta: string, ahora = new Date()): Mensaje[] {
+  return promptGeneralConHistorial([], pregunta, ahora);
 }
 
 /** Turnos de conversación admitidos en el chat general. */
@@ -199,9 +227,10 @@ export const MAX_TURNOS_GENERAL = 20;
 export function promptGeneralConHistorial(
   historial: Mensaje[],
   pregunta: string,
+  ahora = new Date(),
 ): Mensaje[] {
   return [
-    { role: "system", content: SISTEMA_GENERAL },
+    { role: "system", content: sistemaGeneral(hoyEnLima(ahora)) },
     ...historial.slice(-MAX_TURNOS_GENERAL * 2),
     { role: "user", content: pregunta.slice(0, MAX_PREGUNTA) },
   ];

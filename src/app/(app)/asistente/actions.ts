@@ -67,8 +67,8 @@ export async function preguntarAlAsistente(
       ok: false,
       error:
         "El asistente respondió con cifras que no salen de tus datos, así que " +
-        "no se muestra. Vuelve a preguntar, o míralo en la pantalla que " +
-        "corresponda.",
+        "no se muestra. Si preguntaste por tus cobros, tus pagos o tus " +
+        "conciliaciones, vuelve a intentarlo siendo más concreto.",
     };
   }
 

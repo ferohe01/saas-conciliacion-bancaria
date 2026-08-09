@@ -254,8 +254,32 @@ describe("prompt del chat general", () => {
     expect(m[m.length - 1]!.content.length).toBe(MAX_PREGUNTA);
   });
 
-  it("el system NO crece con los datos: es fijo", () => {
-    expect(promptGeneral("a")[0]!.content).toBe(promptGeneral("b")[0]!.content);
+  it("el system NO crece con los datos: solo cambia con el día", () => {
+    const d = new Date("2026-06-15T12:00:00Z");
+    expect(promptGeneral("a", d)[0]!.content).toBe(promptGeneral("b", d)[0]!.content);
+  });
+
+  it("⚠️ le dice qué día es: sin eso no puede resolver «este mes»", () => {
+    const sistema = promptGeneral("x", new Date("2026-06-15T12:00:00Z"))[0]!.content;
+    expect(sistema).toContain("HOY ES 2026-06-15");
+    expect(sistema).toContain("Nunca supongas el año");
+  });
+
+  it("usa el calendario de Lima, no el del servidor", () => {
+    // 03:00 UTC del día 1 es todavía el último día del mes anterior en Perú.
+    const sistema = promptGeneral("x", new Date("2026-07-01T03:00:00Z"))[0]!.content;
+    expect(sistema).toContain("HOY ES 2026-06-30");
+  });
+
+  it("⚠️ rechaza lo ajeno con una frase fija, en vez de responderlo", () => {
+    const sistema = promptGeneral("x")[0]!.content;
+    expect(sistema).toContain("DE QUÉ NO HABLAS");
+    expect(sistema).toContain("Solo puedo ayudarte con tus cobros");
+    expect(sistema).toContain("No respondas la pregunta ni aunque la sepas");
+  });
+
+  it("exige decir el período exacto: un importe sin rango no se comprueba", () => {
+    expect(promptGeneral("x")[0]!.content).toContain("DI EL PERÍODO EXACTO");
   });
 });
 
