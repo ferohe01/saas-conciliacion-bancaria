@@ -8,6 +8,7 @@ import {
 import type { Mensaje } from "@/lib/ia/prompts";
 import { MAX_PREGUNTA } from "@/lib/ia/prompts";
 import { Boton, CLASES_ENTRADA, Tarjeta } from "@/components/ui";
+import { TextoIa } from "./TextoIa";
 
 /**
  * El chat general de la app.
@@ -120,7 +121,13 @@ export function ChatApp({ disponible }: { disponible: boolean }) {
                   : "max-w-prose rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-800"
               }
             >
-              <p className="whitespace-pre-wrap">{m.content}</p>
+              <p>
+                {m.role === "assistant" ? (
+                  <TextoIa>{m.content}</TextoIa>
+                ) : (
+                  <span className="whitespace-pre-wrap">{m.content}</span>
+                )}
+              </p>
               {m.consultas && m.consultas.length > 0 && (
                 <p className="mt-2 border-t border-neutral-100 pt-2 text-xs text-neutral-500">
                   Consultado en:{" "}

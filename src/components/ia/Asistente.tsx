@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Boton, CLASES_ENTRADA } from "@/components/ui";
 import { MAX_PREGUNTA, MAX_TURNOS, type Mensaje } from "@/lib/ia/prompts";
+import { TextoIa } from "./TextoIa";
 
 /**
  * El asistente, encima de un análisis que ya está en pantalla.
@@ -102,10 +103,14 @@ export function Asistente({
                 className={
                   m.role === "user"
                     ? "font-medium text-neutral-900"
-                    : "whitespace-pre-wrap text-neutral-800"
+                    : "text-neutral-800"
                 }
               >
-                {m.role === "user" ? `Tú: ${m.content}` : m.content}
+                {m.role === "user" ? (
+                  `Tú: ${m.content}`
+                ) : (
+                  <TextoIa>{m.content}</TextoIa>
+                )}
               </li>
             ))}
           </ul>

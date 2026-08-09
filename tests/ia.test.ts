@@ -12,6 +12,7 @@ import {
   MAX_PREGUNTA,
 } from "../src/lib/ia/prompts";
 import { HERRAMIENTAS, herramientaValida } from "../src/lib/ia/herramientas";
+import { segmentar } from "../src/lib/ia/formato";
 import { evaluarDiagnostico, type ContadoresPrevios } from "../src/lib/diagnosticoPrevio";
 import type { Diagnostico } from "../src/lib/diagnosticoPartida";
 
@@ -282,5 +283,67 @@ describe("verificación sobre resultados de herramientas", () => {
     // 8004.50 / 19221 = 41,6 %, correcto pero NO viene dado: el modelo no
     // calcula, y si lo hace no se le cree.
     expect(verificarCifras("El 41.6 % está vencido.", SALIDA).ok).toBe(false);
+  });
+});
+
+describe("formato de la respuesta del modelo", () => {
+  const plano = (t: string) =>
+    segmentar(t)
+      .map((s) => s.texto)
+      .join("");
+
+  it("convierte **negrita** en un segmento fuerte, sin los asteriscos", () => {
+    const s = segmentar("Cárgalas desde **Comprobantes**, con la plantilla.");
+    expect(s.filter((x) => x.tipo === "fuerte").map((x) => x.texto)).toEqual([
+      "Comprobantes",
+    ]);
+    expect(plano(s.map((x) => x.texto).join(""))).not.toContain("*");
+  });
+
+  it("maneja varias marcas en la misma frase", () => {
+    const s = segmentar("Míralo en **Por cobrar** o en **Por pagar**.");
+    expect(s.filter((x) => x.tipo === "fuerte")).toHaveLength(2);
+  });
+
+  it("reconoce `código` para nombres de columna", () => {
+    const s = segmentar("La columna `referencia` es la que decide.");
+    expect(s.find((x) => x.tipo === "codigo")?.texto).toBe("referencia");
+  });
+
+  it("⚠️ NO toca el asterisco simple: '3 * 4' es aritmética, no cursiva", () => {
+    const s = segmentar("Son 3 * 4 = 12 documentos.");
+    expect(s).toHaveLength(1);
+    expect(s[0]!.tipo).toBe("texto");
+  });
+
+  it("una marca sin cerrar se deja literal en vez de comerse el resto", () => {
+    const s = segmentar("Esto **no cierra y sigue el texto");
+    expect(plano("Esto **no cierra y sigue el texto")).toBe(
+      "Esto **no cierra y sigue el texto",
+    );
+    expect(s.every((x) => x.tipo === "texto")).toBe(true);
+  });
+
+  it("no pierde ni añade texto: lo que entra es lo que sale", () => {
+    const casos = [
+      "sin marcas",
+      "**todo en negrita**",
+      "a **b** c `d` e",
+      "",
+      "****",
+      "línea 1\nlínea 2 con **negrita**",
+    ];
+    for (const c of casos) {
+      expect(plano(c)).toBe(c.replace(/\*\*([^*]+?)\*\*/g, "$1").replace(/`([^`]+?)`/g, "$1"));
+    }
+  });
+
+  it("conserva los saltos de línea, que dan la estructura de la respuesta", () => {
+    const s = segmentar("uno\n\ndos **tres**");
+    expect(s[0]!.texto).toContain("\n\n");
+  });
+
+  it("un texto vacío no produce segmentos", () => {
+    expect(segmentar("")).toEqual([]);
   });
 });
