@@ -45,20 +45,22 @@ export async function preguntarAlAsistente(
   const limpia = pregunta.trim();
   if (limpia === "") return { ok: false, error: "Escribe una pregunta." };
 
-  const r = await conversarConHerramientas(
-    promptGeneralConHistorial(historial, limpia),
-    ejecutarHerramienta,
-  );
+  const mensajes = promptGeneralConHistorial(historial, limpia);
+  const r = await conversarConHerramientas(mensajes, ejecutarHerramienta);
   if (!r.ok) return r;
 
-  // ⚠️ Se verifica contra lo que devolvieron las consultas MÁS la propia
-  // conversación: el usuario puede haber dado una cifra en su pregunta ("de los
-  // 5.000 que me deben…") y repetirla no es inventarla.
-  const permitido = [
-    r.contexto,
-    limpia,
-    ...historial.map((m) => m.content),
-  ].join("\n");
+  // ⚠️ Se verifica contra TODO lo que el modelo recibió: el prompt entero
+  // (system incluido) más lo que devolvieron las consultas.
+  //
+  // Antes solo se miraban los resultados de las herramientas, y eso rechazaba
+  // respuestas correctas: a una pregunta que no requiere consultar nada —«¿qué
+  // necesitas para darme el balance de marzo?»— la lista de cifras admitidas
+  // salía VACÍA, así que cualquier número de una respuesta legítima se
+  // marcaba como inventado.
+  //
+  // La regla siempre fue "toda cifra tiene que aparecer en el texto que se le
+  // mandó"; lo que estaba mal era mirar solo un trozo de ese texto.
+  const permitido = [...mensajes.map((m) => m.content), r.contexto].join("\n");
 
   const v = verificarCifras(r.texto, permitido);
   if (!v.ok) {

@@ -371,3 +371,46 @@ describe("formato de la respuesta del modelo", () => {
     expect(segmentar("")).toEqual([]);
   });
 });
+
+describe("⚠️ fechas: el fallo que rechazaba respuestas correctas", () => {
+  // Un usuario preguntó "¿qué necesitas para darme el balance de marzo?" —sin
+  // datos, así que no se consultó nada— y el asistente pidió el rango. Con la
+  // lista de admitidas vacía, una respuesta correcta se descartaba.
+  const SIN_CONSULTAS = "";
+
+  it("acepta un rango de fechas propuesto cuando no se consultó nada", () => {
+    const r = verificarCifras(
+      "Necesito el período exacto: ¿del 01/03/2026 al 31/03/2026?",
+      SIN_CONSULTAS,
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it("acepta las formas escritas y la ISO", () => {
+    for (const t of [
+      "Del 1 de marzo de 2026 al 31 de marzo de 2026.",
+      "El período 2026-03-01 a 2026-03-31.",
+      "Los datos de marzo de 2026.",
+      "Durante 2026 no hubo movimientos.",
+    ]) {
+      expect(verificarCifras(t, SIN_CONSULTAS).ok, t).toBe(true);
+    }
+  });
+
+  it("⚠️ pero un IMPORTE junto a la fecha se sigue comprobando", () => {
+    // Es lo que la verificación existe para atrapar: la fecha es calendario,
+    // el dinero es el dato.
+    const r = verificarCifras(
+      "El 31/03/2026 cobraste S/ 88,450.00.",
+      SIN_CONSULTAS,
+    );
+    expect(r.ok).toBe(false);
+    expect(r.intrusas).toContain("88,450.00");
+  });
+
+  it("un recuento inventado tampoco se salva por ir con una fecha", () => {
+    const r = verificarCifras("En marzo de 2026 tienes 4,318 facturas.", "");
+    expect(r.ok).toBe(false);
+    expect(r.intrusas).toContain("4,318");
+  });
+});

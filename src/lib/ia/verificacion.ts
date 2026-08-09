@@ -37,6 +37,36 @@ const PROSA_MAX = 12;
 /** Cuántos decimales se toleran al redondear una cifra del contexto. */
 const REDONDEOS = [0, 1, 2];
 
+const MESES =
+  "enero|febrero|marzo|abril|mayo|junio|julio|agosto|se[pt]tiembre|octubre|noviembre|diciembre";
+
+/**
+ * Fechas escritas, en las formas que usan la app y el modelo.
+ *
+ * ⚠️ **Se descuentan antes de verificar, y esto no es una concesión: es un
+ * fallo corregido.** Un usuario preguntó «¿qué necesitas para darme el balance
+ * de marzo?» —pregunta legítima, sin datos— y el asistente contestó pidiendo el
+ * rango («del 01/03/2026 al 31/03/2026»). Como no había consultado nada, la
+ * lista de cifras admitidas estaba vacía y **una respuesta correcta se
+ * descartó**.
+ *
+ * La verificación existe para impedir que se invente **dinero y recuentos del
+ * negocio**, que es donde un número falso hace daño. Una fecha es otra cosa: el
+ * modelo la necesita para preguntar qué período quieres, y proponerla no
+ * afirma nada sobre tus datos. Los importes que la acompañen siguen
+ * comprobándose uno a uno.
+ */
+const FECHAS = new RegExp(
+  [
+    "\\d{4}-\\d{2}-\\d{2}", // 2026-03-31
+    "\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}", // 31/03/2026
+    `\\d{1,2}\\s+de\\s+(?:${MESES})(?:\\s+de\\s+\\d{4})?`, // 31 de marzo de 2026
+    `(?:${MESES})\\s+de\\s+\\d{4}`, // marzo de 2026
+    "\\b(?:19|20)\\d{2}\\b", // un año suelto
+  ].join("|"),
+  "gi",
+);
+
 /** 1,234 · 12,345.67 — coma como separador de miles (formato es-PE de la app). */
 const MILES_COMA = /^\d{1,3}(,\d{3})+(\.\d+)?$/;
 /** 1.234 · 12.345,67 — punto como separador de miles (formato europeo). */
@@ -110,7 +140,11 @@ export function verificarCifras(
   const permitidos = admisibles(contexto);
   const intrusas: string[] = [];
 
-  for (const { token, valores: vs } of extraer(respuesta)) {
+  // Las fechas se descuentan del texto ANTES de buscar cifras: son calendario,
+  // no datos del negocio. Ver la nota de `FECHAS`.
+  const sinFechas = respuesta.replace(FECHAS, " ");
+
+  for (const { token, valores: vs } of extraer(sinFechas)) {
     // ⚠️ La excepción de prosa mira el TOKEN, no sus lecturas: si mirara los
     // valores, "5,000" se leería como 5 y se colaría por pequeño.
     const esProsa = /^\d{1,2}$/.test(token) && Number(token) <= PROSA_MAX;
