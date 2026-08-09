@@ -117,7 +117,7 @@ async function main() {
     process.exit(1);
   }
 
-  console.log("✓ El modelo responde.");
+  console.log("✓ El modelo responde (asistentes acotados).");
   console.log("");
   console.log(`  «${texto}»`);
   console.log("");
@@ -127,6 +127,98 @@ async function main() {
       `  Tokens: ${uso.prompt_tokens} de entrada + ${uso.completion_tokens} de salida.`,
     );
   }
+
+  console.log("");
+  await probarHerramientas(key, modelo);
+}
+
+/**
+ * La segunda prueba, y la que de verdad importa para el chat general.
+ *
+ * Responder texto y saber PEDIR UNA CONSULTA son dos capacidades distintas: un
+ * modelo puede tener la primera y no la segunda. Cuando el chat de `/asistente`
+ * falla mientras el «¿Por qué?» funciona, la diferencia es exactamente esta
+ * llamada.
+ */
+async function probarHerramientas(key, modelo) {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify({
+      model: modelo,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Para cualquier dato de la empresa USA UNA HERRAMIENTA. Nunca " +
+            "respondas de memoria.",
+        },
+        { role: "user", content: "¿Cuánto me deben en total?" },
+      ],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "cuentas_por_cobrar",
+            description:
+              "Cuánto te deben tus clientes hoy: total, vencido y los mayores " +
+              "deudores. Úsala para «¿cuánto me deben?».",
+            parameters: {
+              type: "object",
+              properties: {
+                busca: { type: "string", description: "Filtra por cliente." },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      ],
+      tool_choice: "auto",
+      max_completion_tokens: 1500,
+    }),
+  });
+
+  const cuerpo = await res.text();
+
+  if (!res.ok) {
+    console.error("✗ El modelo NO admite consultas a tus datos (herramientas).");
+    console.error(`  HTTP ${res.status}: ${cuerpo.slice(0, 500)}`);
+    console.error("");
+    console.error("  Los asistentes del Paso 3 y del «¿Por qué?» siguen bien;");
+    console.error("  el que no funcionará es el chat general de /asistente.");
+    console.error("  Prueba con otro OPENAI_MODEL que soporte function calling.");
+    process.exitCode = 1;
+    return;
+  }
+
+  const data = JSON.parse(cuerpo);
+  const msg = data?.choices?.[0]?.message;
+  const fin = data?.choices?.[0]?.finish_reason;
+  const llamadas = msg?.tool_calls ?? [];
+
+  if (llamadas.length > 0) {
+    console.log("✓ El modelo pide consultas correctamente (chat general OK).");
+    console.log(`  Pidió: ${llamadas.map((c) => c.function.name).join(", ")}`);
+    console.log(
+      `  Tokens de salida: ${data?.usage?.completion_tokens ?? "?"} ` +
+        `(el tope de la app es 1500).`,
+    );
+    return;
+  }
+
+  console.error("✗ El modelo NO pidió ninguna consulta.");
+  console.error(`  finish_reason: ${fin} · tokens: ${data?.usage?.completion_tokens}`);
+  if (fin === "length") {
+    console.error("  Se quedó sin espacio razonando antes de emitir la consulta.");
+    console.error("  Sube MAX_TOKENS_HERRAMIENTAS en src/lib/ia/cliente.ts.");
+  } else {
+    console.error(`  Respondió de memoria: «${(msg?.content ?? "").slice(0, 200)}»`);
+    console.error("  Ese modelo ignora las herramientas; usa otro.");
+  }
+  process.exitCode = 1;
 }
 
 async function listarModelos(key) {

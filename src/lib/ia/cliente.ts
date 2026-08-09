@@ -34,6 +34,58 @@ const TIMEOUT_MS = 20_000;
 /** Tope de la respuesta. Se piden 3 frases; esto es la red, no el objetivo. */
 const MAX_TOKENS = 400;
 
+/**
+ * Tope para la conversación con herramientas.
+ *
+ * ⚠️ Mucho más alto que el otro, y no porque la respuesta sea más larga: el
+ * cupo lo comparten el razonamiento del modelo y las llamadas a herramientas
+ * que emite. Con 400 el modelo puede agotarlo eligiendo qué consultar y
+ * devolver un mensaje VACÍO — que desde fuera se ve como "no pudo responder",
+ * un mensaje que apunta al sitio equivocado.
+ */
+const MAX_TOKENS_HERRAMIENTAS = 1500;
+
+/**
+ * Espera por llamada en el camino con herramientas.
+ *
+ * Más largo que el otro porque aquí el modelo razona qué consultar antes de
+ * emitir nada, y porque una pregunta puede costar hasta tres llamadas. Sigue
+ * siendo un techo: si se agota, el usuario ve que tardó, no una pantalla
+ * colgada.
+ */
+const TIMEOUT_HERRAMIENTAS_MS = 45_000;
+
+/**
+ * Traduce un fallo de la API a algo que se pueda accionar.
+ *
+ * Tres cosas distintas se veían como "El asistente no pudo responder": la
+ * clave mala, el modelo inexistente y el modelo que no admite herramientas. Es
+ * el mismo error de diagnóstico que costó una tarde con el webhook de n8n, y la
+ * lección quedó escrita: **un mensaje que no distingue causas manda a buscar
+ * donde no es.**
+ */
+function explicarFallo(status: number, cuerpo: string): string {
+  let codigo = "";
+  let detalle = "";
+  try {
+    const j = JSON.parse(cuerpo);
+    codigo = j?.error?.code ?? j?.error?.type ?? "";
+    detalle = j?.error?.message ?? "";
+  } catch {
+    detalle = cuerpo.slice(0, 200);
+  }
+
+  if (status === 401) return "La clave del asistente no es válida.";
+  if (status === 429) return "Se agotó la cuota del asistente.";
+  if (status === 404 || codigo === "model_not_found") {
+    return `El modelo configurado no existe (${process.env.OPENAI_MODEL || "por defecto"}).`;
+  }
+  if (/tool|function/i.test(detalle)) {
+    return `El modelo no admite consultas a tus datos: ${detalle.slice(0, 160)}`;
+  }
+  return `El asistente no pudo responder (${status}${codigo ? ` ${codigo}` : ""}).`;
+}
+
 export type RespuestaIa =
   | { ok: true; texto: string }
   | { ok: false; error: string };
@@ -66,8 +118,9 @@ export async function preguntarAlModelo(
     if (!res.ok) {
       // El detalle va al log del servidor, no a la pantalla: puede traer datos
       // de la cuenta y al usuario no le sirve de nada.
-      console.error("[asistente] respuesta no ok", res.status, await res.text());
-      return { ok: false, error: "El asistente no pudo responder." };
+      const cuerpo = await res.text();
+      console.error("[asistente] respuesta no ok", res.status, cuerpo);
+      return { ok: false, error: explicarFallo(res.status, cuerpo) };
     }
 
     const data = (await res.json()) as {
@@ -165,14 +218,16 @@ export async function conversarConHerramientas(
 
   for (let ronda = 0; ronda < MAX_RONDAS; ronda++) {
     const control = new AbortController();
-    const reloj = setTimeout(() => control.abort(), TIMEOUT_MS);
+    const reloj = setTimeout(() => control.abort(), TIMEOUT_HERRAMIENTAS_MS);
     let data: {
       choices?: {
+        finish_reason?: string;
         message?: {
           content?: string | null;
           tool_calls?: MensajeApi["tool_calls"];
         };
       }[];
+      usage?: { completion_tokens?: number };
     };
 
     try {
@@ -190,13 +245,14 @@ export async function conversarConHerramientas(
           // queda sin turno. Sin esto, un modelo indeciso agota el tope y el
           // usuario se queda sin respuesta.
           tool_choice: ronda === MAX_RONDAS - 1 ? "none" : "auto",
-          max_completion_tokens: MAX_TOKENS,
+          max_completion_tokens: MAX_TOKENS_HERRAMIENTAS,
         }),
         signal: control.signal,
       });
       if (!res.ok) {
-        console.error("[asistente] respuesta no ok", res.status, await res.text());
-        return { ok: false, error: "El asistente no pudo responder." };
+        const cuerpo = await res.text();
+        console.error("[asistente] respuesta no ok", res.status, cuerpo);
+        return { ok: false, error: explicarFallo(res.status, cuerpo) };
       }
       data = await res.json();
     } catch (e) {
@@ -212,12 +268,31 @@ export async function conversarConHerramientas(
       clearTimeout(reloj);
     }
 
-    const msg = data.choices?.[0]?.message;
+    const eleccion = data.choices?.[0];
+    const msg = eleccion?.message;
     const llamadas = msg?.tool_calls ?? [];
 
     if (llamadas.length === 0) {
       const texto = msg?.content?.trim();
-      if (!texto) return { ok: false, error: "El asistente no pudo responder." };
+      if (!texto) {
+        // Sin texto y sin consultas: hay que decir POR QUÉ. Quedarse en "no
+        // pudo responder" es el mensaje que manda a buscar donde no es.
+        console.error(
+          "[asistente] respuesta vacía",
+          JSON.stringify({
+            finish_reason: eleccion?.finish_reason,
+            completion_tokens: data.usage?.completion_tokens,
+            ronda,
+          }),
+        );
+        return {
+          ok: false,
+          error:
+            eleccion?.finish_reason === "length"
+              ? "El asistente se quedó sin espacio antes de contestar. Prueba con una pregunta más concreta."
+              : "El asistente no devolvió respuesta.",
+        };
+      }
       return { ok: true, texto, contexto: resultados.join("\n\n"), consultas };
     }
 
@@ -241,5 +316,10 @@ export async function conversarConHerramientas(
     }
   }
 
-  return { ok: false, error: "El asistente no pudo responder." };
+  return {
+    ok: false,
+    error:
+      "El asistente consultó tus datos pero no llegó a redactar la respuesta. " +
+      "Vuelve a preguntar.",
+  };
 }
