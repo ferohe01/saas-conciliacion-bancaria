@@ -56,6 +56,33 @@ const MAX_TOKENS_HERRAMIENTAS = 1500;
 const TIMEOUT_HERRAMIENTAS_MS = 45_000;
 
 /**
+ * Esfuerzo de razonamiento en el camino con herramientas.
+ *
+ * ⚠️ **Obligatorio, no una optimización.** Los modelos de razonamiento (la
+ * familia gpt-5) rechazan las herramientas en `/v1/chat/completions` si el
+ * razonamiento está activo:
+ *
+ *     Function tools with reasoning_effort are not supported for gpt-5.6-luna
+ *     in /v1/chat/completions. To use function tools, use /v1/responses or
+ *     set reasoning_effort…
+ *
+ * Y desactivarlo aquí no cuesta nada: la tarea del modelo es elegir UNA
+ * consulta de una lista de cinco y luego repetir cifras que ya vienen
+ * calculadas. No hay nada que razonar — razonar es justo lo que no queremos que
+ * haga con los números.
+ *
+ * Configurable porque el valor admitido depende del modelo, y hay familias
+ * (gpt-4o) que no aceptan el parámetro en absoluto: si lo rechazan, se
+ * reintenta sin él (ver `conversarConHerramientas`).
+ */
+const RAZONAMIENTO = process.env.OPENAI_REASONING_EFFORT || "none";
+
+/** ¿El fallo se debe al parámetro de razonamiento y no a otra cosa? */
+function esFalloDeRazonamiento(cuerpo: string): boolean {
+  return /reasoning_effort/i.test(cuerpo);
+}
+
+/**
  * Traduce un fallo de la API a algo que se pueda accionar.
  *
  * Tres cosas distintas se veían como "El asistente no pudo responder": la
@@ -231,28 +258,52 @@ export async function conversarConHerramientas(
     };
 
     try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-        },
-        body: JSON.stringify({
-          model: modelo,
-          messages: historial,
-          tools,
-          // La última ronda no puede pedir más consultas: o responde, o se
-          // queda sin turno. Sin esto, un modelo indeciso agota el tope y el
-          // usuario se queda sin respuesta.
-          tool_choice: ronda === MAX_RONDAS - 1 ? "none" : "auto",
-          max_completion_tokens: MAX_TOKENS_HERRAMIENTAS,
-        }),
-        signal: control.signal,
-      });
+      const cuerpoBase = {
+        model: modelo,
+        messages: historial,
+        tools,
+        // La última ronda no puede pedir más consultas: o responde, o se
+        // queda sin turno. Sin esto, un modelo indeciso agota el tope y el
+        // usuario se queda sin respuesta.
+        tool_choice: ronda === MAX_RONDAS - 1 ? "none" : "auto",
+        max_completion_tokens: MAX_TOKENS_HERRAMIENTAS,
+      };
+
+      const pedir = (conRazonamiento: boolean) =>
+        fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${key}`,
+          },
+          body: JSON.stringify(
+            conRazonamiento
+              ? { ...cuerpoBase, reasoning_effort: RAZONAMIENTO }
+              : cuerpoBase,
+          ),
+          signal: control.signal,
+        });
+
+      let res = await pedir(true);
+
+      // ⚠️ Reintento sin el parámetro: hay familias de modelo que lo exigen
+      // (gpt-5 con herramientas) y otras que lo rechazan (gpt-4o). Sin esta
+      // vuelta, cambiar de modelo rompería el chat con un error que no dice
+      // que el problema es un parámetro sobrante.
       if (!res.ok) {
-        const cuerpo = await res.text();
-        console.error("[asistente] respuesta no ok", res.status, cuerpo);
-        return { ok: false, error: explicarFallo(res.status, cuerpo) };
+        const primero = await res.text();
+        if (esFalloDeRazonamiento(primero)) {
+          console.warn("[asistente] reintentando sin reasoning_effort");
+          res = await pedir(false);
+          if (!res.ok) {
+            const cuerpo = await res.text();
+            console.error("[asistente] respuesta no ok", res.status, cuerpo);
+            return { ok: false, error: explicarFallo(res.status, cuerpo) };
+          }
+        } else {
+          console.error("[asistente] respuesta no ok", res.status, primero);
+          return { ok: false, error: explicarFallo(res.status, primero) };
+        }
       }
       data = await res.json();
     } catch (e) {

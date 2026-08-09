@@ -140,84 +140,117 @@ async function main() {
  * falla mientras el «¿Por qué?» funciona, la diferencia es exactamente esta
  * llamada.
  */
-async function probarHerramientas(key, modelo) {
+const HERRAMIENTA_PRUEBA = {
+  type: "function",
+  function: {
+    name: "cuentas_por_cobrar",
+    description:
+      "Cuánto te deben tus clientes hoy: total, vencido y los mayores " +
+      "deudores. Úsala para «¿cuánto me deben?».",
+    parameters: {
+      type: "object",
+      properties: {
+        busca: { type: "string", description: "Filtra por cliente." },
+      },
+      additionalProperties: false,
+    },
+  },
+};
+
+/**
+ * Valores de `reasoning_effort` que se prueban, en orden.
+ *
+ * `null` = no mandar el parámetro. Los modelos de razonamiento con herramientas
+ * lo EXIGEN desactivado; los de la familia gpt-4o ni lo aceptan. Cuál sirve
+ * depende del modelo, así que en vez de adivinar se prueban y se informa.
+ */
+const ESFUERZOS = ["none", "minimal", "low", null];
+
+async function llamarConHerramientas(key, modelo, esfuerzo) {
+  const cuerpo = {
+    model: modelo,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Para cualquier dato de la empresa USA UNA HERRAMIENTA. Nunca " +
+          "respondas de memoria.",
+      },
+      { role: "user", content: "¿Cuánto me deben en total?" },
+    ],
+    tools: [HERRAMIENTA_PRUEBA],
+    tool_choice: "auto",
+    max_completion_tokens: 1500,
+  };
+  if (esfuerzo !== null) cuerpo.reasoning_effort = esfuerzo;
+
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${key}`,
     },
-    body: JSON.stringify({
-      model: modelo,
-      messages: [
-        {
-          role: "system",
-          content:
-            "Para cualquier dato de la empresa USA UNA HERRAMIENTA. Nunca " +
-            "respondas de memoria.",
-        },
-        { role: "user", content: "¿Cuánto me deben en total?" },
-      ],
-      tools: [
-        {
-          type: "function",
-          function: {
-            name: "cuentas_por_cobrar",
-            description:
-              "Cuánto te deben tus clientes hoy: total, vencido y los mayores " +
-              "deudores. Úsala para «¿cuánto me deben?».",
-            parameters: {
-              type: "object",
-              properties: {
-                busca: { type: "string", description: "Filtra por cliente." },
-              },
-              additionalProperties: false,
-            },
-          },
-        },
-      ],
-      tool_choice: "auto",
-      max_completion_tokens: 1500,
-    }),
+    body: JSON.stringify(cuerpo),
   });
+  return { res, texto: await res.text() };
+}
 
-  const cuerpo = await res.text();
+async function probarHerramientas(key, modelo) {
+  console.log("Probando consultas a datos (lo que usa el chat general)…");
+  const fallos = [];
 
-  if (!res.ok) {
-    console.error("✗ El modelo NO admite consultas a tus datos (herramientas).");
-    console.error(`  HTTP ${res.status}: ${cuerpo.slice(0, 500)}`);
-    console.error("");
-    console.error("  Los asistentes del Paso 3 y del «¿Por qué?» siguen bien;");
-    console.error("  el que no funcionará es el chat general de /asistente.");
-    console.error("  Prueba con otro OPENAI_MODEL que soporte function calling.");
-    process.exitCode = 1;
-    return;
-  }
+  for (const esfuerzo of ESFUERZOS) {
+    const etiqueta =
+      esfuerzo === null ? "sin reasoning_effort" : `reasoning_effort=${esfuerzo}`;
+    const { res, texto } = await llamarConHerramientas(key, modelo, esfuerzo);
 
-  const data = JSON.parse(cuerpo);
-  const msg = data?.choices?.[0]?.message;
-  const fin = data?.choices?.[0]?.finish_reason;
-  const llamadas = msg?.tool_calls ?? [];
+    if (!res.ok) {
+      let msg = texto.slice(0, 300);
+      try {
+        msg = JSON.parse(texto)?.error?.message ?? msg;
+      } catch {
+        /* no era JSON */
+      }
+      fallos.push(`  · ${etiqueta} → ${msg}`);
+      continue;
+    }
 
-  if (llamadas.length > 0) {
-    console.log("✓ El modelo pide consultas correctamente (chat general OK).");
-    console.log(`  Pidió: ${llamadas.map((c) => c.function.name).join(", ")}`);
-    console.log(
-      `  Tokens de salida: ${data?.usage?.completion_tokens ?? "?"} ` +
-        `(el tope de la app es 1500).`,
+    const data = JSON.parse(texto);
+    const eleccion = data?.choices?.[0];
+    const llamadas = eleccion?.message?.tool_calls ?? [];
+
+    if (llamadas.length > 0) {
+      console.log("");
+      console.log(`✓ Funciona con ${etiqueta}.`);
+      console.log(`  Pidió: ${llamadas.map((c) => c.function.name).join(", ")}`);
+      console.log(
+        `  Tokens de salida: ${data?.usage?.completion_tokens ?? "?"} (el tope de la app es 1500).`,
+      );
+      console.log("");
+      if (esfuerzo === "none") {
+        console.log("  Es el valor por defecto de la app: no hay que tocar nada.");
+      } else if (esfuerzo === null) {
+        console.log("  Este modelo NO acepta el parámetro; la app reintenta sin él,");
+        console.log("  así que tampoco hay que tocar nada.");
+      } else {
+        console.log(`  Pon OPENAI_REASONING_EFFORT=${esfuerzo} en el entorno.`);
+      }
+      return;
+    }
+
+    fallos.push(
+      `  · ${etiqueta} → no pidió ninguna consulta ` +
+        `(finish_reason: ${eleccion?.finish_reason}, tokens: ${data?.usage?.completion_tokens})`,
     );
-    return;
   }
 
-  console.error("✗ El modelo NO pidió ninguna consulta.");
-  console.error(`  finish_reason: ${fin} · tokens: ${data?.usage?.completion_tokens}`);
-  if (fin === "length") {
-    console.error("  Se quedó sin espacio razonando antes de emitir la consulta.");
-    console.error("  Sube MAX_TOKENS_HERRAMIENTAS en src/lib/ia/cliente.ts.");
-  } else {
-    console.error(`  Respondió de memoria: «${(msg?.content ?? "").slice(0, 200)}»`);
-    console.error("  Ese modelo ignora las herramientas; usa otro.");
-  }
+  console.error("");
+  console.error("✗ Este modelo no sirve para el chat general.");
+  for (const f of fallos) console.error(f);
+  console.error("");
+  console.error("  Los asistentes del Paso 3 y del «¿Por qué?» siguen bien: no");
+  console.error("  usan herramientas. El que no funcionará es /asistente.");
+  console.error("  Prueba otro OPENAI_MODEL con soporte de function calling.");
   process.exitCode = 1;
 }
 
