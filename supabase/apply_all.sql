@@ -4401,7 +4401,22 @@ drop function if exists public.resumen_comprobantes_periodo(date, date);
 -- muestra un bloque por moneda. Sumar soles con dólares da un número que no
 -- responde a ninguna pregunta, y filtrar por una sola escondería el resto sin
 -- que nadie se entere.
+--
+-- ⚠️⚠️ EL `drop` NO ES OPCIONAL. `create or replace function` **no puede cambiar
+-- el tipo de retorno**, y aquí la fila gana una columna (`moneda`):
+--
+--     ERROR 42P13: cannot change return type of existing function
+--     DETAIL: Row type defined by OUT parameters is different.
+--
+-- Las demás funciones de esta migración no lo necesitan: o conservan su forma
+-- de salida (`conciliar_exacta`, `residuo_internos`, `diagnostico_previo`) o
+-- cambian de FIRMA —ganan un parámetro— y entonces Postgres crea una función
+-- nueva y la vieja se retira aparte (`pares_exactos`,
+-- `resumen_comprobantes_periodo`). Esta es la única que cambia el retorno sin
+-- cambiar los argumentos.
 -- ---------------------------------------------------------------------------
+drop function if exists public.resumen_saldos(text, text, boolean, text, date);
+
 create or replace function public.resumen_saldos(
   p_tipo         text,
   p_tramo        text default 'todos',
