@@ -55,3 +55,37 @@ export async function guardarConfiguracion(
   revalidatePath("/configuracion");
   return { ok: true };
 }
+
+/**
+ * Cambia el modo de carga de comprobantes (plantilla / archivo propio).
+ *
+ * ⚠️ Escribe una columna que la 0040 concede explícitamente a `authenticated`.
+ * Si algún día la activación pasa a ser decisión comercial, se quita ese grant
+ * y esta acción empieza a fallar por permisos — que es el fallo correcto.
+ */
+export async function guardarModoCarga(
+  modo: unknown,
+): Promise<{ ok: boolean; error?: string }> {
+  const parsed = z.enum(["plantilla", "archivo_propio"]).safeParse(modo);
+  if (!parsed.success) {
+    return { ok: false, error: "Opción no válida." };
+  }
+
+  const empresa = await getEmpresaActual();
+  if (!empresa) return { ok: false, error: "Sesión no válida." };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("empresas")
+    .update({ modo_carga: parsed.data })
+    .eq("id", empresa.empresa_id);
+
+  if (error) {
+    console.error("[configuracion] no se pudo guardar el modo de carga:", error);
+    return { ok: false, error: "No se pudo guardar." };
+  }
+
+  revalidatePath("/configuracion");
+  revalidatePath("/wizard");
+  return { ok: true };
+}

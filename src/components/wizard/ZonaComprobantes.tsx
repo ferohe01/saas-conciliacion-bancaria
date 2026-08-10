@@ -10,7 +10,11 @@ import {
 import { formatearPEN } from "@/lib/parsing/resumen";
 import { descargarPlantilla } from "@/lib/plantilla";
 import { leerCabecera } from "@/lib/parsing/leerArchivo";
-import { esPlantilla, type Config } from "@/lib/parsing/mapeoComprobantes";
+import {
+  esPlantilla,
+  columnasFaltantes,
+  type Config,
+} from "@/lib/parsing/mapeoComprobantes";
 import { detectarColumnasComprobante } from "@/lib/parsing/deteccionComprobantes";
 import { MapeoComprobantesForm } from "@/components/comprobantes/MapeoComprobantesForm";
 import type { ResumenComprobantes } from "@/app/(app)/wizard/actions";
@@ -42,6 +46,7 @@ export function ZonaComprobantes({
   moneda,
   onCambio,
   mapeoConfigurado = false,
+  archivoPropio = false,
   onMapeando,
 }: {
   resumen: ResumenComprobantes | null;
@@ -50,6 +55,11 @@ export function ZonaComprobantes({
   onCambio: () => void;
   /** La empresa ya confirmó con qué columnas viene su archivo. */
   mapeoConfigurado?: boolean;
+  /**
+   * La empresa puede subir su propio formato (`modo_carga = archivo_propio`).
+   * Sin esto se exige la plantilla, que es lo correcto para una PyME.
+   */
+  archivoPropio?: boolean;
   /** Avisa al wizard para darle a la tarjeta el ancho entero mientras se mapea. */
   onMapeando?: (activo: boolean) => void;
 }) {
@@ -72,11 +82,14 @@ export function ZonaComprobantes({
     muestras: Record<string, unknown>[];
     config: Config;
   } | null>(null);
+  /** Columnas de la plantilla que le faltan al archivo elegido. */
+  const [sinPlantilla, setSinPlantilla] = useState<string[] | null>(null);
 
   const subir = (file: File | undefined, config?: Config) => {
     if (!file) return;
     setError(null);
     setAviso(null);
+    setSinPlantilla(null);
     setGrande(file.size > AVISO_GRANDE);
     startSubida(async () => {
       // ⚠️ Se comprueba ANTES de subir, no después de fallar.
@@ -89,7 +102,30 @@ export function ZonaComprobantes({
       //
       // Aquí el mapeo es un acto de configuración que se hace una vez, así que
       // se señala el camino en vez de abrirlo a medias en esta tarjeta.
-      if (!mapeoConfigurado && !config) {
+      // ── Modo plantilla: el archivo TIENE que traer sus columnas ───────────
+      //
+      // Es el caso normal de una PyME, y para ella la plantilla es mejor
+      // producto: garantiza los datos limpios y no la obliga a distinguir el
+      // "número de documento" de la "referencia de operación" —lo que más se
+      // confunde—. Un mapeo mal elegido no da la cara al mapear, sino cuando la
+      // conciliación no encuentra pareja.
+      //
+      // ⚠️ El rechazo dice QUÉ COLUMNAS faltan. "Este archivo no sirve" deja al
+      // usuario comparando dos ficheros a mano.
+      if (!archivoPropio) {
+        try {
+          const { headers } = await leerCabecera(file, 5);
+          const faltan = columnasFaltantes(headers);
+          if (headers.length > 0 && faltan.length > 0) {
+            setSinPlantilla(faltan);
+            return;
+          }
+        } catch {
+          // Si no se puede leer la cabecera, que decida el servidor.
+        }
+      }
+
+      if (archivoPropio && !mapeoConfigurado && !config) {
         try {
           const { headers, filas } = await leerCabecera(file);
           if (headers.length > 0 && !esPlantilla(headers)) {
@@ -184,6 +220,47 @@ export function ZonaComprobantes({
 
   const mensajes = (
     <>
+      {/* ⚠️ Un rechazo tiene que traer la salida al lado. Decir "usa la
+          plantilla" y dejar al usuario buscándola es convertir una regla
+          razonable en un muro. */}
+      {sinPlantilla && (
+        <div
+          role="alert"
+          className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+        >
+          <p className="font-medium">Este archivo no tiene el formato esperado</p>
+          <p className="mt-1">
+            Le {sinPlantilla.length === 1 ? "falta la columna" : "faltan las columnas"}{" "}
+            <strong>{sinPlantilla.join(", ")}</strong>. Descarga la plantilla,
+            copia ahí tus cobranzas y pagos, y súbela.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Boton
+              tamano="sm"
+              onClick={() => {
+                void descargarPlantilla();
+              }}
+            >
+              Descargar plantilla
+            </Boton>
+            <button
+              type="button"
+              onClick={() => setSinPlantilla(null)}
+              className="rounded text-sm font-medium text-amber-900 underline underline-offset-2"
+            >
+              Elegir otro archivo
+            </button>
+          </div>
+          {/* La salida para quien SÍ exporta desde un ERP. Discreta a
+              propósito: vive en Configuración y no en el flujo de carga, para
+              que nadie acabe ahí por probar. */}
+          <p className="mt-3 text-xs text-amber-800">
+            ¿Tu sistema exporta a Excel o CSV con sus propias columnas? Puedes
+            habilitarlo en Configuración → Cómo cargas tus comprobantes.
+          </p>
+        </div>
+      )}
+
       {aviso && (
         <p role="status" className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-900">
           {aviso}

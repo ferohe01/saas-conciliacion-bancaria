@@ -235,8 +235,23 @@ export const MAPEO_PLANTILLA: MapeoComprobantes = {
 
 /** ¿El archivo ya viene con las columnas de la plantilla? */
 export function esPlantilla(headers: string[]): boolean {
+  return columnasFaltantes(headers).length === 0;
+}
+
+/**
+ * Qué columnas de la plantilla le faltan al archivo.
+ *
+ * ⚠️ Se devuelven POR NOMBRE, no un sí/no. Cuando la plantilla es obligatoria,
+ * «este archivo no sirve» deja al usuario comparando dos ficheros columna por
+ * columna; «le faltan las columnas monto y tipo» se arregla en diez segundos.
+ *
+ * Solo se exigen las tres imprescindibles: un archivo al que le sobren o le
+ * falten columnas opcionales sigue siendo la plantilla, y rechazarlo por eso
+ * sería puro rigor sin motivo.
+ */
+export function columnasFaltantes(headers: string[]): string[] {
   const h = new Set(headers.map((x) => x.trim().toLowerCase()));
-  return OBLIGATORIOS.every((c) => h.has(MAPEO_PLANTILLA[c]!));
+  return OBLIGATORIOS.map((c) => MAPEO_PLANTILLA[c]!).filter((n) => !h.has(n));
 }
 
 /** ¿Se puede importar con esta configuración? */

@@ -16,6 +16,7 @@ import {
   ConfigMapeoGuardado,
   type Config,
 } from "@/lib/parsing/mapeoComprobantes";
+import { permiteArchivoPropio } from "@/lib/modoCarga";
 
 /**
  * Ingesta de comprobantes EN SERVIDOR, por lotes.
@@ -137,7 +138,17 @@ export async function POST(request: Request) {
       );
     }
   }
-  const config = resolverConfig(mapeoPeticion, empresa.mapeo_comprobantes);
+  // ⚠️ El modo se hace cumplir AQUÍ, no solo en la pantalla.
+  //
+  // En modo `plantilla` se ignora cualquier mapeo —venga en la petición o
+  // guardado de antes— y se lee con las columnas de la plantilla. Ocultar la
+  // opción en la interfaz orienta; esto es lo que impide que un POST directo
+  // cargue un archivo con columnas elegidas a mano. Misma lección que el
+  // período de prueba: un botón escondido no es un control.
+  const archivoPropio = permiteArchivoPropio(empresa.modo_carga);
+  const config = archivoPropio
+    ? resolverConfig(mapeoPeticion, empresa.mapeo_comprobantes)
+    : { mapeo: MAPEO_PLANTILLA, tipoFijo: null };
 
   const admin = createAdminClient();
   const lote = randomUUID();
@@ -287,9 +298,10 @@ export async function POST(request: Request) {
   let configFila: Config | null = null;
   const admitir = (cruda: Record<string, unknown>) => {
     if (configFila === null) {
-      configFila = esPlantilla(Object.keys(cruda))
-        ? { mapeo: MAPEO_PLANTILLA, tipoFijo: null }
-        : config;
+      configFila =
+        archivoPropio && !esPlantilla(Object.keys(cruda))
+          ? config
+          : { mapeo: MAPEO_PLANTILLA, tipoFijo: null };
     }
     filasProcesadas++;
     const p = preparar(cruda, empresa.empresa_id, lote, configFila);

@@ -12,6 +12,8 @@ export type EmpresaActual = {
   created_at: string | null;
   /** Qué columna del archivo del cliente es cada campo. Ver 0039. */
   mapeo_comprobantes: unknown;
+  /** `plantilla` | `archivo_propio`. Ver 0040 y lib/modoCarga.ts. */
+  modo_carga: string | null;
 };
 
 /**
@@ -40,7 +42,7 @@ export async function getEmpresaActual(): Promise<EmpresaActual | null> {
 
   const { data, error } = await supabase
     .from("usuarios_empresa")
-    .select("rol, empresa_id, empresas(nombre, ruc, plan, prueba_hasta, created_at, mapeo_comprobantes)")
+    .select("rol, empresa_id, empresas(nombre, ruc, plan, prueba_hasta, created_at, mapeo_comprobantes, modo_carga)")
     .eq("usuario_id", user.id)
     .limit(1)
     .maybeSingle();
@@ -63,5 +65,6 @@ export async function getEmpresaActual(): Promise<EmpresaActual | null> {
     prueba_hasta: empresa.prueba_hasta ?? null,
     created_at: empresa.created_at ?? null,
     mapeo_comprobantes: empresa.mapeo_comprobantes ?? null,
+    modo_carga: empresa.modo_carga ?? null,
   };
 }

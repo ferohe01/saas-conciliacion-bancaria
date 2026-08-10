@@ -181,6 +181,7 @@ export function WizardContainer({
   conexion = null,
   asistente = false,
   mapeoConfigurado = false,
+  archivoPropio = false,
 }: {
   cuentas: CuentaOpcion[];
   conexion?: ResumenConexion | null;
@@ -188,6 +189,8 @@ export function WizardContainer({
   asistente?: boolean;
   /** La empresa ya confirmó con qué columnas viene su archivo de comprobantes. */
   mapeoConfigurado?: boolean;
+  /** La empresa puede subir su propio formato en vez de la plantilla (0040). */
+  archivoPropio?: boolean;
 }) {
   const router = useRouter();
   const [paso, setPaso] = useState<PasoWizard>(1);
@@ -782,6 +785,7 @@ export function WizardContainer({
                   moneda={moneda}
                   onCambio={() => setRecargaComprobantes((n) => n + 1)}
                   mapeoConfigurado={mapeoConfigurado}
+                  archivoPropio={archivoPropio}
                   onMapeando={setMapeandoComprobantes}
                 />
               ) : (

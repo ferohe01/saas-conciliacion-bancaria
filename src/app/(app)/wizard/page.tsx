@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getEmpresaActual } from "@/lib/auth";
 import { estadoSuscripcion } from "@/lib/suscripcion";
 import { asistenteDisponible } from "@/lib/ia/cliente";
+import { permiteArchivoPropio } from "@/lib/modoCarga";
 import { getConexionErp } from "@/lib/conexiones-servidor";
 import { nombreSistema, estadoConexion } from "@/lib/conexiones";
 import { PruebaVencida } from "@/components/app/AvisoPrueba";
@@ -96,6 +97,7 @@ export default async function WizardPage() {
           conexion={resumenConexion}
           asistente={asistenteDisponible()}
           mapeoConfigurado={empresa?.mapeo_comprobantes != null}
+          archivoPropio={permiteArchivoPropio(empresa?.modo_carga)}
         />
       </div>
     </div>
