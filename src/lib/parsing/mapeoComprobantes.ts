@@ -40,6 +40,7 @@ export type CampoComprobante =
   | "referencia_externa"
   | "ruc_contraparte"
   | "razon_social"
+  | "moneda"
   | "descripcion";
 
 export type MapeoComprobantes = Partial<Record<CampoComprobante, string>>;
@@ -53,6 +54,7 @@ export const CAMPOS_COMPROBANTE: CampoComprobante[] = [
   "razon_social",
   "ruc_contraparte",
   "fecha_vencimiento",
+  "moneda",
   "descripcion",
 ];
 
@@ -68,6 +70,7 @@ export const ETIQUETA_COMPROBANTE: Record<CampoComprobante, string> = {
   referencia_externa: "Referencia / Nº de operación",
   ruc_contraparte: "RUC del cliente o proveedor",
   razon_social: "Nombre del cliente o proveedor",
+  moneda: "Moneda",
   descripcion: "Descripción",
 };
 
@@ -86,6 +89,8 @@ export const AYUDA_COMPROBANTE: Partial<Record<CampoComprobante, string>> = {
     "El código con el que ese cobro aparece en el banco (nº de operación, de depósito). SE REPITE cuando el cliente paga varias facturas juntas, y es con el que se empareja.",
   tipo:
     "Si la columna no existe, puedes declarar que todo el archivo es de un solo tipo.",
+  moneda:
+    "Solo se concilian comprobantes de la MISMA moneda que la cuenta bancaria. Si tu archivo no la trae, decláralo abajo.",
 };
 
 /** Un archivo entero de un solo tipo, cuando no hay columna que lo diga. */
@@ -95,6 +100,11 @@ export type Config = {
   mapeo: MapeoComprobantes;
   /** Se aplica a todas las filas. Manda sobre la columna `tipo` si ambas hay. */
   tipoFijo?: TipoFijo | null;
+  /**
+   * Moneda para todo el archivo, cuando no hay columna que la diga.
+   * Manda sobre la columna, igual que `tipoFijo`.
+   */
+  monedaFija?: string | null;
 };
 
 /**
@@ -118,6 +128,42 @@ function limpiar(v: unknown): string {
     .replace(/[̀-ͯ]/g, "")
     .trim()
     .toLowerCase();
+}
+
+/**
+ * Moneda cuando no se sabe otra cosa. Perú, soles.
+ *
+ * ⚠️ Que exista un valor por defecto NO significa que dé igual: un comprobante
+ * en dólares cargado como soles se empareja contra depósitos que no le
+ * corresponden. El defecto está para que el caso normal —una PyME peruana que
+ * factura en soles— no tenga que declarar nada.
+ */
+export const MONEDA_DEFECTO = "PEN";
+
+/**
+ * Cómo escribe la gente la moneda en un export real.
+ *
+ * El símbolo "$" es ambiguo a propósito y se deja fuera: en Perú se usa tanto
+ * para dólares como, mal, para soles. Adivinarlo sería elegir por el usuario
+ * justo donde el error no se ve.
+ */
+const MONEDAS: Record<string, string> = {
+  pen: "PEN", "s/": "PEN", "s/.": "PEN", soles: "PEN", sol: "PEN",
+  "nuevo sol": "PEN", "nuevos soles": "PEN", pe: "PEN",
+  usd: "USD", "us$": "USD", dolares: "USD", dolar: "USD",
+  "dolares americanos": "USD", us: "USD",
+  eur: "EUR", euros: "EUR", euro: "EUR",
+};
+
+/** Traduce el valor de la columna de moneda. `null` si no se reconoce. */
+export function normalizarMoneda(v: unknown): string | null {
+  const s = limpiar(v);
+  if (s === "") return null;
+  const conocida = MONEDAS[s];
+  if (conocida) return conocida;
+  // Un código ISO que no esté en la lista vale igual: la base acepta cualquier
+  // trío de letras, y rechazar "CLP" por no haberlo previsto sería absurdo.
+  return /^[a-z]{3}$/.test(s) ? s.toUpperCase() : null;
 }
 
 /** Traduce el valor de la columna de tipo. `null` si no se reconoce. */
@@ -144,6 +190,7 @@ export type FilaComprobante = {
   referencia_externa: string | null;
   ruc_contraparte: string | null;
   razon_social: string | null;
+  moneda: string;
   descripcion: string | null;
 };
 
@@ -181,6 +228,7 @@ export function aplicarMapeo(
     referencia_externa: texto(col("referencia_externa")),
     ruc_contraparte: texto(col("ruc_contraparte")),
     razon_social: texto(col("razon_social")),
+    moneda: config.monedaFija ?? normalizarMoneda(col("moneda")) ?? MONEDA_DEFECTO,
     descripcion: texto(col("descripcion")),
   };
 }
@@ -230,6 +278,7 @@ export const MAPEO_PLANTILLA: MapeoComprobantes = {
   referencia_externa: "referencia_externa",
   ruc_contraparte: "ruc_contraparte",
   razon_social: "razon_social",
+  moneda: "moneda",
   descripcion: "descripcion",
 };
 
@@ -295,4 +344,9 @@ export const ConfigMapeoGuardado = z.object({
     )
     .strict(),
   tipoFijo: z.enum(["cobranza", "pago"]).nullable().optional(),
+  monedaFija: z
+    .string()
+    .regex(/^[A-Z]{3}$/, "La moneda es un código de tres letras (PEN, USD…).")
+    .nullable()
+    .optional(),
 });

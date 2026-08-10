@@ -1,7 +1,7 @@
 import "server-only";
 import { traerTodo } from "@/lib/supabase/paginado";
 import type { ComprobanteCobrar, ResumenAging, TipoSaldo } from "@/lib/aging";
-import { agingDesdeResumen, type FilaResumenSaldo } from "@/lib/agingResumen";
+import { agingPorMoneda, type FilaResumenSaldo } from "@/lib/agingResumen";
 import type { FiltroSaldo } from "@/lib/filtrosSaldo";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -50,7 +50,7 @@ export async function traerResumenSaldos(
   tipo: TipoSaldo,
   filtro: FiltroSaldo,
   hoy: Date = new Date(),
-): Promise<ResumenAging> {
+): Promise<{ moneda: string; aging: ResumenAging }[]> {
   const { data, error } = await supabase.rpc("resumen_saldos", {
     p_tipo: tipo,
     p_tramo: filtro.tramo,
@@ -65,7 +65,8 @@ export async function traerResumenSaldos(
       `No se pudo calcular la antigüedad de deuda: ${error.message}`,
     );
   }
-  return agingDesdeResumen((data ?? []) as FilaResumenSaldo[]);
+  // ⚠️ Un bloque por moneda, sin sumar entre ellas: ver `agingPorMoneda`.
+  return agingPorMoneda((data ?? []) as FilaResumenSaldo[]);
 }
 
 export async function traerComprobantesConSaldo(

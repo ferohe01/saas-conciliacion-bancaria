@@ -312,14 +312,18 @@ export function WizardContainer({
       // vuelven nulas y la pantalla decía **"No hay comprobantes en este
       // período"** sobre medio millón que sí estaban. Una respuesta
       // tranquilizadora y falsa, que es la peor clase.
-      const r = await resumenComprobantesPeriodo(periodo.desde, periodo.hasta);
+      const r = await resumenComprobantesPeriodo(periodo.desde, periodo.hasta, moneda);
       if (cancelado) return;
       setComprobantesResumen(r);
     })();
     return () => {
       cancelado = true;
     };
-  }, [periodo, recargaComprobantes]);
+    // ⚠️ `moneda` está en las dependencias: solo entran a conciliar los
+    // comprobantes de la moneda de la CUENTA elegida, así que cambiar de cuenta
+    // cambia el recuento. Sin esto, la tarjeta seguiría enseñando el número de
+    // la cuenta anterior.
+  }, [periodo, recargaComprobantes, moneda]);
 
   /**
    * Un archivo ilegible (corrupto, protegido con contraseña, .xls antiguo) hace

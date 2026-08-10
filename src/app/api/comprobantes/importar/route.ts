@@ -57,6 +57,7 @@ type Preparada = {
   referencia_externa: string | null;
   ruc_contraparte: string | null;
   razon_social_contraparte: string | null;
+  moneda: string;
   descripcion: string | null;
   origen: "plantilla";
   lote_importacion: string;
@@ -88,6 +89,7 @@ function preparar(
     referencia_externa: fila.referencia_externa,
     ruc_contraparte: fila.ruc_contraparte,
     razon_social_contraparte: fila.razon_social,
+    moneda: fila.moneda,
     descripcion: fila.descripcion,
     origen: "plantilla",
     lote_importacion: lote,

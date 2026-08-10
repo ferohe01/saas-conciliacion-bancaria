@@ -154,6 +154,8 @@ describe("aplicarMapeo", () => {
       referencia_externa: "00000001300486",
       ruc_contraparte: "20512345678",
       razon_social: "Comercial Ñuñez SAC",
+      // Sin columna de moneda ni declaración: soles, el caso normal peruano.
+      moneda: "PEN",
       descripcion: "Servicio de junio",
     });
   });

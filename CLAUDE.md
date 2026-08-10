@@ -521,44 +521,47 @@ borra un comprobante **con cobros aplicados**: eso se iría en cascada y dejarí
 un agujero en una conciliación aprobada, que seguiría diciendo que esa factura
 se cobró. Lo conciliado no se limpia, se **anula** (ver `0016`).
 
-## Dos clientes, dos formas de cargar (y el modo se declara, no se adivina)
+## La moneda del comprobante (y por qué NO se convierte)
 
-La PyME de 500 facturas al mes las lleva en su propio Excel. Para ella **la
-plantilla es mejor producto**: garantiza datos limpios y no la obliga a
-distinguir el «número de documento» de la «referencia de operación» —lo que más
-se confunde—. Si mapea mal una columna no lo descubre al mapear: lo descubre
-cuando la conciliación da 0 %, y entonces culpa al sistema.
+Un comprobante no decía en qué moneda estaba: se asumía la de la cuenta contra
+la que se conciliara. Con un solo cliente en soles no se nota; con el primero
+que factura en dólares produce **dos errores que no protestan**:
 
-La recaudadora de 450.000 movimientos no puede transponer nada a ninguna
-plantilla. Exigírsela es cerrarle la puerta.
+1. **Un emparejamiento falso.** Una factura de 200 USD y un depósito de
+   S/ 200,00 tienen el mismo número, y la capa exacta casa por monto +
+   referencia sin mirar nada más. El par sale `auto`, se da por conciliado y
+   descuenta el saldo.
+2. **Un total sin sentido.** «Te deben 19.221» sumando soles con dólares no
+   responde a ninguna pregunta, y nadie puede saber mirándolo que está mal.
 
- () separa los dos casos: ** por defecto**,
- para quien exporta desde un ERP.
+`comprobantes.moneda` (`0041`), con `PEN` por defecto.
 
-- ⚠️⚠️ **El discriminador es la EMPRESA, no el archivo.** La tentación era abrir
-  el mapeo «para archivos grandes» y no funciona: la primera prueba del flujo de
-  la recaudadora se hizo con **200 filas**, que un umbral habría bloqueado; y una
-  PyME que pasa de 4.900 a 5.100 filas cambiaría de flujo de un mes a otro sin
-  entender por qué. Un umbral convierte una decisión de producto en una lotería.
-- ⚠️ **Se hace cumplir en el SERVIDOR.** En modo , la ruta de
-  importación ignora cualquier mapeo —de la petición o guardado— y lee con las
-  columnas de la plantilla. Ocultar la opción orienta; esto es lo que impide que
-  un POST directo cargue columnas elegidas a mano.
-- ⚠️ **El rechazo nombra las columnas que faltan** («le faltan monto y tipo») y
-  trae el botón de descargar la plantilla al lado. «Este archivo no sirve» deja
-  al usuario comparando dos ficheros a mano, y convierte una regla razonable en
-  un muro.
-- **La opción vive en Configuración, no en el flujo de carga.** Si apareciera al
-  fallar una subida, cualquiera la activaría para salir del paso — y acabaría
-  eligiendo columnas a mano, que es justo lo que el modo evita. Activarla pide
-  confirmación; volver a la plantilla no, porque volver a lo seguro nunca
-  necesita advertencia.
--  degrada a  ante cualquier valor desconocido, nunca al
-  revés (mismo criterio que  en ).
-- ⚠️ La  lleva su , como toda columna nueva de 
-  desde la . Se concede al usuario a propósito: quien de verdad exporta
-  desde un ERP no debería esperar a que le activen nada. **Si algún día conviene
-  que sea decisión comercial, basta con quitar ese grant.**
+- ⚠️⚠️ **NO hay conversión, y es deliberado.** El tipo de cambio es otra
+  funcionalidad —fuente de la tasa, fecha aplicable, tratamiento contable de la
+  diferencia— y hacerla a medias sería peor que no hacerla. Lo que la migración
+  garantiza es que **las monedas no se mezclen**.
+- **La guarda vive en SQL, no en la pantalla**: `pares_exactos` filtra por la
+  moneda de la cuenta y `residuo_internos` también, así que n8n tampoco las
+  cruza por monto y fecha una capa más abajo. La firma vieja de `pares_exactos`
+  se **elimina** en la misma migración para que nadie la llame sin moneda.
+- ⚠️ **El relleno de lo ya cargado usa las cuentas de la empresa**: si todas
+  están en la misma moneda, sus comprobantes toman esa; si hay varias, se queda
+  el defecto. Inventar una asignación fila a fila sería peor que dejar un dato
+  corregible.
+- **El Paso 1 dice qué deja fuera** («12 están en otra moneda y no entran: esta
+  cuenta es en PEN»), igual que ya hacía con los cobrados. Y el recuento se
+  recalcula al cambiar de cuenta.
+- **Por cobrar y Por pagar pintan un bloque por moneda** (`agingPorMoneda`), sin
+  sumar entre ellas y sin filtrar a una sola —eso escondería el resto—. Con una
+  moneda se ve exactamente igual que antes.
+- **La moneda se puede declarar para todo el archivo**, como el tipo: un export
+  rara vez trae la columna porque todo él está en una.
+- ⚠️ El símbolo **`$` no se interpreta**: en Perú se usa tanto para dólares como,
+  mal, para soles. Adivinarlo sería elegir por el usuario justo donde el error
+  no se ve.
+- ⚠️ **Pendiente**: `resumen_ejecutivo` (`0032`) sigue sumando todas las monedas.
+  El asistente lo advierte al responder, pero la pantalla `/resumen` todavía no
+  las separa.
 
 ## Dos clientes, dos formas de cargar (y el modo se declara, no se adivina)
 

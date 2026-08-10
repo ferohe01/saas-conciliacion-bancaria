@@ -17,6 +17,7 @@ export const COLUMNAS_PLANTILLA = [
   "referencia_externa",
   "ruc_contraparte",
   "razon_social",
+  "moneda",
   "descripcion",
 ] as const;
 
@@ -29,6 +30,10 @@ const FILA_EJEMPLO: Record<(typeof COLUMNAS_PLANTILLA)[number], string> = {
   referencia_externa: "",
   ruc_contraparte: "20123456789",
   razon_social: "Ferretería Lima Norte EIRL",
+  // Vacío = soles. Se deja así en el ejemplo para que el caso normal no tenga
+  // que rellenar nada, pero la columna existe: un comprobante en dólares
+  // cargado como soles se emparejaría contra depósitos que no le tocan.
+  moneda: "PEN",
   descripcion: "Pago factura F001-234",
 };
 

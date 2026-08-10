@@ -139,6 +139,44 @@ export function MapeoComprobantesForm({
         </div>
       </div>
 
+      {/* ⚠️ La moneda tiene el mismo problema que el tipo: un export rara vez
+          la trae, porque todo el archivo está en una. Y equivocarla no da un
+          error: da un comprobante que se empareja contra depósitos que no le
+          tocan, o que no aparece nunca. */}
+      <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+        <p className="text-sm font-medium text-neutral-800">
+          ¿Tu archivo no tiene columna de moneda?
+        </p>
+        <p className="mt-1 text-sm text-neutral-600">
+          Solo se concilian comprobantes de la misma moneda que la cuenta
+          bancaria. No se convierte nada.
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {[
+            { v: null, label: "Usar la columna" },
+            { v: "PEN", label: "Todo en soles" },
+            { v: "USD", label: "Todo en dólares" },
+          ].map((o) => {
+            const activo = (config.monedaFija ?? null) === o.v;
+            return (
+              <button
+                key={String(o.v)}
+                type="button"
+                onClick={() => onCambio({ ...config, monedaFija: o.v })}
+                aria-pressed={activo}
+                className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
+                  activo
+                    ? "border-neutral-800 bg-neutral-900 text-white"
+                    : "border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50"
+                }`}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {ejemplos.length > 0 && (
         <div>
           <p className="mb-2 text-sm font-medium text-neutral-700">
@@ -150,6 +188,7 @@ export function MapeoComprobantesForm({
                 <tr>
                   <th className="px-3 py-2">Fecha</th>
                   <th className="px-3 py-2">Importe</th>
+                  <th className="px-3 py-2">Moneda</th>
                   <th className="px-3 py-2">Tipo</th>
                   <th className="px-3 py-2">Documento</th>
                   <th className="px-3 py-2">Referencia</th>
@@ -166,7 +205,7 @@ export function MapeoComprobantesForm({
                     return (
                       <tr key={i} className="border-t border-neutral-100">
                         <td
-                          colSpan={6}
+                          colSpan={7}
                           className="px-3 py-2 text-sm text-amber-700"
                         >
                           Esta fila se omitiría: falta {falta.join(" y ")}.
@@ -180,8 +219,9 @@ export function MapeoComprobantesForm({
                         {formatearFecha(f.fecha)}
                       </td>
                       <td className="px-3 py-2 tabular-nums">
-                        {formatearPEN(f.monto, moneda)}
+                        {formatearPEN(f.monto, f.moneda)}
                       </td>
+                      <td className="px-3 py-2">{f.moneda}</td>
                       <td className="px-3 py-2">{f.tipo}</td>
                       <td className="px-3 py-2">{f.serie_numero ?? "—"}</td>
                       <td className="px-3 py-2">{f.referencia_externa ?? "—"}</td>

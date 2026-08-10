@@ -310,6 +310,17 @@ export function ZonaComprobantes({
                   y no entran: se conciliaron antes.
                 </p>
               )}
+
+              {/* ⚠️ Los de otra moneda tampoco entran, y hay que decirlo: un
+                  comprobante en dólares no se concilia contra una cuenta en
+                  soles porque no hay conversión. Callarlo haría que el usuario
+                  viera menos de los que cargó y pensara que se perdieron. */}
+              {resumen.otrasMonedas > 0 && (
+                <p className="mt-1 text-xs text-emerald-700">
+                  {resumen.otrasMonedas.toLocaleString("es-PE")} están en otra
+                  moneda y no entran: esta cuenta es en {moneda}.
+                </p>
+              )}
             </div>
           </div>
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white">

@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { traerResumenSaldos } from "@/lib/comprobantesSaldo";
 import { accesoModulo } from "@/lib/modulos-servidor";
 import { ModuloBloqueado } from "@/components/app/ModuloBloqueado";
-import { VistaAging } from "@/components/app/VistaAging";
+import { VistaAgingMonedas } from "@/components/app/VistaAging";
 import { FiltrosSaldo } from "@/components/comprobantes/FiltrosSaldo";
 import {
   FILTRO_SALDO_VACIO,
@@ -56,7 +56,10 @@ export default async function CobranzasPage({
     ? await traerResumenSaldos(supabase, "cobranza", FILTRO_SALDO_VACIO, hoy)
     : aging;
 
-  if (agingTotal.documentos === 0) {
+  const docsTotal = agingTotal.reduce((n, b) => n + b.aging.documentos, 0);
+  const docsFiltrados = aging.reduce((n, b) => n + b.aging.documentos, 0);
+
+  if (docsTotal === 0) {
     return (
       <div className="space-y-6">
         <EncabezadoPagina
@@ -85,14 +88,17 @@ export default async function CobranzasPage({
       />
       <FiltrosSaldo valores={filtro} etiquetaBusqueda="Cliente, RUC o serie" />
 
-      {aging.documentos === 0 ? (
+      {docsFiltrados === 0 ? (
         <p className="rounded-2xl border border-neutral-200 bg-white px-5 py-4 text-sm text-neutral-600">
-          Ninguno de los {agingTotal.documentos.toLocaleString("es-PE")}{" "}
+          Ninguno de los {docsTotal.toLocaleString("es-PE")}{" "}
           documentos por cobrar coincide con este filtro. Prueba a quitar alguno.
         </p>
       ) : (
-      <VistaAging
-        aging={aging}
+      /* ⚠️ Un bloque POR MONEDA, sin sumar entre ellas. Con una sola —el caso
+         normal— se ve igual que siempre; con dos, cada cifra dice a qué moneda
+         pertenece en vez de mezclarlas en un total sin sentido. */
+      <VistaAgingMonedas
+        bloques={aging}
         textos={{
           total: "Total por cobrar",
           notaVencido: "conviene reclamar",

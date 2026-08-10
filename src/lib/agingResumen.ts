@@ -22,6 +22,8 @@ export type FilaResumenSaldo = {
   contraparte: string;
   ruc: string | null;
   tramo: string;
+  /** Desde la 0041. Ausente en datos viejos: se asume PEN. */
+  moneda?: string | null;
   total: number | string;
   documentos: number | string;
 };
@@ -95,4 +97,34 @@ export function agingDesdeResumen(filas: FilaResumenSaldo[]): ResumenAging {
     contrapartes,
     documentos: total.docs,
   };
+}
+
+/**
+ * Lo mismo, pero SEPARADO POR MONEDA.
+ *
+ * ⚠️ Sumar soles con dólares da un número que no responde a ninguna pregunta, y
+ * nadie puede saber mirándolo que está mal. Antes de que los comprobantes
+ * tuvieran moneda (0041) eso no podía pasar; ahora sí, y la única salida
+ * honesta es no sumarlos.
+ *
+ * ⚠️ Tampoco se filtra a una sola moneda: eso escondería el resto sin que el
+ * usuario se entere. La pantalla pinta un bloque por cada una — con una sola,
+ * que es el caso normal, se ve exactamente igual que siempre.
+ *
+ * El orden pone primero la moneda con más saldo: es por la que se empieza.
+ */
+export function agingPorMoneda(
+  filas: FilaResumenSaldo[],
+): { moneda: string; aging: ResumenAging }[] {
+  const porMoneda = new Map<string, FilaResumenSaldo[]>();
+  for (const f of filas) {
+    const m = (f.moneda ?? "PEN").toUpperCase();
+    const lista = porMoneda.get(m);
+    if (lista) lista.push(f);
+    else porMoneda.set(m, [f]);
+  }
+
+  return [...porMoneda.entries()]
+    .map(([moneda, suyas]) => ({ moneda, aging: agingDesdeResumen(suyas) }))
+    .sort((a, b) => b.aging.total - a.aging.total);
 }

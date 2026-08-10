@@ -388,6 +388,12 @@ export type ResumenComprobantes = {
   totalCargados: number;
   /** Del período, pero ya saldados: no entran a conciliar. */
   yaCobrados: number;
+  /**
+   * Del período, pero en OTRA moneda que la cuenta elegida. No entran a
+   * conciliar y hay que decirlo: callarlos haría que el usuario viera menos
+   * comprobantes de los que cargó y pensara que se perdieron.
+   */
+  otrasMonedas: number;
 };
 
 /**
@@ -402,6 +408,7 @@ export type ResumenComprobantes = {
 export async function resumenComprobantesPeriodo(
   desde: string,
   hasta: string,
+  moneda?: string,
 ): Promise<ResumenComprobantes> {
   const vacio: ResumenComprobantes = {
     registros: 0,
@@ -409,11 +416,13 @@ export async function resumenComprobantesPeriodo(
     sumaParcial: false,
     totalCargados: 0,
     yaCobrados: 0,
+    otrasMonedas: 0,
   };
   const supabase = await createClient(); // la función acota por auth.uid()
   const { data, error } = await supabase.rpc("resumen_comprobantes_periodo", {
     p_desde: desde,
     p_hasta: hasta,
+    p_moneda: moneda ?? null,
   });
   if (error) {
     // Devolver ceros diría "no hay comprobantes", que es una afirmación falsa
@@ -431,10 +440,12 @@ export async function resumenComprobantesPeriodo(
     sumaParcial: false,
     totalCargados: Number(f.total_cargados ?? 0),
     yaCobrados: Number(f.ya_cobrados ?? 0),
+    otrasMonedas: Number(f.otras_monedas ?? 0),
   };
 }
 
 type ResumenFila = {
+  otras_monedas?: number | string | null;
   registros: number | string;
   suma: number | string;
   total_cargados: number | string;

@@ -4,6 +4,7 @@ import { detectarCon } from "./deteccion";
 import {
   CAMPOS_COMPROBANTE,
   normalizarTipo,
+  normalizarMoneda,
   type CampoComprobante,
   type MapeoComprobantes,
 } from "./mapeoComprobantes";
@@ -64,6 +65,7 @@ const KEYWORDS: Record<CampoComprobante, string[]> = {
     "razon social", "razon", "cliente", "proveedor", "nombre", "contraparte",
     "beneficiario", "denominacion",
   ],
+  moneda: ["moneda", "currency", "divisa", "mon", "tipo moneda"],
   descripcion: [
     "descripcion", "detalle", "concepto", "glosa", "observacion",
     "observaciones", "nota",
@@ -100,6 +102,8 @@ function puntajeContenido(campo: CampoComprobante, valores: unknown[]): number {
       );
     case "tipo":
       return fraccion(noVacios, (v) => normalizarTipo(v) != null) * 2.5;
+    case "moneda":
+      return fraccion(noVacios, (v) => normalizarMoneda(v) != null) * 2.5;
     case "ruc_contraparte":
       // RUC peruano: 11 dígitos empezando por 10, 15, 17 o 20.
       return (

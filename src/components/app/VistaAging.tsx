@@ -1,4 +1,4 @@
-import { montoPEN } from "@/lib/suscripcion";
+import { formatearPEN } from "@/lib/parsing/resumen";
 import { TRAMOS, type ResumenAging } from "@/lib/aging";
 import { Tarjeta } from "@/components/ui";
 
@@ -28,11 +28,19 @@ export type TextosAging = {
 export function VistaAging({
   aging,
   textos,
+  moneda = "PEN",
 }: {
   aging: ResumenAging;
   textos: TextosAging;
+  /**
+   * En qué moneda están estas cifras. Antes se formateaba SIEMPRE con «S/»
+   * porque no había otra posible; con comprobantes en dólares eso convertía un
+   * total correcto en una etiqueta falsa.
+   */
+  moneda?: string;
 }) {
   const alDia = aging.total - aging.vencido;
+  const fmt = (n: number) => formatearPEN(n, moneda);
 
   return (
     <>
@@ -45,7 +53,7 @@ export function VistaAging({
             {textos.total}
           </p>
           <p className="mt-2 text-3xl leading-none font-bold tabular-nums text-neutral-900">
-            {montoPEN(aging.total)}
+            {fmt(aging.total)}
           </p>
           <p className="mt-2 text-sm text-neutral-600">
             <span className="tabular-nums">{aging.documentos}</span>{" "}
@@ -61,7 +69,7 @@ export function VistaAging({
               aging.vencido > 0 ? "text-amber-700" : "text-neutral-900"
             }`}
           >
-            {montoPEN(aging.vencido)}
+            {fmt(aging.vencido)}
           </p>
           <p className="mt-2 text-sm text-neutral-600">{textos.notaVencido}</p>
         </div>
@@ -70,7 +78,7 @@ export function VistaAging({
             Aún no vence
           </p>
           <p className="mt-2 text-3xl leading-none font-bold tabular-nums text-neutral-900">
-            {montoPEN(alDia)}
+            {fmt(alDia)}
           </p>
           <p className="mt-2 text-sm text-neutral-600">dentro de plazo</p>
         </div>
@@ -100,7 +108,7 @@ export function VistaAging({
                   />
                 </span>
                 <span className="w-28 shrink-0 text-right tabular-nums text-neutral-900">
-                  {montoPEN(v)}
+                  {fmt(v)}
                 </span>
               </li>
             );
@@ -155,10 +163,10 @@ export function VistaAging({
                       c.vencido > 0 ? "font-medium text-amber-800" : "text-neutral-500"
                     }`}
                   >
-                    {montoPEN(c.vencido)}
+                    {fmt(c.vencido)}
                   </td>
                   <td className="px-5 py-3 text-right tabular-nums text-neutral-900">
-                    {montoPEN(c.total)}
+                    {fmt(c.total)}
                   </td>
                 </tr>
               ))}
@@ -171,5 +179,49 @@ export function VistaAging({
         <p className="text-sm text-neutral-700">{textos.pie}</p>
       </Tarjeta>
     </>
+  );
+}
+
+/**
+ * La misma vista, una vez por moneda.
+ *
+ * ⚠️ **No se suman las monedas.** «Te deben 19.221» mezclando soles y dólares no
+ * responde a ninguna pregunta, y nadie puede saber mirándolo que está mal. Antes
+ * de que los comprobantes tuvieran moneda (0041) el problema no existía; ahora
+ * la única salida honesta es separarlos.
+ *
+ * ⚠️ Y tampoco se filtra a una sola: eso escondería el resto sin avisar. Con una
+ * moneda —el caso normal— esto se ve **exactamente igual que antes**, sin
+ * cabecera ni adorno de más; el encabezado solo aparece cuando de verdad hay
+ * más de una y hace falta decir a cuál pertenece cada cifra.
+ */
+export function VistaAgingMonedas({
+  bloques,
+  textos,
+}: {
+  bloques: { moneda: string; aging: ResumenAging }[];
+  textos: TextosAging;
+}) {
+  const varias = bloques.length > 1;
+
+  return (
+    <div className="space-y-8">
+      {bloques.map(({ moneda, aging }) => (
+        <section key={moneda} className="space-y-6">
+          {varias && (
+            <div className="flex flex-wrap items-baseline gap-2">
+              <h2 className="text-lg font-semibold text-neutral-900">
+                En {moneda}
+              </h2>
+              <span className="text-sm text-neutral-600">
+                {aging.documentos.toLocaleString("es-PE")}{" "}
+                {aging.documentos === 1 ? "documento" : "documentos"}
+              </span>
+            </div>
+          )}
+          <VistaAging aging={aging} textos={textos} moneda={moneda} />
+        </section>
+      ))}
+    </div>
   );
 }

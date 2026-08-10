@@ -32,28 +32,32 @@ import {
  * 4,7 MB.
  */
 
-const pen = (n: number) =>
-  `S/ ${n.toLocaleString("es-PE", {
+const importe = (n: number, moneda: string) =>
+  `${moneda} ${n.toLocaleString("es-PE", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
 
-function aging(r: ResumenAging, quien: string): string {
-  const tramos = TRAMOS.map((t) => `${t.label}: ${pen(r.porTramo[t.id])}`).join(
+function aging(r: ResumenAging, quien: string, moneda: string): string {
+  // ⚠️ Formatea con LA moneda del bloque. Etiquetar dólares como soles sería
+  // darle al modelo un dato falso que además pasaría la verificación de cifras:
+  // el número está bien, la unidad no.
+  const m = (n: number) => importe(n, moneda);
+  const tramos = TRAMOS.map((t) => `${t.label}: ${m(r.porTramo[t.id])}`).join(
     " · ",
   );
   const top = r.contrapartes
     .slice(0, TOPE_CONTRAPARTES)
     .map(
       (c) =>
-        `  · ${c.contraparte}: ${pen(c.total)} (vencido ${pen(c.vencido)}, ${c.documentos} doc.)`,
+        `  · ${c.contraparte}: ${m(c.total)} (vencido ${m(c.vencido)}, ${c.documentos} doc.)`,
     )
     .join("\n");
 
   return [
-    `${quien} (foto de hoy):`,
-    `Total: ${pen(r.total)} en ${r.documentos} documentos.`,
-    `Vencido: ${pen(r.vencido)}.`,
+    `${quien} — en ${moneda} (foto de hoy):`,
+    `Total: ${m(r.total)} en ${r.documentos} documentos.`,
+    `Vencido: ${m(r.vencido)}.`,
     `Por antigüedad → ${tramos}`,
     r.contrapartes.length > 0
       ? `Los ${Math.min(r.contrapartes.length, TOPE_CONTRAPARTES)} mayores de ${r.contrapartes.length}:\n${top}`
@@ -76,7 +80,12 @@ async function saldos(
     typeof args.busca === "string" && args.busca.trim() !== ""
       ? ` filtrado por «${args.busca}»`
       : "";
-  return aging(r, quien + filtro);
+  // ⚠️ Un bloque POR MONEDA. Sumarlas daría un total que no responde a
+  // ninguna pregunta, y el asistente lo repetiría como si fuera un dato.
+  if (r.length === 0) return `${quien}${filtro}: no hay nada pendiente.`;
+  return r
+    .map((b) => aging(b.aging, quien + filtro, b.moneda))
+    .join("\n\n");
 }
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -114,19 +123,23 @@ export async function ejecutarHerramienta(
         const auto = porcentajeAutomatizado(r.periodo);
         return [
           `Período ${desde} a ${hasta} (solo conciliaciones APROBADAS):`,
-          `Cobrado: ${pen(r.periodo.cobrado)} · Pagado: ${pen(r.periodo.pagado)}`,
+          `Cobrado: ${importe(r.periodo.cobrado, "PEN")} · Pagado: ${importe(r.periodo.pagado, "PEN")}`,
           `Conciliaciones: ${r.periodo.conciliaciones}. Terminadas sin aprobar: ${r.periodo.sinAprobar}.`,
           `Partidas: ${r.periodo.partidas}, de las que se emparejaron ${r.periodo.partidasConciliadas}.`,
           auto === null
             ? "No hubo partidas, así que no hay porcentaje automatizado."
             : `Automatizado: ${auto} %.`,
-          `Sin explicar en los cuadres: ${pen(r.periodo.diferenciaCuadre)}.`,
+          `Sin explicar en los cuadres: ${importe(r.periodo.diferenciaCuadre, "PEN")}.`,
           "",
           "Foto de hoy (no del período):",
-          `Por cobrar ${pen(r.hoy.porCobrar)} (vencido ${pen(r.hoy.porCobrarVencido)}) · ` +
-            `Por pagar ${pen(r.hoy.porPagar)} (vencido ${pen(r.hoy.porPagarVencido)})`,
-          `Posición neta: ${pen(posicionNeta(r.hoy))}. ` +
+          `Por cobrar ${importe(r.hoy.porCobrar, "PEN")} (vencido ${importe(r.hoy.porCobrarVencido, "PEN")}) · ` +
+            `Por pagar ${importe(r.hoy.porPagar, "PEN")} (vencido ${importe(r.hoy.porPagarVencido, "PEN")})`,
+          `Posición neta: ${importe(posicionNeta(r.hoy), "PEN")}. ` +
             "No dice el calendario: cobrar a 90 días y pagar a 30 deja sin caja aunque el neto sea positivo.",
+          // ⚠️ `resumen_ejecutivo` todavía suma todas las monedas (ver 0041):
+          // decirlo evita que el asistente presente como soles un total que
+          // puede llevar dólares dentro.
+          "Estas cifras del período están expresadas en la moneda principal; si la empresa factura en varias, consúltalas en Por cobrar y Por pagar, que sí las separan.",
         ].join("\n");
       }
 
