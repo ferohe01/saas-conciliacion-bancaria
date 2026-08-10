@@ -541,12 +541,21 @@ nadie repite el segundo mes** — y una columna corrida un puesto da una
 conciliación al 0 % que el cliente no atribuye a su copia, sino al producto.
 
 - **Un solo destino, dos caminos que convergen enseguida.** No hay pantalla
-  nueva: en `/comprobantes` se sube el archivo y, si las cabeceras no son las de
-  la plantilla, aparece «¿qué columna es cada cosa?» con detección previa
+  nueva: se sube el archivo y, si las cabeceras no son las de la plantilla,
+  aparece «¿qué columna es cada cosa?» con detección previa
   (`deteccionComprobantes.ts`) y vista previa interpretada. Todo lo de después
   —validación, deduplicación por serie, lote, «ya estaban cargados», deshacer—
   es exactamente el mismo código. Bifurcar eso sería bifurcar donde viven los
   bugs caros.
+- ⚠️ **Y ocurre DONDE ESTÁ EL USUARIO**, en los dos sitios que cargan
+  comprobantes: `/comprobantes` y la tarjeta «Comprobantes del período» del
+  Paso 1. La primera versión solo lo ponía en `/comprobantes` y desde el wizard
+  mandaba allí a configurar; eso es abandonar el flujo a mitad, y además dejaba
+  **dos bloques distintos para cargar comprobantes en la misma pantalla** —la
+  tarjeta y el recuadro de la plantilla—, que es exactamente lo que confundía.
+  Ahora la plantilla es un enlace dentro de la tarjeta y no hay segundo bloque.
+  Mientras se mapea, la tarjeta ocupa el ancho entero: nueve columnas y una
+  vista previa no caben en media pantalla.
 - **La plantilla deja de ser un mecanismo aparte y pasa a ser un atajo del
   mismo**: sus cabeceras se reconocen y no se pregunta nada. Es menos
   maquinaria, no más.

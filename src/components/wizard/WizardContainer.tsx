@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { Stepper, type PasoWizard } from "./Stepper";
 import { UploadZone, type ArchivoResumen } from "./UploadZone";
-import { ZonaComprobantes, AyudaPlantilla } from "./ZonaComprobantes";
+import { ZonaComprobantes } from "./ZonaComprobantes";
 import { MapeoDataset } from "./MapeoDataset";
 import { RevisionPrevia } from "./RevisionPrevia";
 import { CandadoIcon, ChevronIcon, DocumentoIcon } from "./icons";
@@ -249,6 +249,8 @@ export function WizardContainer({
    */
   const [hallazgos, setHallazgos] = useState<Hallazgo[] | null>(null);
   const [revisando, setRevisando] = useState(false);
+  /** La tarjeta de comprobantes está preguntando qué columna es cada cosa. */
+  const [mapeandoComprobantes, setMapeandoComprobantes] = useState(false);
 
   const esRango = periodoValor === VALOR_RANGO;
 
@@ -764,7 +766,14 @@ export function WizardContainer({
             </p>
           </fieldset>
 
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          {/* Mientras se mapea, la tarjeta de comprobantes ocupa el ancho
+              entero: nueve columnas y una vista previa no caben en media
+              pantalla, y el extracto se sube después de todos modos. */}
+          <div
+            className={`mt-4 grid gap-4 ${
+              mapeandoComprobantes ? "" : "sm:grid-cols-2"
+            }`}
+          >
             <div>
               {fuente === "comprobantes" ? (
                 <ZonaComprobantes
@@ -773,6 +782,7 @@ export function WizardContainer({
                   moneda={moneda}
                   onCambio={() => setRecargaComprobantes((n) => n + 1)}
                   mapeoConfigurado={mapeoConfigurado}
+                  onMapeando={setMapeandoComprobantes}
                 />
               ) : (
                 // "Conectar sistema" todavía no produce registros. Aun así ocupa
@@ -813,12 +823,6 @@ export function WizardContainer({
               )}
             </div>
           </div>
-
-          {fuente === "comprobantes" && (
-            <div className="mt-4">
-              <AyudaPlantilla />
-            </div>
-          )}
 
           <div className="mt-6 grid gap-4 sm:grid-cols-3">
             <label className="block">

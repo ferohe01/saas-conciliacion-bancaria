@@ -3,11 +3,16 @@
 import { useRef, useState, useTransition } from "react";
 import { DocumentoIcon, CheckIcon } from "./icons";
 import { Boton } from "@/components/ui";
-import { quitarComprobantesDelPeriodo } from "@/app/(app)/wizard/actions";
+import {
+  quitarComprobantesDelPeriodo,
+  guardarMapeoComprobantes,
+} from "@/app/(app)/wizard/actions";
 import { formatearPEN } from "@/lib/parsing/resumen";
 import { descargarPlantilla } from "@/lib/plantilla";
 import { leerCabecera } from "@/lib/parsing/leerArchivo";
-import { esPlantilla } from "@/lib/parsing/mapeoComprobantes";
+import { esPlantilla, type Config } from "@/lib/parsing/mapeoComprobantes";
+import { detectarColumnasComprobante } from "@/lib/parsing/deteccionComprobantes";
+import { MapeoComprobantesForm } from "@/components/comprobantes/MapeoComprobantesForm";
 import type { ResumenComprobantes } from "@/app/(app)/wizard/actions";
 
 /**
@@ -37,6 +42,7 @@ export function ZonaComprobantes({
   moneda,
   onCambio,
   mapeoConfigurado = false,
+  onMapeando,
 }: {
   resumen: ResumenComprobantes | null;
   periodo: { desde: string; hasta: string } | null;
@@ -44,6 +50,8 @@ export function ZonaComprobantes({
   onCambio: () => void;
   /** La empresa ya confirmó con qué columnas viene su archivo. */
   mapeoConfigurado?: boolean;
+  /** Avisa al wizard para darle a la tarjeta el ancho entero mientras se mapea. */
+  onMapeando?: (activo: boolean) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [subiendo, startSubida] = useTransition();
@@ -53,8 +61,19 @@ export function ZonaComprobantes({
   const [arrastrando, setArrastrando] = useState(false);
   /** Solo para explicar la espera: por encima de esto lo lee el servidor. */
   const [grande, setGrande] = useState(false);
+  /**
+   * Cuando el archivo no trae las columnas de la plantilla: qué es cada una.
+   * Vive AQUÍ y no en otra pantalla — todo el paso de cargar comprobantes
+   * ocurre en esta tarjeta.
+   */
+  const [mapeando, setMapeando] = useState<{
+    archivo: File;
+    headers: string[];
+    muestras: Record<string, unknown>[];
+    config: Config;
+  } | null>(null);
 
-  const subir = (file: File | undefined) => {
+  const subir = (file: File | undefined, config?: Config) => {
     if (!file) return;
     setError(null);
     setAviso(null);
@@ -70,15 +89,24 @@ export function ZonaComprobantes({
       //
       // Aquí el mapeo es un acto de configuración que se hace una vez, así que
       // se señala el camino en vez de abrirlo a medias en esta tarjeta.
-      if (!mapeoConfigurado) {
+      if (!mapeoConfigurado && !config) {
         try {
-          const { headers } = await leerCabecera(file, 5);
+          const { headers, filas } = await leerCabecera(file);
           if (headers.length > 0 && !esPlantilla(headers)) {
-            setError(
-              "Las columnas de este archivo no son las de la plantilla. Ve a " +
-                "Comprobantes y súbelo ahí: podrás indicar qué columna es cada " +
-                "cosa, se guarda, y a partir de entonces podrás subirlo desde aquí.",
-            );
+            // No es la plantilla: se pregunta aquí mismo qué columna es cada
+            // cosa. Antes esto mandaba a otra pantalla, y tener DOS sitios
+            // donde cargar comprobantes en el mismo paso confundía más de lo
+            // que ayudaba.
+            setMapeando({
+              archivo: file,
+              headers,
+              muestras: filas,
+              config: {
+                mapeo: detectarColumnasComprobante(headers, filas),
+                tipoFijo: null,
+              },
+            });
+            onMapeando?.(true);
             return;
           }
         } catch {
@@ -86,8 +114,13 @@ export function ZonaComprobantes({
         }
       }
 
+      // El formato se recuerda ANTES de importar: si la carga es larga y el
+      // usuario cierra la pestaña, el aprendizaje ya quedó hecho.
+      if (config) await guardarMapeoComprobantes(config);
+
       const cuerpo = new FormData();
       cuerpo.append("archivo", file);
+      if (config) cuerpo.append("mapeo", JSON.stringify(config));
       try {
         const r = await fetch("/api/comprobantes/importar", {
           method: "POST",
@@ -103,6 +136,8 @@ export function ZonaComprobantes({
           return;
         }
         setAviso(res.mensaje ?? "Comprobantes importados.");
+        setMapeando(null);
+        onMapeando?.(false);
         onCambio();
       } catch {
         setError(
@@ -161,6 +196,43 @@ export function ZonaComprobantes({
       )}
     </>
   );
+
+  // ── Mapeando: la tarjeta se convierte en el paso de "¿qué columna es qué?"
+  //
+  // Ocurre AQUÍ, no en otra pantalla. Tener dos sitios donde cargar
+  // comprobantes dentro del mismo paso confundía más de lo que ayudaba.
+  if (mapeando) {
+    return (
+      <div className="rounded-2xl border border-neutral-200 bg-white p-5">
+        <div className="flex items-start gap-3">
+          <DocumentoIcon className="mt-0.5 h-6 w-6 text-neutral-500" />
+          <div className="min-w-0">
+            <p className="font-semibold text-neutral-900">
+              Comprobantes del período
+            </p>
+            <p className="mt-1 truncate text-sm text-neutral-600">
+              {mapeando.archivo.name}
+            </p>
+          </div>
+        </div>
+
+        <MapeoComprobantesForm
+          headers={mapeando.headers}
+          muestras={mapeando.muestras}
+          config={mapeando.config}
+          moneda={moneda}
+          ocupado={subiendo}
+          onCambio={(config) => setMapeando({ ...mapeando, config })}
+          onCancelar={() => {
+            setMapeando(null);
+            onMapeando?.(false);
+          }}
+          onConfirmar={() => subir(mapeando.archivo, mapeando.config)}
+        />
+        {mensajes}
+      </div>
+    );
+  }
 
   // ── Con datos: misma tarjeta verde que el extracto cargado ───────────────
   if (resumen && resumen.registros > 0) {
@@ -299,38 +371,29 @@ export function ZonaComprobantes({
         <p className="mt-3 text-xs text-neutral-600">
           Excel o CSV · tus cobranzas y pagos del período
         </p>
+        <p className="mt-1 text-xs text-neutral-600">
+          Súbelo con las columnas que tenga: te preguntamos qué es cada una.
+        </p>
       </div>
+
+      {/* La plantilla, para quien no tiene ningún archivo que soltar. Va DENTRO
+          de la tarjeta, debajo de su zona de carga: cuando vivía en un bloque
+          aparte había dos sitios donde cargar comprobantes en el mismo paso, y
+          eso confundía más de lo que ayudaba. */}
+      <p className="mt-3 text-center text-xs text-neutral-600">
+        ¿No tienes sistema?{" "}
+        <button
+          type="button"
+          onClick={() => void descargarPlantilla()}
+          className="rounded font-medium text-blue-700 underline underline-offset-2 transition-colors hover:text-blue-800"
+        >
+          Descarga la plantilla
+        </button>{" "}
+        y llénala.
+      </p>
+
       {mensajes}
       {input}
-    </div>
-  );
-}
-
-/**
- * "¿No tienes sistema? Usa la plantilla" — solo la descarga.
- *
- * Subir la plantilla llena ya vive dentro de `ZonaComprobantes`, que es donde
- * uno la busca; aquí queda el paso previo, el de quien todavía no tiene un
- * archivo que soltar. Dejar los dos botones juntos abajo era lo que rompía la
- * simetría de la pantalla.
- */
-export function AyudaPlantilla() {
-  return (
-    <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
-      <p className="text-sm font-medium text-neutral-800">
-        ¿No tienes sistema? Usa la plantilla
-      </p>
-      <p className="mt-1 text-sm text-neutral-500">
-        Descárgala, llénala con tus cobranzas y pagos, y súbela arriba en
-        «Comprobantes del período».
-      </p>
-      <button
-        type="button"
-        onClick={() => void descargarPlantilla()}
-        className="mt-3 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-800 transition-colors hover:bg-neutral-50"
-      >
-        Descargar plantilla
-      </button>
     </div>
   );
 }
