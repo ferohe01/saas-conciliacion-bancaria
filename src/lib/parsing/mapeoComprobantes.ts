@@ -350,3 +350,47 @@ export const ConfigMapeoGuardado = z.object({
     .nullable()
     .optional(),
 });
+
+/**
+ * Qué columnas del formato guardado NO están en este archivo.
+ *
+ * ⚠️ El formato se recuerda para no volver a preguntar, pero recordarlo no
+ * significa que valga para CUALQUIER archivo. Si el cliente guardó el mapeo de
+ * su libro de ventas y luego sube el de compras con otras cabeceras, aplicar el
+ * guardado a ciegas descarta todas las filas — y el mensaje resultante habla de
+ * columnas cuando el problema es que hay que volver a mapear.
+ *
+ * Solo se miran las obligatorias: que falte la descripción no impide nada.
+ */
+export function faltanColumnasDelMapeo(
+  config: Config,
+  headers: string[],
+): string[] {
+  const presentes = new Set(headers.map((h) => h.trim()));
+  const necesarias: CampoComprobante[] = ["fecha", "monto"];
+  if (config.tipoFijo == null) necesarias.push("tipo");
+
+  return necesarias
+    .map((c) => config.mapeo[c])
+    .filter((h): h is string => h != null && !presentes.has(h.trim()));
+}
+
+/**
+ * Lo que el formato guardado DECLARA para todas las filas, en palabras.
+ *
+ * ⚠️⚠️ Existe porque una declaración guardada es una afirmación sobre un
+ * archivo que aún no se ha visto. Un cliente que guarda «todo son cobranzas»
+ * con su libro de ventas y después sube el de pagos por la carga rápida
+ * cargaría **los pagos como cobros**: entra bien, se ve bien, y el dinero queda
+ * del lado equivocado. Es el modo de fallo más caro de este producto.
+ *
+ * Devuelve lista vacía cuando no hay nada declarado —el formato solo dice qué
+ * columna es cada cosa— y entonces no hay nada que confirmar.
+ */
+export function describirDeclaraciones(config: Config): string[] {
+  const partes: string[] = [];
+  if (config.tipoFijo === "cobranza") partes.push("cobranzas");
+  if (config.tipoFijo === "pago") partes.push("pagos");
+  if (config.monedaFija) partes.push(`en ${config.monedaFija}`);
+  return partes;
+}

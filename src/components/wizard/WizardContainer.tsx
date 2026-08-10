@@ -24,6 +24,7 @@ import {
   explicarRevisionPrevia,
   type ResumenComprobantes,
 } from "@/app/(app)/wizard/actions";
+import type { Config } from "@/lib/parsing/mapeoComprobantes";
 import {
   evaluarDiagnostico,
   debeRevisar,
@@ -180,15 +181,15 @@ export function WizardContainer({
   cuentas,
   conexion = null,
   asistente = false,
-  mapeoConfigurado = false,
+  mapeoGuardado = null,
   archivoPropio = false,
 }: {
   cuentas: CuentaOpcion[];
   conexion?: ResumenConexion | null;
   /** Si el despliegue tiene modelo configurado (lo decide el servidor). */
   asistente?: boolean;
-  /** La empresa ya confirmó con qué columnas viene su archivo de comprobantes. */
-  mapeoConfigurado?: boolean;
+  /** El formato que esta empresa confirmó la última vez, si lo hay. */
+  mapeoGuardado?: Config | null;
   /** La empresa puede subir su propio formato en vez de la plantilla (0040). */
   archivoPropio?: boolean;
 }) {
@@ -790,7 +791,7 @@ export function WizardContainer({
                   periodo={periodo}
                   moneda={moneda}
                   onCambio={() => setRecargaComprobantes((n) => n + 1)}
-                  mapeoConfigurado={mapeoConfigurado}
+                  mapeoGuardado={mapeoGuardado}
                   archivoPropio={archivoPropio}
                   onMapeando={setMapeandoComprobantes}
                   onRechazo={setSinPlantilla}

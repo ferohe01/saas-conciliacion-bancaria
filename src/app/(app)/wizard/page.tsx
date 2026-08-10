@@ -4,6 +4,7 @@ import { getEmpresaActual } from "@/lib/auth";
 import { estadoSuscripcion } from "@/lib/suscripcion";
 import { asistenteDisponible } from "@/lib/ia/cliente";
 import { permiteArchivoPropio } from "@/lib/modoCarga";
+import { ConfigMapeoGuardado } from "@/lib/parsing/mapeoComprobantes";
 import { getConexionErp } from "@/lib/conexiones-servidor";
 import { nombreSistema, estadoConexion } from "@/lib/conexiones";
 import { PruebaVencida } from "@/components/app/AvisoPrueba";
@@ -70,6 +71,10 @@ export default async function WizardPage() {
 
   const cuentas = (data ?? []) as CuentaOpcion[];
 
+  // El formato que la empresa confirmó la última vez. Se valida al leerlo: la
+  // columna es JSONB y pudo quedar de una versión anterior con otra forma.
+  const guardado = ConfigMapeoGuardado.safeParse(empresa?.mapeo_comprobantes);
+
   // El wizard solo necesita saber qué contar bajo la opción "Conectar sistema";
   // los datos de la conexión se administran en /conexiones.
   const resumenConexion = conexion
@@ -96,7 +101,7 @@ export default async function WizardPage() {
           cuentas={cuentas}
           conexion={resumenConexion}
           asistente={asistenteDisponible()}
-          mapeoConfigurado={empresa?.mapeo_comprobantes != null}
+          mapeoGuardado={guardado.success ? guardado.data : null}
           archivoPropio={permiteArchivoPropio(empresa?.modo_carga)}
         />
       </div>

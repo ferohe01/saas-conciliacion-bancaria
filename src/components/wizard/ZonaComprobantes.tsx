@@ -13,6 +13,8 @@ import { leerCabecera } from "@/lib/parsing/leerArchivo";
 import {
   esPlantilla,
   columnasFaltantes,
+  faltanColumnasDelMapeo,
+  describirDeclaraciones,
   type Config,
 } from "@/lib/parsing/mapeoComprobantes";
 import { detectarColumnasComprobante } from "@/lib/parsing/deteccionComprobantes";
@@ -45,7 +47,7 @@ export function ZonaComprobantes({
   periodo,
   moneda,
   onCambio,
-  mapeoConfigurado = false,
+  mapeoGuardado = null,
   archivoPropio = false,
   onMapeando,
   onRechazo,
@@ -54,8 +56,8 @@ export function ZonaComprobantes({
   periodo: { desde: string; hasta: string } | null;
   moneda: string;
   onCambio: () => void;
-  /** La empresa ya confirmó con qué columnas viene su archivo. */
-  mapeoConfigurado?: boolean;
+  /** El formato que esta empresa confirmó la última vez, si lo hay. */
+  mapeoGuardado?: Config | null;
   /**
    * La empresa puede subir su propio formato (`modo_carga = archivo_propio`).
    * Sin esto se exige la plantilla, que es lo correcto para una PyME.
@@ -89,12 +91,23 @@ export function ZonaComprobantes({
     muestras: Record<string, unknown>[];
     config: Config;
   } | null>(null);
+  /**
+   * Archivo listo para subir con el formato guardado, esperando que el usuario
+   * confirme lo que ese formato DECLARA para todas las filas.
+   */
+  const [confirmando, setConfirmando] = useState<{
+    archivo: File;
+    declara: string[];
+    headers: string[];
+    muestras: Record<string, unknown>[];
+  } | null>(null);
 
   const subir = (file: File | undefined, config?: Config) => {
     if (!file) return;
     setError(null);
     setAviso(null);
     onRechazo?.(null);
+    setConfirmando(null);
     setGrande(file.size > AVISO_GRANDE);
     startSubida(async () => {
       // ⚠️ Se comprueba ANTES de subir, no después de fallar.
@@ -130,7 +143,50 @@ export function ZonaComprobantes({
         }
       }
 
-      if (archivoPropio && !mapeoConfigurado && !config) {
+      // ── Con formato guardado: comprobar que sirve para ESTE archivo ───────
+      //
+      // ⚠️⚠️ El formato se recuerda para no volver a preguntar, pero recordarlo
+      // no significa que valga para cualquier archivo.
+      //
+      // Dos peligros distintos, y los dos silenciosos:
+      //
+      //   1. Las COLUMNAS guardadas no están en este archivo (subió el libro de
+      //      compras después de mapear el de ventas). Aplicarlo a ciegas
+      //      descarta todas las filas y el mensaje habla de columnas cuando lo
+      //      que hay que hacer es volver a mapear.
+      //   2. La DECLARACIÓN guardada («todo son cobranzas») se aplicaría a un
+      //      archivo de pagos: entra bien, se ve bien, y el dinero queda del
+      //      lado equivocado. Es el modo de fallo más caro del producto.
+      if (archivoPropio && mapeoGuardado && !config) {
+        try {
+          const { headers, filas } = await leerCabecera(file);
+          if (headers.length > 0) {
+            const faltan = faltanColumnasDelMapeo(mapeoGuardado, headers);
+            if (faltan.length > 0) {
+              // El formato guardado no encaja: se vuelve a preguntar, con la
+              // detección de ESTE archivo y lo guardado como punto de partida.
+              const detectado = detectarColumnasComprobante(headers, filas);
+              setMapeando({
+                archivo: file,
+                headers,
+                muestras: filas,
+                config: { mapeo: detectado, tipoFijo: null, monedaFija: null },
+              });
+              onMapeando?.(true);
+              return;
+            }
+            const declara = describirDeclaraciones(mapeoGuardado);
+            if (declara.length > 0) {
+              setConfirmando({ archivo: file, declara, headers, muestras: filas });
+              return;
+            }
+          }
+        } catch {
+          // Si no se puede leer la cabecera, que decida el servidor.
+        }
+      }
+
+      if (archivoPropio && !mapeoGuardado && !config) {
         try {
           const { headers, filas } = await leerCabecera(file);
           if (headers.length > 0 && !esPlantilla(headers)) {
@@ -178,6 +234,7 @@ export function ZonaComprobantes({
         }
         setAviso(res.mensaje ?? "Comprobantes importados.");
         setMapeando(null);
+        setConfirmando(null);
         onMapeando?.(false);
         onCambio();
       } catch {
@@ -237,6 +294,79 @@ export function ZonaComprobantes({
       )}
     </>
   );
+
+  // ── Confirmar lo que el formato guardado DECLARA para todo el archivo ────
+  //
+  // ⚠️⚠️ Este paso existe por un fallo concreto: quien guarda «todo son
+  // cobranzas» con su libro de ventas y luego sube el de pagos por la carga
+  // rápida cargaría **los pagos como cobros**. Entra bien, se ve bien, y el
+  // dinero queda del lado equivocado — el modo de fallo más caro del producto.
+  //
+  // Solo aparece cuando hay algo declarado. Si el formato guardado se limita a
+  // decir qué columna es cada cosa —porque el archivo trae su columna de tipo—
+  // no hay nada que confirmar y la carga sigue siendo de un clic.
+  if (confirmando) {
+    return (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+        <div className="flex items-start gap-3">
+          <DocumentoIcon className="mt-0.5 h-6 w-6 text-amber-700" />
+          <div className="min-w-0">
+            <p className="font-semibold text-amber-900">
+              Comprobantes del período
+            </p>
+            <p className="mt-1 truncate text-sm text-amber-800">
+              {confirmando.archivo.name}
+            </p>
+          </div>
+        </div>
+
+        <p className="mt-4 max-w-prose text-sm text-amber-900">
+          Con tu formato guardado, <strong>todas las filas</strong> de este
+          archivo se cargarán como{" "}
+          <strong>{confirmando.declara.join(", ")}</strong>.
+        </p>
+        <p className="mt-1 max-w-prose text-sm text-amber-900">
+          Si este archivo es de otro tipo, cambia el formato antes de importar.
+        </p>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Boton
+            disabled={subiendo}
+            onClick={() => subir(confirmando.archivo, mapeoGuardado ?? undefined)}
+          >
+            {subiendo ? "Importando…" : "Sí, importar así"}
+          </Boton>
+          <button
+            type="button"
+            disabled={subiendo}
+            onClick={() => {
+              setMapeando({
+                archivo: confirmando.archivo,
+                headers: confirmando.headers,
+                muestras: confirmando.muestras,
+                config: mapeoGuardado ?? { mapeo: {}, tipoFijo: null },
+              });
+              setConfirmando(null);
+              onMapeando?.(true);
+            }}
+            className="rounded text-sm font-medium text-amber-900 underline underline-offset-2"
+          >
+            Cambiar el formato
+          </button>
+          <button
+            type="button"
+            disabled={subiendo}
+            onClick={() => setConfirmando(null)}
+            className="rounded text-sm text-amber-900 underline underline-offset-2"
+          >
+            Cancelar
+          </button>
+        </div>
+        {mensajes}
+        {input}
+      </div>
+    );
+  }
 
   // ── Mapeando: la tarjeta se convierte en el paso de "¿qué columna es qué?"
   //

@@ -6,6 +6,8 @@ import {
   configCompleta,
   faltaEnConfig,
   motivoOmision,
+  faltanColumnasDelMapeo,
+  describirDeclaraciones,
   MAPEO_PLANTILLA,
   ConfigMapeoGuardado,
   type Config,
@@ -321,5 +323,59 @@ describe("motivoOmision — decir QUÉ falta, no lo que podría faltar", () => {
       const entra = aplicarMapeo(COBROS_ESCOLARES[0]!, c) !== null;
       expect(hayMotivos).toBe(!entra);
     }
+  });
+});
+
+describe("⚠️ el formato guardado no vale para CUALQUIER archivo", () => {
+  // Un cliente guarda "todo son cobranzas" con su libro de ventas y luego sube
+  // el de pagos por la carga rápida: entrarían como cobros. Entra bien, se ve
+  // bien, y el dinero queda del lado equivocado.
+  const guardado: Config = {
+    mapeo: { fecha: "F. EMISIÓN", monto: "TOTAL", razon_social: "CLIENTE" },
+    tipoFijo: "cobranza",
+    monedaFija: "PEN",
+  };
+
+  it("dice lo que el formato declara para todas las filas", () => {
+    expect(describirDeclaraciones(guardado)).toEqual(["cobranzas", "en PEN"]);
+  });
+
+  it("un formato que solo mapea columnas no declara nada: no hay que confirmar", () => {
+    expect(
+      describirDeclaraciones({ mapeo: { fecha: "f", monto: "m", tipo: "t" } }),
+    ).toEqual([]);
+  });
+
+  it("distingue pagos de cobranzas en el texto", () => {
+    expect(describirDeclaraciones({ mapeo: {}, tipoFijo: "pago" })).toEqual([
+      "pagos",
+    ]);
+  });
+
+  it("detecta que las columnas guardadas no están en el archivo nuevo", () => {
+    const otras = ["FECHA", "IMPORTE", "PROVEEDOR"];
+    expect(faltanColumnasDelMapeo(guardado, otras)).toEqual([
+      "F. EMISIÓN",
+      "TOTAL",
+    ]);
+  });
+
+  it("con las columnas presentes no falta nada", () => {
+    const mismas = ["F. EMISIÓN", "TOTAL", "CLIENTE"];
+    expect(faltanColumnasDelMapeo(guardado, mismas)).toEqual([]);
+  });
+
+  it("⚠️ el tipo solo se exige como columna si NO está declarado", () => {
+    const sinDeclarar: Config = {
+      mapeo: { fecha: "F", monto: "T", tipo: "CLASE" },
+      tipoFijo: null,
+    };
+    expect(faltanColumnasDelMapeo(sinDeclarar, ["F", "T"])).toEqual(["CLASE"]);
+    expect(faltanColumnasDelMapeo(sinDeclarar, ["F", "T", "CLASE"])).toEqual([]);
+  });
+
+  it("las columnas opcionales que falten no bloquean", () => {
+    // Que no venga la descripción no impide cargar nada.
+    expect(faltanColumnasDelMapeo(guardado, ["F. EMISIÓN", "TOTAL"])).toEqual([]);
   });
 });

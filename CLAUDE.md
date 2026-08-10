@@ -647,11 +647,23 @@ conciliación al 0 % que el cliente no atribuye a su copia, sino al producto.
   bien, y **ningún comprobante quedaba cobrado**. Aquí la flexibilidad de
   formato produce filas reales en `comprobantes`, con su id y su saldo. Se
   parece; no es lo mismo.
-- **El mapeo se recuerda** en `empresas.mapeo_comprobantes` (`0039`), así que la
-  carga rápida del Paso 1 del wizard entiende el formato del cliente sin volver
-  a preguntar. ⚠️ La `0039` lleva su `GRANT update` porque la `0005` revocó el
+- **El mapeo se recuerda** en `empresas.mapeo_comprobantes` (`0039`), así que
+  la carga rápida del Paso 1 entiende el formato del cliente sin volver a
+  preguntar. ⚠️ La `0039` lleva su `GRANT update` porque la `0005` revocó el
   UPDATE amplio sobre `empresas`: toda columna nueva nace sin permiso de
   escritura (ya pasó con `criterios_conciliacion`).
+- ⚠️⚠️ **Pero recordarlo NO significa que valga para cualquier archivo.** El
+  formato guardado puede llevar una DECLARACIÓN («todo son cobranzas»), y esa es
+  una afirmación sobre un archivo que aún no se ha visto: quien la guarda con su
+  libro de ventas y luego sube el de pagos por la carga rápida cargaría **los
+  pagos como cobros**. Entra bien, se ve bien, y el dinero queda del lado
+  equivocado. Antes de importar se confirma en una frase («todas las filas se
+  cargarán como cobranzas, en PEN») con la salida de cambiar el formato al lado.
+  Si el formato guardado solo mapea columnas, no hay nada que confirmar y la
+  carga sigue siendo de un clic.
+- ⚠️ **Y si las columnas guardadas no están en el archivo nuevo, se vuelve a
+  preguntar** en vez de aplicarlo a ciegas: aplicarlo descartaría todas las filas
+  y el mensaje hablaría de columnas cuando lo que hay que hacer es remapear.
 - ⚠️ **La plantilla GANA sobre el mapeo guardado**, decidido con las cabeceras
   reales de cada archivo. Una empresa que configuró su ERP y luego sube la
   plantilla para cuatro facturas vería fallar todas las filas: el mapeo apunta a
