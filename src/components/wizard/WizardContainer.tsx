@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { Stepper, type PasoWizard } from "./Stepper";
 import { UploadZone, type ArchivoResumen } from "./UploadZone";
-import { ZonaComprobantes } from "./ZonaComprobantes";
+import { ZonaComprobantes, AvisoSinPlantilla } from "./ZonaComprobantes";
 import { MapeoDataset } from "./MapeoDataset";
 import { RevisionPrevia } from "./RevisionPrevia";
 import { CandadoIcon, ChevronIcon, DocumentoIcon } from "./icons";
@@ -254,6 +254,8 @@ export function WizardContainer({
   const [revisando, setRevisando] = useState(false);
   /** La tarjeta de comprobantes está preguntando qué columna es cada cosa. */
   const [mapeandoComprobantes, setMapeandoComprobantes] = useState(false);
+  /** Columnas de la plantilla que le faltan al archivo que se intentó subir. */
+  const [sinPlantilla, setSinPlantilla] = useState<string[] | null>(null);
 
   const esRango = periodoValor === VALOR_RANGO;
 
@@ -787,6 +789,7 @@ export function WizardContainer({
                   mapeoConfigurado={mapeoConfigurado}
                   archivoPropio={archivoPropio}
                   onMapeando={setMapeandoComprobantes}
+                  onRechazo={setSinPlantilla}
                 />
               ) : (
                 // "Conectar sistema" todavía no produce registros. Aun así ocupa
@@ -827,6 +830,19 @@ export function WizardContainer({
               )}
             </div>
           </div>
+
+          {/* A ancho completo, debajo de las dos tarjetas. Dentro de la columna
+              izquierda el texto se partía en seis líneas y los botones quedaban
+              apretados: un rechazo tiene que leerse de una pasada, porque es el
+              momento en que el usuario decide si esto le sirve o no. */}
+          {sinPlantilla && (
+            <div className="mt-4">
+              <AvisoSinPlantilla
+                faltan={sinPlantilla}
+                onCerrar={() => setSinPlantilla(null)}
+              />
+            </div>
+          )}
 
           <div className="mt-6 grid gap-4 sm:grid-cols-3">
             <label className="block">

@@ -48,6 +48,7 @@ export function ZonaComprobantes({
   mapeoConfigurado = false,
   archivoPropio = false,
   onMapeando,
+  onRechazo,
 }: {
   resumen: ResumenComprobantes | null;
   periodo: { desde: string; hasta: string } | null;
@@ -62,6 +63,12 @@ export function ZonaComprobantes({
   archivoPropio?: boolean;
   /** Avisa al wizard para darle a la tarjeta el ancho entero mientras se mapea. */
   onMapeando?: (activo: boolean) => void;
+  /**
+   * Columnas de la plantilla que faltan, o null al limpiarse. Lo pinta el
+   * wizard a ancho completo: en media pantalla el aviso no se lee de una
+   * pasada, y es el momento en que el usuario decide si esto le sirve.
+   */
+  onRechazo?: (faltan: string[] | null) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [subiendo, startSubida] = useTransition();
@@ -82,14 +89,12 @@ export function ZonaComprobantes({
     muestras: Record<string, unknown>[];
     config: Config;
   } | null>(null);
-  /** Columnas de la plantilla que le faltan al archivo elegido. */
-  const [sinPlantilla, setSinPlantilla] = useState<string[] | null>(null);
 
   const subir = (file: File | undefined, config?: Config) => {
     if (!file) return;
     setError(null);
     setAviso(null);
-    setSinPlantilla(null);
+    onRechazo?.(null);
     setGrande(file.size > AVISO_GRANDE);
     startSubida(async () => {
       // ⚠️ Se comprueba ANTES de subir, no después de fallar.
@@ -117,7 +122,7 @@ export function ZonaComprobantes({
           const { headers } = await leerCabecera(file, 5);
           const faltan = columnasFaltantes(headers);
           if (headers.length > 0 && faltan.length > 0) {
-            setSinPlantilla(faltan);
+            onRechazo?.(faltan);
             return;
           }
         } catch {
@@ -220,47 +225,6 @@ export function ZonaComprobantes({
 
   const mensajes = (
     <>
-      {/* ⚠️ Un rechazo tiene que traer la salida al lado. Decir "usa la
-          plantilla" y dejar al usuario buscándola es convertir una regla
-          razonable en un muro. */}
-      {sinPlantilla && (
-        <div
-          role="alert"
-          className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
-        >
-          <p className="font-medium">Este archivo no tiene el formato esperado</p>
-          <p className="mt-1">
-            Le {sinPlantilla.length === 1 ? "falta la columna" : "faltan las columnas"}{" "}
-            <strong>{sinPlantilla.join(", ")}</strong>. Descarga la plantilla,
-            copia ahí tus cobranzas y pagos, y súbela.
-          </p>
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <Boton
-              tamano="sm"
-              onClick={() => {
-                void descargarPlantilla();
-              }}
-            >
-              Descargar plantilla
-            </Boton>
-            <button
-              type="button"
-              onClick={() => setSinPlantilla(null)}
-              className="rounded text-sm font-medium text-amber-900 underline underline-offset-2"
-            >
-              Elegir otro archivo
-            </button>
-          </div>
-          {/* La salida para quien SÍ exporta desde un ERP. Discreta a
-              propósito: vive en Configuración y no en el flujo de carga, para
-              que nadie acabe ahí por probar. */}
-          <p className="mt-3 text-xs text-amber-800">
-            ¿Tu sistema exporta a Excel o CSV con sus propias columnas? Puedes
-            habilitarlo en Configuración → Cómo cargas tus comprobantes.
-          </p>
-        </div>
-      )}
-
       {aviso && (
         <p role="status" className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-900">
           {aviso}
@@ -471,6 +435,64 @@ export function ZonaComprobantes({
 
       {mensajes}
       {input}
+    </div>
+  );
+}
+
+/**
+ * «Este archivo no tiene el formato esperado».
+ *
+ * ⚠️ Va **fuera** de la tarjeta y a ancho completo, debajo de las dos. Dentro de
+ * media pantalla el texto se partía en seis líneas y los dos botones quedaban
+ * apretados contra el borde: un rechazo tiene que leerse de una pasada, porque
+ * es el momento en que el usuario decide si el sistema le sirve o no.
+ *
+ * ⚠️ Y trae la salida al lado. Decir «usa la plantilla» y dejar al usuario
+ * buscándola convierte una regla razonable en un muro.
+ */
+export function AvisoSinPlantilla({
+  faltan,
+  onCerrar,
+}: {
+  faltan: string[];
+  onCerrar: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900"
+    >
+      <p className="font-medium">Este archivo no tiene el formato esperado</p>
+      <p className="mt-1 max-w-prose">
+        Le {faltan.length === 1 ? "falta la columna" : "faltan las columnas"}{" "}
+        <strong>{faltan.join(", ")}</strong>. Descarga la plantilla, copia ahí
+        tus cobranzas y pagos, y súbela.
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <Boton
+          tamano="sm"
+          onClick={() => {
+            void descargarPlantilla();
+          }}
+        >
+          Descargar plantilla
+        </Boton>
+        <button
+          type="button"
+          onClick={onCerrar}
+          className="rounded text-sm font-medium text-amber-900 underline underline-offset-2"
+        >
+          Elegir otro archivo
+        </button>
+      </div>
+      {/* La salida para quien SÍ exporta desde un ERP. Discreta a propósito:
+          vive en Configuración y no en el flujo de carga, para que nadie acabe
+          ahí por probar a ver qué pasa. */}
+      <p className="mt-3 max-w-prose text-xs text-amber-800">
+        ¿Tu sistema exporta a Excel o CSV con sus propias columnas? Puedes
+        habilitarlo en Configuración en la opción → Cómo cargas tus
+        comprobantes.
+      </p>
     </div>
   );
 }
