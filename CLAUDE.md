@@ -560,6 +560,47 @@ plantilla. Exigírsela es cerrarle la puerta.
   desde un ERP no debería esperar a que le activen nada. **Si algún día conviene
   que sea decisión comercial, basta con quitar ese grant.**
 
+## Dos clientes, dos formas de cargar (y el modo se declara, no se adivina)
+
+La PyME de 500 facturas al mes las lleva en su propio Excel. Para ella **la
+plantilla es mejor producto**: garantiza datos limpios y no la obliga a
+distinguir el «número de documento» de la «referencia de operación» —lo que más
+se confunde—. Si mapea mal una columna no lo descubre al mapear: lo descubre
+cuando la conciliación da 0 %, y entonces culpa al sistema.
+
+La recaudadora de 450.000 movimientos no puede transponer nada a ninguna
+plantilla. Exigírsela es cerrarle la puerta.
+
+`empresas.modo_carga` (`0040`) separa los dos casos: **`plantilla` por
+defecto**, `archivo_propio` para quien exporta desde un ERP.
+
+- ⚠️⚠️ **El discriminador es la EMPRESA, no el archivo.** La tentación era abrir
+  el mapeo «para archivos grandes» y no funciona: la primera prueba del flujo de
+  la recaudadora se hizo con **200 filas**, que un umbral habría bloqueado; y
+  una PyME que pasa de 4.900 a 5.100 filas cambiaría de flujo de un mes a otro
+  sin entender por qué. Un umbral convierte una decisión de producto en una
+  lotería.
+- ⚠️ **Se hace cumplir en el SERVIDOR.** En modo `plantilla`, la ruta de
+  importación ignora cualquier mapeo —de la petición o guardado— y lee con las
+  columnas de la plantilla. Ocultar la opción orienta; esto es lo que impide que
+  un POST directo cargue columnas elegidas a mano.
+- ⚠️ **El rechazo nombra las columnas que faltan** («le faltan monto y tipo») y
+  trae el botón de descargar la plantilla al lado. «Este archivo no sirve» deja
+  al usuario comparando dos ficheros a mano, y convierte una regla razonable en
+  un muro.
+- **La opción vive en Configuración, no en el flujo de carga.** Si apareciera al
+  fallar una subida, cualquiera la activaría para salir del paso — y acabaría
+  eligiendo columnas a mano, que es justo lo que el modo evita. Activarla pide
+  confirmación; volver a la plantilla no, porque volver a lo seguro nunca
+  necesita advertencia.
+- `modoCarga()` degrada a `plantilla` ante cualquier valor desconocido, nunca al
+  revés (mismo criterio que `plan` en `suscripcion.ts`).
+- ⚠️ La `0040` lleva su `GRANT update`, como toda columna nueva de `empresas`
+  desde la `0005`. Se concede al usuario a propósito: quien de verdad exporta
+  desde un ERP no debería esperar a que le activen nada. **Si algún día conviene
+  que sea decisión comercial, basta con quitar ese grant** — el resto del
+  sistema no cambia.
+
 ## Subir los comprobantes con el formato del CLIENTE
 
 El sistema trataba los dos lados con criterios opuestos, y al revés de como
