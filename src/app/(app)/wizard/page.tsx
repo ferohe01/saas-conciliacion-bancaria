@@ -95,6 +95,7 @@ export default async function WizardPage() {
           cuentas={cuentas}
           conexion={resumenConexion}
           asistente={asistenteDisponible()}
+          mapeoConfigurado={empresa?.mapeo_comprobantes != null}
         />
       </div>
     </div>

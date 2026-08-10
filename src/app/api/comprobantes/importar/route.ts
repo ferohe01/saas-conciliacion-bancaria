@@ -167,40 +167,75 @@ export async function POST(request: Request) {
     invalidas: 0,
   };
 
-  // Series ya presentes en la empresa. Se piden UNA vez y se llevan en memoria:
-  // preguntar por cada lote serían cientos de viajes, y un Set de 500.000
-  // cadenas cortas cabe de sobra.
+  // ── Qué comprobantes YA están cargados ────────────────────────────────────
   //
-  // ⚠️ CON `admin` Y FILTRANDO POR EMPRESA, no con el cliente de RLS.
+  // ⚠️⚠️ Esto se preguntaba SIEMPRE por todo, y era el coste dominante de
+  // cualquier carga: traer las 452.309 series de la empresa son ~453 peticiones
+  // paginadas, se suban 200 filas o 450.000. El síntoma lo delataba —**subir
+  // 200 comprobantes tardaba casi lo mismo que subir el mes entero**— y la
+  // causa no estaba en el archivo sino en lo que ya había en la base.
   //
-  // La política de `comprobantes` es `es_miembro(empresa_id)`: una función
-  // sobre una COLUMNA, que Postgres evalúa fila a fila. Sobre 452.309
-  // comprobantes eso pasa de los 8 s de `statement_timeout` y la consulta
-  // muere. Y como `traerTodo` se traga el error, el conjunto salía VACÍO: la
-  // ruta creía que ninguna serie existía, intentaba insertarlas todas y
-  // chocaba con el índice único.
+  // Ahora se pregunta por LO QUE TRAE EL ARCHIVO, lote a lote, y solo se
+  // precarga todo cuando el archivo demuestra ser grande: a partir de ahí
+  // preguntar por partes serían más viajes que traerlo entero. Con 200 filas es
+  // UNA consulta.
   //
-  // El síntoma era desconcertante — "se intentó cargar un comprobante que ya
-  // existe" sobre una carga que no había insertado nada— y apuntaba al archivo
-  // en vez de a la consulta.
-  const { filas: existentes, error: errExistentes } = await traerSeries(
-    admin,
-    empresa.empresa_id,
-  );
-  if (errExistentes) {
-    return NextResponse.json(
-      {
-        error:
-          "No se pudo comprobar qué comprobantes ya tienes cargados, así que no se importó nada para no duplicarlos. Vuelve a intentarlo en un momento.",
-      },
-      { status: 503 },
-    );
-  }
-  const yaEnBase = new Set(
-    existentes
-      .map((c) => claveComprobante({ tipo: c.tipo, referencia: c.serie_numero }))
-      .filter((k): k is string => k !== null),
-  );
+  // ⚠️ CON `admin` Y FILTRANDO POR EMPRESA, no con el cliente de RLS. La
+  // política de `comprobantes` es `es_miembro(empresa_id)`: una función sobre
+  // una COLUMNA que Postgres evalúa fila a fila, y sobre medio millón se pasa
+  // del `statement_timeout`. Como el error se tragaba, el conjunto salía VACÍO
+  // y la ruta intentaba insertarlo todo contra el índice único — con un mensaje
+  // que culpaba al archivo.
+  const UMBRAL_PRECARGA = 20_000;
+  const yaEnBase = new Set<string>();
+  let precargado = false;
+  let filasProcesadas = 0;
+
+  /** Cuáles de estas claves ya existen. Elige la estrategia por tamaño. */
+  const existentesDe = async (
+    claves: { clave: string; serie: string }[],
+  ): Promise<{ set: Set<string>; error: boolean }> => {
+    if (!precargado && filasProcesadas > UMBRAL_PRECARGA) {
+      const { filas, error } = await traerSeries(admin, empresa.empresa_id);
+      if (error) return { set: new Set(), error: true };
+      for (const c of filas) {
+        const k = claveComprobante({ tipo: c.tipo, referencia: c.serie_numero });
+        if (k !== null) yaEnBase.add(k);
+      }
+      precargado = true;
+    }
+
+    if (precargado) {
+      return {
+        set: new Set(claves.filter((c) => yaEnBase.has(c.clave)).map((c) => c.clave)),
+        error: false,
+      };
+    }
+
+    // ⚠️ Troceado a 300: los `.in()` no fallan por número de filas sino por
+    // longitud de URL, y una serie puede ser larga.
+    const encontradas = new Set<string>();
+    const series = [...new Set(claves.map((c) => c.serie))];
+    for (const parte of enLotes(series, 300)) {
+      const { data, error } = await admin
+        .from("comprobantes")
+        .select("tipo, serie_numero")
+        .eq("empresa_id", empresa.empresa_id)
+        .in("serie_numero", parte);
+      if (error) {
+        console.error("[comprobantes] no se pudieron leer las series:", error);
+        return { set: new Set(), error: true };
+      }
+      for (const c of data ?? []) {
+        const k = claveComprobante({
+          tipo: String(c.tipo),
+          referencia: c.serie_numero as string | null,
+        });
+        if (k !== null) encontradas.add(k);
+      }
+    }
+    return { set: encontradas, error: false };
+  };
 
   // Claves vistas en ESTE archivo, para no insertar dos veces la misma.
   const vistas = new Set<string>();
@@ -208,7 +243,38 @@ export async function POST(request: Request) {
 
   const descargar = async (): Promise<string | null> => {
     if (pendientes.length === 0) return null;
-    for (const parte of enLotes(pendientes, LOTE)) {
+
+    // Lo que ya está en la base se aparta ANTES de insertar. Un comprobante
+    // existente NO se actualiza: puede tener cobros aplicados y su saldo se
+    // calcula desde `monto`, así que reescribirlo lo dejaría mintiendo.
+    const conClave = pendientes
+      .map((p) => ({
+        p,
+        clave: claveComprobante({ tipo: p.tipo, referencia: p.serie_numero }),
+        serie: p.serie_numero,
+      }))
+      .filter((x): x is { p: Preparada; clave: string; serie: string } =>
+        x.clave !== null && x.serie !== null,
+      );
+
+    const { set: existen, error: errExistentes } = await existentesDe(conClave);
+    if (errExistentes) {
+      return "No se pudo comprobar qué comprobantes ya tienes cargados, así que no se importó nada para no duplicarlos. Vuelve a intentarlo en un momento.";
+    }
+
+    const aInsertar = pendientes.filter((p) => {
+      const k = claveComprobante({ tipo: p.tipo, referencia: p.serie_numero });
+      if (k === null) return true; // sin número no hay identidad: siempre entra
+      if (existen.has(k)) {
+        resumen.yaExistian++;
+        return false;
+      }
+      // Se recuerda para los lotes siguientes del mismo archivo.
+      yaEnBase.add(k);
+      return true;
+    });
+
+    for (const parte of enLotes(aInsertar, LOTE)) {
       const { error } = await admin.from("comprobantes").insert(parte);
       if (error) {
         // El 23505 no debería ocurrir: los repetidos se filtran antes. Si
@@ -244,6 +310,7 @@ export async function POST(request: Request) {
         ? { mapeo: MAPEO_PLANTILLA, tipoFijo: null }
         : config;
     }
+    filasProcesadas++;
     const p = preparar(cruda, empresa.empresa_id, lote, configFila);
     if (!p) {
       resumen.invalidas++;
@@ -251,6 +318,8 @@ export async function POST(request: Request) {
     }
     const k = claveComprobante({ tipo: p.tipo, referencia: p.serie_numero });
     if (k !== null) {
+      // Repetida dentro del propio archivo. Lo que ya está en la BASE se mira
+      // al vaciar el lote (`descargar`), que es donde se puede preguntar.
       if (vistas.has(k)) {
         resumen.repetidasEnArchivo++;
         return;

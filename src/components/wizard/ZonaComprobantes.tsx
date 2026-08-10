@@ -6,6 +6,8 @@ import { Boton } from "@/components/ui";
 import { quitarComprobantesDelPeriodo } from "@/app/(app)/wizard/actions";
 import { formatearPEN } from "@/lib/parsing/resumen";
 import { descargarPlantilla } from "@/lib/plantilla";
+import { leerCabecera } from "@/lib/parsing/leerArchivo";
+import { esPlantilla } from "@/lib/parsing/mapeoComprobantes";
 import type { ResumenComprobantes } from "@/app/(app)/wizard/actions";
 
 /**
@@ -34,11 +36,14 @@ export function ZonaComprobantes({
   periodo,
   moneda,
   onCambio,
+  mapeoConfigurado = false,
 }: {
   resumen: ResumenComprobantes | null;
   periodo: { desde: string; hasta: string } | null;
   moneda: string;
   onCambio: () => void;
+  /** La empresa ya confirmó con qué columnas viene su archivo. */
+  mapeoConfigurado?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [subiendo, startSubida] = useTransition();
@@ -55,6 +60,32 @@ export function ZonaComprobantes({
     setAviso(null);
     setGrande(file.size > AVISO_GRANDE);
     startSubida(async () => {
+      // ⚠️ Se comprueba ANTES de subir, no después de fallar.
+      //
+      // Esta carga rápida no pregunta por las columnas: usa la plantilla, o el
+      // formato que la empresa ya confirmó en Comprobantes. Con un archivo
+      // ajeno y sin formato guardado, el servidor descartaría TODAS las filas y
+      // el usuario leería "200 filas con datos incompletos" — un mensaje que
+      // culpa a sus datos y no dice dónde arreglarlo.
+      //
+      // Aquí el mapeo es un acto de configuración que se hace una vez, así que
+      // se señala el camino en vez de abrirlo a medias en esta tarjeta.
+      if (!mapeoConfigurado) {
+        try {
+          const { headers } = await leerCabecera(file, 5);
+          if (headers.length > 0 && !esPlantilla(headers)) {
+            setError(
+              "Las columnas de este archivo no son las de la plantilla. Ve a " +
+                "Comprobantes y súbelo ahí: podrás indicar qué columna es cada " +
+                "cosa, se guarda, y a partir de entonces podrás subirlo desde aquí.",
+            );
+            return;
+          }
+        } catch {
+          // Si no se puede leer la cabecera, que lo intente el servidor.
+        }
+      }
+
       const cuerpo = new FormData();
       cuerpo.append("archivo", file);
       try {

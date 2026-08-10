@@ -168,3 +168,42 @@ describe("vista previa de la plantilla", () => {
     expect(cuerpo.match(/<td/g)!.length).toBe(cols);
   });
 });
+
+describe("⚠️ cuando NO se reconoce ninguna fila, el mensaje señala el formato", () => {
+  // Un cliente subió su Excel de 200 filas y leyó "200 filas se descartaron por
+  // datos incompletos": un mensaje que culpa a sus datos cuando el problema era
+  // el formato, y que no dice dónde arreglarlo.
+  it("no habla de datos incompletos: habla de columnas", () => {
+    const m = mensajeImportacion({
+      insertados: 0,
+      yaExistian: 0,
+      repetidasEnArchivo: 0,
+      invalidas: 200,
+    });
+    expect(m).toContain("200");
+    expect(m).toContain("columnas");
+    expect(m).toContain("Comprobantes");
+    expect(m).not.toContain("incompletos");
+  });
+
+  it("si algo entró, el mensaje normal sigue igual", () => {
+    const m = mensajeImportacion({
+      insertados: 180,
+      yaExistian: 0,
+      repetidasEnArchivo: 0,
+      invalidas: 20,
+    });
+    expect(m).toContain("180");
+    expect(m).toContain("20");
+  });
+
+  it("y si todas ya estaban, tampoco cambia", () => {
+    const m = mensajeImportacion({
+      insertados: 0,
+      yaExistian: 200,
+      repetidasEnArchivo: 0,
+      invalidas: 0,
+    });
+    expect(m).toContain("ya estaban cargados");
+  });
+});

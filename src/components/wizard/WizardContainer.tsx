@@ -180,11 +180,14 @@ export function WizardContainer({
   cuentas,
   conexion = null,
   asistente = false,
+  mapeoConfigurado = false,
 }: {
   cuentas: CuentaOpcion[];
   conexion?: ResumenConexion | null;
   /** Si el despliegue tiene modelo configurado (lo decide el servidor). */
   asistente?: boolean;
+  /** La empresa ya confirmó con qué columnas viene su archivo de comprobantes. */
+  mapeoConfigurado?: boolean;
 }) {
   const router = useRouter();
   const [paso, setPaso] = useState<PasoWizard>(1);
@@ -769,6 +772,7 @@ export function WizardContainer({
                   periodo={periodo}
                   moneda={moneda}
                   onCambio={() => setRecargaComprobantes((n) => n + 1)}
+                  mapeoConfigurado={mapeoConfigurado}
                 />
               ) : (
                 // "Conectar sistema" todavía no produce registros. Aun así ocupa

@@ -105,6 +105,22 @@ export type ResumenImportacion = {
 export function mensajeImportacion(r: ResumenImportacion): string {
   const partes: string[] = [];
 
+  // ⚠️ TODAS las filas descartadas no es "datos incompletos": es que no se
+  // reconocieron las columnas.
+  //
+  // Un cliente subió su Excel de 200 filas y leyó «200 filas se descartaron por
+  // datos incompletos», que apunta a sus datos cuando el problema era el
+  // formato del archivo — y no decía dónde arreglarlo. Un mensaje que manda a
+  // revisar lo que está bien es peor que no decir nada.
+  if (r.insertados === 0 && r.yaExistian === 0 && r.invalidas > 0) {
+    return (
+      `No se pudo leer ninguna de las ${r.invalidas.toLocaleString("es-PE")} filas del archivo. ` +
+      "Lo más probable es que sus columnas no sean las de la plantilla: ve a " +
+      "Comprobantes, súbelo ahí y podrás indicar qué columna es cada cosa (se " +
+      "guarda para las próximas veces)."
+    );
+  }
+
   if (r.insertados === 0) {
     partes.push(
       r.yaExistian > 0
