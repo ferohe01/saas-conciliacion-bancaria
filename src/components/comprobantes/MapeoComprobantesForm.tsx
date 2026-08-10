@@ -28,6 +28,110 @@ import { Boton } from "@/components/ui";
  * delata el error antes de importar nada.
  */
 
+/**
+ * «Declara esto para todo el archivo»: la salida cuando el export no trae la
+ * columna. La usan el tipo y la moneda, que fallan igual y por lo mismo.
+ *
+ * ⚠️ **«Usar la columna» se DESHABILITA cuando no hay columna mapeada.** Antes
+ * salía seleccionada por defecto aunque no hubiera nada que usar, y eso dejaba
+ * la pantalla en un estado muerto: las tres filas de la vista previa decían «se
+ * omitiría», el botón estaba apagado, y la salida era un chip de más abajo que
+ * nadie te había señalado. Una opción que no puede funcionar no debe poder
+ * elegirse.
+ *
+ * ⚠️ Y NO se autoselecciona ninguna de las otras. Un libro de ventas son
+ * cobranzas y uno de compras son pagos: elegir por el usuario sería una moneda
+ * al aire que además mueve el dinero al lado equivocado.
+ */
+function DeclaracionArchivo<T extends string>({
+  titulo,
+  descripcion,
+  hayColumna,
+  valor,
+  opciones,
+  onElegir,
+  aviso,
+}: {
+  titulo: string;
+  descripcion: string;
+  hayColumna: boolean;
+  valor: T | null;
+  opciones: { v: T; label: string }[];
+  onElegir: (v: T | null) => void;
+  /** Qué pasa si no se declara nada. `null` cuando declararlo es obligatorio. */
+  aviso: string | null;
+}) {
+  // Sin columna y sin declaración no hay nada elegido: hay que decidir.
+  const pendiente = !hayColumna && valor === null && aviso === null;
+
+  return (
+    <div
+      className={`rounded-xl border p-4 ${
+        pendiente
+          ? "border-amber-300 bg-amber-50"
+          : "border-neutral-200 bg-neutral-50"
+      }`}
+    >
+      <p
+        className={`text-sm font-medium ${
+          pendiente ? "text-amber-900" : "text-neutral-800"
+        }`}
+      >
+        {hayColumna ? titulo : `Tu archivo no trae la columna de ${titulo.toLowerCase()}`}
+      </p>
+      <p
+        className={`mt-1 text-sm ${
+          pendiente ? "text-amber-900" : "text-neutral-600"
+        }`}
+      >
+        {pendiente ? "Dinos qué vale para todas las filas y podrás continuar." : descripcion}
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={!hayColumna}
+          onClick={() => onElegir(null)}
+          aria-pressed={hayColumna && valor === null}
+          title={hayColumna ? undefined : "Tu archivo no trae esa columna"}
+          className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
+            hayColumna && valor === null
+              ? "border-neutral-800 bg-neutral-900 text-white"
+              : hayColumna
+                ? "border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50"
+                : "cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-400"
+          }`}
+        >
+          Usar la columna
+        </button>
+        {opciones.map((o) => {
+          const activo = valor === o.v;
+          return (
+            <button
+              key={o.v}
+              type="button"
+              onClick={() => onElegir(o.v)}
+              aria-pressed={activo}
+              className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
+                activo
+                  ? "border-neutral-800 bg-neutral-900 text-white"
+                  : "border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50"
+              }`}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+      {/* Lo que pasa si no se declara nada. Callarlo convertiría un valor por
+          defecto en una suposición invisible — que es justo el fallo que la
+          moneda vino a corregir. */}
+      {aviso && !hayColumna && valor === null && (
+        <p className="mt-2 text-xs text-neutral-600">{aviso}</p>
+      )}
+    </div>
+  );
+}
+
 export function MapeoComprobantesForm({
   headers,
   muestras,
@@ -102,80 +206,31 @@ export function MapeoComprobantesForm({
         })}
       </div>
 
-      {/* El tipo es el campo que más falta en un export real: un libro de
-          ventas no trae una columna que diga "cobranza", porque todo él lo es.
-          Sin esta salida, la mitad de los archivos serían inmapeables. */}
-      <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
-        <p className="text-sm font-medium text-neutral-800">
-          ¿Tu archivo no tiene columna de tipo?
-        </p>
-        <p className="mt-1 text-sm text-neutral-600">
-          Si todo el archivo es de un solo tipo, decláralo aquí y se aplica a
-          todas las filas.
-        </p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {[
-            { v: null, label: "Usar la columna" },
-            { v: "cobranza" as const, label: "Todo son cobranzas" },
-            { v: "pago" as const, label: "Todo son pagos" },
-          ].map((o) => {
-            const activo = (config.tipoFijo ?? null) === o.v;
-            return (
-              <button
-                key={String(o.v)}
-                type="button"
-                onClick={() => onCambio({ ...config, tipoFijo: o.v })}
-                aria-pressed={activo}
-                className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
-                  activo
-                    ? "border-neutral-800 bg-neutral-900 text-white"
-                    : "border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50"
-                }`}
-              >
-                {o.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <DeclaracionArchivo
+        titulo="Tipo"
+        descripcion="Si todo el archivo es de un solo tipo, decláralo aquí y se aplica a todas las filas."
+        hayColumna={config.mapeo.tipo != null}
+        valor={config.tipoFijo ?? null}
+        opciones={[
+          { v: "cobranza" as const, label: "Todo son cobranzas" },
+          { v: "pago" as const, label: "Todo son pagos" },
+        ]}
+        onElegir={(v) => onCambio({ ...config, tipoFijo: v })}
+        aviso={null}
+      />
 
-      {/* ⚠️ La moneda tiene el mismo problema que el tipo: un export rara vez
-          la trae, porque todo el archivo está en una. Y equivocarla no da un
-          error: da un comprobante que se empareja contra depósitos que no le
-          tocan, o que no aparece nunca. */}
-      <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
-        <p className="text-sm font-medium text-neutral-800">
-          ¿Tu archivo no tiene columna de moneda?
-        </p>
-        <p className="mt-1 text-sm text-neutral-600">
-          Solo se concilian comprobantes de la misma moneda que la cuenta
-          bancaria. No se convierte nada.
-        </p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {[
-            { v: null, label: "Usar la columna" },
-            { v: "PEN", label: "Todo en soles" },
-            { v: "USD", label: "Todo en dólares" },
-          ].map((o) => {
-            const activo = (config.monedaFija ?? null) === o.v;
-            return (
-              <button
-                key={String(o.v)}
-                type="button"
-                onClick={() => onCambio({ ...config, monedaFija: o.v })}
-                aria-pressed={activo}
-                className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
-                  activo
-                    ? "border-neutral-800 bg-neutral-900 text-white"
-                    : "border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50"
-                }`}
-              >
-                {o.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <DeclaracionArchivo
+        titulo="Moneda"
+        descripcion="Solo se concilian comprobantes de la misma moneda que la cuenta bancaria. No se convierte nada."
+        hayColumna={config.mapeo.moneda != null}
+        valor={config.monedaFija ?? null}
+        opciones={[
+          { v: "PEN", label: "Todo en soles" },
+          { v: "USD", label: "Todo en dólares" },
+        ]}
+        onElegir={(v) => onCambio({ ...config, monedaFija: v })}
+        aviso="Si no indicas nada se cargarán como soles (PEN)."
+      />
 
       {ejemplos.length > 0 && (
         <div>
