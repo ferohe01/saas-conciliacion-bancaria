@@ -5,6 +5,7 @@ import {
   esPlantilla,
   configCompleta,
   faltaEnConfig,
+  motivoOmision,
   MAPEO_PLANTILLA,
   ConfigMapeoGuardado,
   type Config,
@@ -207,6 +208,116 @@ describe("lo guardado se valida al LEERLO", () => {
   it("un valor corrupto no rompe la pantalla: simplemente no vale", () => {
     for (const v of [null, "texto", 42, { mapeo: "no es objeto" }]) {
       expect(ConfigMapeoGuardado.safeParse(v).success).toBe(false);
+    }
+  });
+});
+
+/** El archivo real de una prueba: cobros escolares en USD. */
+const COBROS_ESCOLARES = [
+  {
+    "ID DE PAGO": "HE112065245",
+    "ID DE ESTUDIANTE": "UEC-2026-000076",
+    "NOMBRE COMPLETO": "Rosa Ibarra Bravo",
+    MONEDA: "USD",
+    MONTO: "200",
+    FECHA: "29/07/2026",
+  },
+  {
+    "ID DE PAGO": "HE182926614",
+    "ID DE ESTUDIANTE": "UEC-2026-000084",
+    "NOMBRE COMPLETO": "Sofía Gamarra Mendoza",
+    MONEDA: "USD",
+    MONTO: "450",
+    FECHA: "02/07/2026",
+  },
+];
+
+describe("archivo de cobros escolares", () => {
+  const headers = Object.keys(COBROS_ESCOLARES[0]!);
+  const m = detectarColumnasComprobante(headers, COBROS_ESCOLARES);
+
+  it("acierta fecha, importe y nombre", () => {
+    expect(m.fecha).toBe("FECHA");
+    expect(m.monto).toBe("MONTO");
+    expect(m.razon_social).toBe("NOMBRE COMPLETO");
+  });
+
+  it("⚠️ detecta «ID DE PAGO» como la referencia que casa con el banco", () => {
+    // Es la columna que decide el resultado de la conciliación. Sin detectarla,
+    // el usuario tiene que acertar a mano cuál es.
+    expect(m.referencia_externa).toBe("ID DE PAGO");
+  });
+
+  it("⚠️ NO confunde «ID DE ESTUDIANTE» con ella", () => {
+    // "id" a secas casaría con las dos y la asignación elegiría por azar.
+    expect(m.referencia_externa).not.toBe("ID DE ESTUDIANTE");
+  });
+
+  it("no inventa un tipo que el archivo no trae", () => {
+    expect(m.tipo).toBeUndefined();
+  });
+
+  it("sin declarar el tipo, no se puede importar", () => {
+    expect(configCompleta({ mapeo: m, tipoFijo: null })).toBe(false);
+  });
+
+  it("declarándolo, las filas entran completas", () => {
+    const f = aplicarMapeo(COBROS_ESCOLARES[0]!, {
+      mapeo: m,
+      tipoFijo: "cobranza",
+    });
+    expect(f).toMatchObject({
+      fecha: "2026-07-29",
+      monto: 200,
+      tipo: "cobranza",
+      referencia_externa: "HE112065245",
+      razon_social: "Rosa Ibarra Bravo",
+    });
+  });
+});
+
+describe("motivoOmision — decir QUÉ falta, no lo que podría faltar", () => {
+  // La vista previa decía "falta fecha, importe o tipo" en todas las filas, con
+  // la fecha y el importe ya mapeados y correctos. Eso manda a revisar lo que
+  // está bien.
+  const mapeo = { fecha: "FECHA", monto: "MONTO" };
+
+  it("con fecha e importe correctos, solo señala el tipo", () => {
+    expect(
+      motivoOmision(COBROS_ESCOLARES[0]!, { mapeo, tipoFijo: null }),
+    ).toEqual(["el tipo"]);
+  });
+
+  it("señala varios cuando de verdad faltan varios", () => {
+    expect(motivoOmision({}, { mapeo: {}, tipoFijo: null })).toEqual([
+      "la fecha",
+      "el importe",
+      "el tipo",
+    ]);
+  });
+
+  it("no señala el tipo si está declarado para todo el archivo", () => {
+    expect(
+      motivoOmision(COBROS_ESCOLARES[0]!, { mapeo, tipoFijo: "cobranza" }),
+    ).toEqual([]);
+  });
+
+  it("una fila que entra no tiene motivos", () => {
+    const config = { mapeo, tipoFijo: "cobranza" as const };
+    expect(motivoOmision(COBROS_ESCOLARES[0]!, config)).toEqual([]);
+    expect(aplicarMapeo(COBROS_ESCOLARES[0]!, config)).not.toBeNull();
+  });
+
+  it("coincide siempre con aplicarMapeo: si hay motivos, la fila no entra", () => {
+    const casos = [
+      { mapeo: {}, tipoFijo: null },
+      { mapeo, tipoFijo: null },
+      { mapeo, tipoFijo: "cobranza" as const },
+    ];
+    for (const c of casos) {
+      const hayMotivos = motivoOmision(COBROS_ESCOLARES[0]!, c).length > 0;
+      const entra = aplicarMapeo(COBROS_ESCOLARES[0]!, c) !== null;
+      expect(hayMotivos).toBe(!entra);
     }
   });
 });

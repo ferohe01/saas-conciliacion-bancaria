@@ -186,6 +186,35 @@ export function aplicarMapeo(
 }
 
 /**
+ * Por qué se omitiría ESTA fila, campo a campo.
+ *
+ * ⚠️ `aplicarMapeo` solo dice sí o no, y la vista previa mostraba «falta fecha,
+ * importe o tipo» en todas las filas — incluso con la fecha y el importe ya
+ * mapeados y correctos. Un mensaje que enumera lo que podría fallar manda a
+ * revisar lo que está bien; el usuario mira la fecha, la ve puesta, y no
+ * entiende nada.
+ *
+ * Devuelve lista vacía cuando la fila entra.
+ */
+export function motivoOmision(
+  fila: Record<string, unknown>,
+  config: Config,
+): string[] {
+  const col = (campo: CampoComprobante): unknown => {
+    const header = config.mapeo[campo];
+    return header == null ? undefined : fila[header];
+  };
+
+  const falta: string[] = [];
+  if (!normalizarFecha(col("fecha"))) falta.push("la fecha");
+  if (normalizarMonto(col("monto")) == null) falta.push("el importe");
+  if (config.tipoFijo == null && normalizarTipo(col("tipo")) == null) {
+    falta.push("el tipo");
+  }
+  return falta;
+}
+
+/**
  * El mapeo de la plantilla: cada campo en la columna que lleva su nombre.
  *
  * Es lo que se usa cuando nadie ha configurado nada, así que **el camino de

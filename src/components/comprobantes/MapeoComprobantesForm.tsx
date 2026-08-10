@@ -7,6 +7,7 @@ import {
   OBLIGATORIOS,
   faltaEnConfig,
   aplicarMapeo,
+  motivoOmision,
   type CampoComprobante,
   type Config,
 } from "@/lib/parsing/mapeoComprobantes";
@@ -159,13 +160,16 @@ export function MapeoComprobantesForm({
                 {ejemplos.map((m, i) => {
                   const f = aplicarMapeo(m, config);
                   if (!f) {
+                    // Se dice QUÉ falta, no lo que podría faltar: enumerar los
+                    // tres manda a revisar los dos que están bien.
+                    const falta = motivoOmision(m, config);
                     return (
                       <tr key={i} className="border-t border-neutral-100">
                         <td
                           colSpan={6}
                           className="px-3 py-2 text-sm text-amber-700"
                         >
-                          Esta fila se omitiría: falta fecha, importe o tipo.
+                          Esta fila se omitiría: falta {falta.join(" y ")}.
                         </td>
                       </tr>
                     );
@@ -189,6 +193,21 @@ export function MapeoComprobantesForm({
             </table>
           </div>
         </div>
+      )}
+
+      {/* ⚠️ Sin número de documento no hay IDENTIDAD, y sin identidad no se
+          puede detectar que estás subiendo el mismo archivo otra vez: el índice
+          único de la 0018 es parcial y las filas sin número entran siempre.
+          Se puede continuar —hay ventas al contado sin documento— pero callarlo
+          sería dejar que el cliente descubra la tabla duplicada por su cuenta. */}
+      {!config.mapeo.serie_numero && (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          No has indicado el <strong>número de documento</strong>. Puedes
+          continuar, pero sin él no podremos reconocer estas filas si vuelves a
+          subir el mismo archivo: se cargarían por segunda vez. Si tu archivo
+          trae un código único por fila (nº de operación, de recibo, de pago),
+          indícalo ahí.
+        </p>
       )}
 
       {falta.length > 0 && (

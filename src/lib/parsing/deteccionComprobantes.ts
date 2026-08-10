@@ -43,9 +43,21 @@ const KEYWORDS: Record<CampoComprobante, string[]> = {
     "factura",
   ],
   // Con qué casarlo en el banco: SE REPITE a propósito (ver migración 0020).
+  //
+  // ⚠️ Las formas de "id de pago" van AQUÍ y no en `serie_numero`, aunque en
+  // algunos sistemas sean lo mismo. Un archivo real de cobros escolares traía
+  // «ID DE PAGO» junto a «ID DE ESTUDIANTE» y ninguna se detectaba: la primera
+  // es la operación con la que el banco identifica el cobro —la que decide el
+  // resultado de la conciliación— y la segunda no es un documento.
+  //
+  // "id" a secas NO entra: casaría igual con «ID DE ESTUDIANTE» y la asignación
+  // greedy elegiría una de las dos por azar. Las formas compuestas son
+  // específicas y no colisionan.
   referencia_externa: [
     "referencia", "ref", "operacion", "nro operacion", "n operacion",
     "codigo operacion", "recibo", "recibos", "deposito", "voucher",
+    "id de pago", "id pago", "idpago", "codigo de pago", "cod pago",
+    "nro de pago", "numero de pago", "n de pago", "payment id",
   ],
   ruc_contraparte: ["ruc", "documento identidad", "dni", "nro documento cliente"],
   razon_social: [
