@@ -230,11 +230,17 @@ export function faltaEnConfig(config: Config): string[] {
 }
 
 /**
- * Validación de lo que está guardado en `empresas.mapeo_comprobantes`.
+ * El ÚNICO esquema del mapeo. Valida las tres puertas por las que entra:
+ * lo que manda el navegador, lo que guarda la empresa y lo que se lee de vuelta.
  *
- * Se valida al leer y no solo al escribir: la columna es JSONB y pudo quedar
- * de una versión anterior con otra forma. Un mapeo corrupto no debe romper la
- * pantalla — se ignora y se vuelve a detectar, que es el peor caso aceptable.
+ * ⚠️ Una copia por sitio es lo que se separa con el tiempo, y aquí separarse
+ * significaría que el navegador puede mandar una forma que el guardado rechaza
+ * —o al revés—. Se valida también AL LEER porque la columna es JSONB y pudo
+ * quedar de una versión anterior: un mapeo corrupto se ignora y se vuelve a
+ * detectar, que es el peor caso aceptable.
+ *
+ * ⚠️ `.strict()` no es decorativo: este valor elige QUÉ COLUMNA se lee para
+ * cada dato, así que una clave inesperada no puede colarse hasta el `insert`.
  */
 export const ConfigMapeoGuardado = z.object({
   mapeo: z

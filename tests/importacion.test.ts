@@ -153,19 +153,38 @@ describe("referencia_externa no interfiere con la deduplicación", () => {
   });
 });
 
-describe("vista previa de la plantilla", () => {
+describe("vista previa del mapeo", () => {
   it("la cabecera y el cuerpo tienen el mismo número de columnas", () => {
-    // Tenía 9 títulos y 8 celdas: cada valor aparecía bajo la columna
-    // siguiente. En una pantalla cuyo trabajo es que revises el mapeo, eso no
-    // es cosmético.
+    // Una versión anterior tenía 9 títulos y 8 celdas: cada valor aparecía bajo
+    // la columna siguiente. En una tabla cuyo único trabajo es que el usuario
+    // reconozca si mapeó bien, eso no es cosmético — es la tabla diciéndole que
+    // la fecha está donde no está.
     const fs = require("node:fs") as typeof import("node:fs");
-    const plantilla = fs.readFileSync("src/lib/plantilla.ts", "utf8");
-    const cols = plantilla
-      .slice(plantilla.indexOf("COLUMNAS_PLANTILLA = ["), plantilla.indexOf("] as const"))
-      .match(/"[a-z_]+"/g)!.length;
-    const comp = fs.readFileSync("src/components/wizard/ImportadorComprobantes.tsx", "utf8");
-    const cuerpo = comp.slice(comp.indexOf("filas.slice(0, 5).map"), comp.indexOf("</tbody>"));
-    expect(cuerpo.match(/<td/g)!.length).toBe(cols);
+    const comp = fs.readFileSync(
+      "src/components/comprobantes/MapeoComprobantesForm.tsx",
+      "utf8",
+    );
+    const cabecera = comp.slice(comp.indexOf("<thead"), comp.indexOf("</thead>"));
+    const cuerpo = comp.slice(comp.indexOf("<tbody"), comp.indexOf("</tbody>"));
+    const titulos = cabecera.match(/<th[ >]/g)!.length;
+    // El `colSpan` de la fila "se omitiría" no cuenta: es una celda que ocupa
+    // toda la anchura a propósito.
+    const celdas = cuerpo.match(/<td(?![^>]*colSpan)/g)!.length;
+    expect(titulos).toBeGreaterThan(0);
+    expect(celdas).toBe(titulos);
+  });
+
+  it("el colSpan de la fila omitida cubre todas las columnas", () => {
+    const fs = require("node:fs") as typeof import("node:fs");
+    const comp = fs.readFileSync(
+      "src/components/comprobantes/MapeoComprobantesForm.tsx",
+      "utf8",
+    );
+    const titulos = comp
+      .slice(comp.indexOf("<thead"), comp.indexOf("</thead>"))
+      .match(/<th[ >]/g)!.length;
+    const span = comp.match(/colSpan=\{(\d+)\}/);
+    expect(Number(span![1])).toBe(titulos);
   });
 });
 

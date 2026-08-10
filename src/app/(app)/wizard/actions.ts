@@ -26,19 +26,7 @@ import { verificarCifras } from "@/lib/ia/verificacion";
 import type { MapeoColumnas } from "@/lib/parsing/deteccion";
 import type { RegistroInterno } from "@/lib/contract/payload";
 import type { ContadoresPrevios } from "@/lib/diagnosticoPrevio";
-import { CAMPOS_COMPROBANTE } from "@/lib/parsing/mapeoComprobantes";
-
-/** Mismo cierre que en la ruta de importación: solo campos conocidos. */
-const ConfigComprobantes = z.object({
-  mapeo: z
-    .object(
-      Object.fromEntries(
-        CAMPOS_COMPROBANTE.map((c) => [c, z.string().min(1).optional()]),
-      ) as Record<(typeof CAMPOS_COMPROBANTE)[number], z.ZodOptional<z.ZodString>>,
-    )
-    .strict(),
-  tipoFijo: z.enum(["cobranza", "pago"]).nullable().optional(),
-});
+import { ConfigMapeoGuardado } from "@/lib/parsing/mapeoComprobantes";
 
 /**
  * Importación de comprobantes desde la plantilla Excel (§6.4). El cliente ya
@@ -617,7 +605,7 @@ export async function guardarMapeoComprobantes(
   const empresa = await getEmpresaActual();
   if (!empresa) return { ok: false, error: "Sesión no válida." };
 
-  const parsed = ConfigComprobantes.safeParse(config);
+  const parsed = ConfigMapeoGuardado.safeParse(config);
   if (!parsed.success) {
     return { ok: false, error: "El mapeo de columnas no es válido." };
   }

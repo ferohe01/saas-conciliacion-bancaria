@@ -4,7 +4,6 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getEmpresaActual } from "@/lib/auth";
 import { enLotes } from "@/lib/supabase/paginado";
 import { LectorCsv, type FilaCsv } from "@/lib/parsing/csv";
-import { z } from "zod";
 import {
   claveComprobante,
   mensajeImportacion,
@@ -14,7 +13,7 @@ import {
   aplicarMapeo,
   esPlantilla,
   MAPEO_PLANTILLA,
-  CAMPOS_COMPROBANTE,
+  ConfigMapeoGuardado,
   type Config,
 } from "@/lib/parsing/mapeoComprobantes";
 
@@ -95,24 +94,6 @@ function preparar(
 }
 
 /**
- * El mapeo, validado.
- *
- * ⚠️ Solo se admiten los nombres de campo conocidos. El valor viaja desde el
- * navegador y acaba eligiendo QUÉ COLUMNA se lee para cada dato: sin cerrar la
- * forma, una clave inesperada entraría hasta el `insert`.
- */
-const ConfigMapeo = z.object({
-  mapeo: z
-    .object(
-      Object.fromEntries(
-        CAMPOS_COMPROBANTE.map((c) => [c, z.string().min(1).optional()]),
-      ) as Record<(typeof CAMPOS_COMPROBANTE)[number], z.ZodOptional<z.ZodString>>,
-    )
-    .strict(),
-  tipoFijo: z.enum(["cobranza", "pago"]).nullable().optional(),
-});
-
-/**
  * De dónde sale el mapeo, en orden: lo que manda esta petición, lo que la
  * empresa dejó configurado, y si no, la plantilla.
  *
@@ -120,9 +101,9 @@ const ConfigMapeo = z.object({
  * el formato del cliente sin volver a preguntar nada.
  */
 function resolverConfig(crudo: unknown, guardado: unknown): Config {
-  const parsed = ConfigMapeo.safeParse(crudo);
+  const parsed = ConfigMapeoGuardado.safeParse(crudo);
   if (parsed.success) return parsed.data;
-  const previo = ConfigMapeo.safeParse(guardado);
+  const previo = ConfigMapeoGuardado.safeParse(guardado);
   if (previo.success) return previo.data;
   return { mapeo: MAPEO_PLANTILLA, tipoFijo: null };
 }

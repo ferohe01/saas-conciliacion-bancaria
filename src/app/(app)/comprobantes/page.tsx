@@ -3,15 +3,13 @@ import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getEmpresaActual } from "@/lib/auth";
-import { ConfigMapeoGuardado } from "@/lib/parsing/mapeoComprobantes";
-import { ImportadorComprobantes } from "@/components/wizard/ImportadorComprobantes";
 import {
   CargasRealizadas,
   type Carga,
 } from "@/components/comprobantes/CargasRealizadas";
 import { formatearFecha } from "@/lib/parsing/resumen";
 import { montoPEN } from "@/lib/suscripcion";
-import { EncabezadoPagina, EstadoVacio } from "@/components/ui";
+import { EncabezadoPagina, EstadoVacio, clasesBoton } from "@/components/ui";
 import { FiltrosComprobantes } from "@/components/comprobantes/FiltrosComprobantes";
 import { VaciarComprobantes } from "@/components/comprobantes/VaciarComprobantes";
 import {
@@ -74,12 +72,6 @@ export default async function ComprobantesPage({
   const sp = await searchParams;
   const empresa = await getEmpresaActual();
   if (!empresa) notFound();
-
-  // El formato del archivo del cliente, si ya lo confirmó alguna vez. Se pasa
-  // al importador para que no vuelva a preguntar.
-  const mapeoGuardado = ConfigMapeoGuardado.safeParse(
-    empresa.mapeo_comprobantes,
-  );
 
   // ⚠️ `admin` + filtro EXPLÍCITO de empresa, no el cliente de RLS.
   //
@@ -144,13 +136,19 @@ export default async function ComprobantesPage({
 
   return (
     <div className="space-y-6">
+      {/* ⚠️ Aquí NO se cargan comprobantes: se consultan y se gestionan.
+          Cargarlos vive en un solo sitio, la tarjeta «Comprobantes del período»
+          de Nueva conciliación. Tener dos puertas para la misma tarea —una aquí
+          y otra en el wizard— obligaba a elegir cuál usar antes de entender la
+          diferencia, que no existía. */}
       <EncabezadoPagina
         titulo="Comprobantes"
         descripcion="Tus cobranzas y pagos. De aquí salen los registros internos de cada conciliación, y aquí se ve lo que ya cobraste."
-      />
-
-      <ImportadorComprobantes
-        mapeoGuardado={mapeoGuardado.success ? mapeoGuardado.data : null}
+        accion={
+          <Link href="/wizard" className={clasesBoton("secundario", "md")}>
+            Cargar comprobantes
+          </Link>
+        }
       />
 
       <CargasRealizadas cargas={cargas} />
@@ -163,7 +161,12 @@ export default async function ComprobantesPage({
         <EstadoVacio
           icono={<DocumentoIcon className="h-6 w-6" />}
           titulo="Todavía no has cargado comprobantes"
-          texto="Descarga la plantilla de arriba, llénala con tus cobranzas y pagos, y súbela. Luego podrás conciliar usando estos datos en lugar de un archivo suelto."
+          texto="Se cargan al empezar una conciliación, en «Comprobantes del período»: sube el archivo que exporte tu sistema —con las columnas que tenga— o descarga ahí la plantilla si no tienes ninguno."
+          accion={
+            <Link href="/wizard" className={clasesBoton("primario", "md")}>
+              Cargar comprobantes
+            </Link>
+          }
         />
       ) : filas.length === 0 ? (
         <p className="rounded-2xl border border-neutral-200 bg-white px-5 py-4 text-sm text-neutral-600">
