@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Marca, NOMBRE_MARCA } from "@/components/ui/Marca";
+import { ERPS_PORTADA } from "@/lib/conexiones";
 
 /*
  * HOME — "Conciliación en vivo" (Persuade)
@@ -128,12 +129,17 @@ export default function Home() {
             </div>
 
             {/* "Cualquier tamaño" es una afirmación, y sin nada que la sostenga
-                suena a eslogan. Estas dos líneas la prueban con lo que el
-                sistema hace de verdad — sin nombrar a ningún cliente ni citar
-                sus cifras, que son suyas. */}
+                suena a eslogan. Estas tres líneas la prueban con lo que el
+                sistema hace de verdad —los bancos, los sistemas y la escala—
+                sin nombrar a ningún cliente ni citar sus cifras, que son suyas.
+
+                ⚠️ La de los sistemas dice "con el archivo que exporte", NO "nos
+                conectamos con tu ERP": hoy no hay ninguna sincronización
+                construida, y la portada es el peor sitio para prometerla. */}
             <ul className="mt-6 space-y-2 text-sm text-neutral-500">
               {[
                 "Funciona con el extracto de cualquier banco en Excel, CSV o PDF.",
+                `Con el archivo que exporte tu sistema —${ERPS_PORTADA.join(", ")} o el que uses—, con las columnas que traiga.`,
                 "Desde unas decenas de comprobantes al mes hasta cientos de miles.",
               ].map((t) => (
                 <li key={t} className="flex items-center gap-2">

@@ -168,3 +168,27 @@ export type ConexionErp = ConexionErpInput & {
   estado: string;
   updated_at?: string | null;
 };
+
+/**
+ * Los sistemas que la PORTADA nombra, en su forma corta y reconocible.
+ *
+ * Vive aquí, pegado al catálogo, y no en la página: son dos listas que tienen
+ * que decir lo mismo, y separarlas es cómo acaban divergiendo.
+ *
+ * ⚠️ **No prometen integración.** Hoy no hay ninguna sincronización construida:
+ * lo que el producto hace es leer el ARCHIVO que exporte cualquiera de ellos,
+ * con las columnas que traiga. Decir «nos conectamos con tu ERP» sería vender
+ * algo que no existe, y la portada es el peor sitio posible para hacerlo.
+ *
+ * ⚠️ Cada nombre es una promesa que se cobra en la pantalla siguiente: quien lee
+ * «Oracle» en la portada, se registra y no lo encuentra en «Conectar sistema»
+ * concluye que el producto no es para él —y lo descubre justo después de darte
+ * sus datos—. `tests/landing.test.ts` ata las dos listas.
+ */
+export const ERPS_PORTADA = [
+  "SAP",
+  "Dynamics",
+  "Oracle",
+  "Defontana",
+  "Nubefact",
+] as const;
