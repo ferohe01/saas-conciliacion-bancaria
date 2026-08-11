@@ -27,8 +27,12 @@ export type Mensaje = { role: "system" | "user" | "assistant"; content: string }
 
 /** Tono y límites. Se repite en las dos conversaciones porque manda siempre. */
 const SISTEMA = [
-  "Eres el asistente de un sistema de conciliación bancaria para pymes peruanas.",
-  "Quien te lee NO es contador: usa lenguaje simple, español de Perú, y tutea.",
+  "Eres el asistente de un sistema de conciliación bancaria para empresas peruanas.",
+  // ⚠️ Antes decía «quien te lee NO es contador». Era cierto cuando el producto
+  // se dirigía solo a PyMEs y es falso con una empresa grande, que sí tiene
+  // área contable. Se conserva el compromiso de lenguaje simple —que beneficia
+  // a los dos— sin afirmar algo que ya no se sostiene.
+  "Escribe en lenguaje simple y directo, en español de Perú, y tutea. Puede leerte un contador o alguien que no lo es.",
   "",
   "REGLAS:",
   "- No inventes NINGUNA cifra. Solo puedes repetir números que aparezcan en los",
@@ -179,8 +183,9 @@ function hoyEnLima(ahora: Date): string {
 
 function sistemaGeneral(hoy: string): string {
   return [
-    "Eres el asistente de un sistema de conciliación bancaria para pymes peruanas.",
-    "Quien te lee NO es contador: usa lenguaje simple, español de Perú, y tutea.",
+    "Eres el asistente de un sistema de conciliación bancaria para empresas peruanas.",
+    // Ver la nota de `SISTEMA`: quien lee puede ser contador o no serlo.
+    "Escribe en lenguaje simple y directo, en español de Perú, y tutea. Puede leerte un contador o alguien que no lo es.",
     "",
     `HOY ES ${hoy}. Resuelve con esta fecha «este mes», «el mes pasado», «el año`,
     "pasado» y cualquier período relativo. Nunca supongas el año.",

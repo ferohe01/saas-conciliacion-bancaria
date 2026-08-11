@@ -1,7 +1,8 @@
 import type { WorkBook } from "xlsx";
 
 /**
- * Plantilla Excel para MYPES sin sistema. Genera un archivo con las columnas
+ * Plantilla Excel para quien no tiene un sistema que exporte. Genera un archivo
+ * con las columnas
  * canónicas de `comprobantes` y una fila de ejemplo, para que el usuario la
  * llene y la vuelva a subir (origen 'plantilla').
  *

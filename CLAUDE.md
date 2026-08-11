@@ -6,9 +6,17 @@ tocar código.
 ## Qué es esto
 
 Interfaz web + backend delgado + base de datos para un SaaS de **conciliación
-bancaria asistida por IA** dirigido a PyMEs peruanas. El usuario típico **no es
-contador de profesión**: la UI es guiada, en español (es-PE), con lenguaje
-simple.
+bancaria asistida por IA** dirigido a **empresas peruanas de cualquier tamaño**,
+de la pequeña que emite 50 comprobantes al mes a la que mueve cientos de miles.
+El usuario **puede no ser contador de profesión**, así que la UI es guiada, en
+español (es-PE) y con lenguaje simple — eso no cambia con el tamaño.
+
+⚠️ Nació apuntando solo a PyMEs y esa suposición se coló en la portada, en los
+metadatos y en el prompt del asistente. **La diferencia entre segmentos no es de
+discurso: vive en `empresas.modo_carga` (`0040`)** — plantilla obligatoria por
+defecto, formato propio para quien exporta de un ERP. Al escribir texto nuevo,
+no volver a estrechar el público: lo que distingue a un cliente de otro es cómo
+carga sus datos y cuánto volumen mueve, no su tamaño en abstracto.
 
 **El motor de conciliación NO vive aquí.** Corre como flujos de **n8n**
 externos, invocados por webhook. Este proyecto implementa la interfaz, un

@@ -38,9 +38,9 @@ import { ConfigConciliacion } from "@/lib/contract/config";
 /**
  * Tope de partidas por lado en una conciliación.
  *
- * Es un TECHO, no un objetivo: una PyME con 500–2.000 movimientos —el caso para
- * el que está pensado el producto— no lo roza nunca. Existe para que un archivo
- * absurdo no tumbe el motor ni deje un `resultado` inmanejable.
+ * Es un TECHO, no un objetivo: una empresa con 500–2.000 movimientos —el caso
+ * más común— no lo roza nunca. Existe para que un archivo absurdo no tumbe el
+ * motor ni deje un `resultado` inmanejable.
  *
  * ⚠️ VA EMPAREJADO CON EL TOPE DE PAYLOAD DE n8n. Cada fila pesa ~194 bytes
  * medidos, así que el payload son `filas × 2 × 194`:
@@ -75,7 +75,7 @@ const MAX_FILAS = maxFilasConciliacion();
  * ── Modo PAYLOAD (arrays) ──────────────────────────────────────────────────
  *
  * El camino de siempre, que sigue vivo: el navegador parsea el extracto y manda
- * las filas. Para una PyME de 500–2.000 movimientos es más simple y no tiene
+ * las filas. Con 500–2.000 movimientos es más simple y no tiene
  * ninguna desventaja, y además es el que usan todas las conciliaciones ya
  * guardadas.
  */

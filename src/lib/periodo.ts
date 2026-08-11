@@ -83,8 +83,8 @@ export function mesDeISO(iso: string): string | null {
 /**
  * ── Rango libre de fechas ───────────────────────────────────────────────────
  *
- * El mes calendario cubre a la PyME, que es para quien está pensado el
- * producto, y por eso sigue siendo lo primero del desplegable. Pero hay
+ * El mes calendario cubre al caso más común y por eso sigue siendo lo primero
+ * del desplegable. Pero hay
  * clientes cuyo período natural NO es el mes: una recaudadora con 450.000
  * movimientos mensuales concilia por día —su día pico son 36.390 partidas— y
  * con solo meses no podía expresar su propio corte. El motor ya lo aguantaba;

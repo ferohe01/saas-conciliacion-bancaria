@@ -9,8 +9,10 @@ import { Marca, NOMBRE_MARCA } from "@/components/ui/Marca";
  * OWN-WORLD: azul marca como campo comprometido (media página en desktop),
  *   workspace blanco, verde esmeralda SOLO como semántica de "conciliado/cuadra",
  *   números tabulares, el par ledger Tus registros ↔ Tu banco.
- * STORY: una PyME/su contador ve sus ventas emparejadas al banco por IA, con
- *   confianza y "Cuadre S/ 0.00 ✓" → entiende que concilia por ella y crea cuenta.
+ * STORY: una empresa —o su contador— ve sus ventas emparejadas al banco por IA,
+ *   con confianza y "Cuadre S/ 0.00 ✓" → entiende que concilia por ella y crea
+ *   cuenta. Sirve igual a quien mueve 50 comprobantes al mes que a quien mueve
+ *   cientos de miles, y la página lo dice en vez de dejarlo a la fe.
  * FIRST VIEWPORT: izq. marca + H1 + subtítulo + CTAs; der. panel de conciliación.
  * FORM: hero dividido, producto-como-héroe. Datos del panel: ilustrativos.
  */
@@ -37,7 +39,12 @@ const METODO_ESTILO: Record<Par["metodo"], string> = {
 const PASOS = [
   {
     titulo: "Sube tus datos",
-    texto: "Tus ventas o comprobantes y el extracto del banco, en Excel, CSV o PDF.",
+    // Los dos caminos de carga son el diferenciador real entre segmentos —la
+    // plantilla para quien no tiene sistema, su propio archivo para quien
+    // exporta de un ERP— y ya están construidos (0039/0040). Nombrarlos aquí es
+    // lo que hace creíble que sirva a una empresa de cualquier tamaño.
+    texto:
+      "Tus comprobantes y el extracto del banco. Usa nuestra plantilla o sube el archivo que exporte tu sistema, con las columnas que tenga.",
   },
   {
     titulo: "La IA concilia",
@@ -85,7 +92,7 @@ export default function Home() {
           <div className="ci-rise">
             <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-medium text-neutral-600 ring-1 ring-neutral-200">
               <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              Para PyMEs peruanas
+              Para empresas peruanas de cualquier tamaño
             </span>
 
             <h1 className="mt-5 text-4xl font-extrabold leading-[1.05] tracking-[-0.03em] text-balance text-neutral-900 sm:text-5xl lg:text-6xl">
@@ -93,7 +100,7 @@ export default function Home() {
             </h1>
 
             <p className="mt-4 max-w-md text-lg leading-relaxed text-neutral-600">
-              Conciliación bancaria asistida por IA para PyMEs peruanas.
+              Conciliación bancaria asistida por IA para empresas peruanas.
             </p>
 
             <p className="mt-4 max-w-md text-[15px] leading-relaxed text-neutral-500">
@@ -120,12 +127,23 @@ export default function Home() {
               </Link>
             </div>
 
-            <p className="mt-6 flex items-center gap-2 text-sm text-neutral-500">
-              <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none text-emerald-600" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20 6L9 17l-5-5" />
-              </svg>
-              Funciona con el extracto de cualquier banco en Excel, CSV o PDF.
-            </p>
+            {/* "Cualquier tamaño" es una afirmación, y sin nada que la sostenga
+                suena a eslogan. Estas dos líneas la prueban con lo que el
+                sistema hace de verdad — sin nombrar a ningún cliente ni citar
+                sus cifras, que son suyas. */}
+            <ul className="mt-6 space-y-2 text-sm text-neutral-500">
+              {[
+                "Funciona con el extracto de cualquier banco en Excel, CSV o PDF.",
+                "Desde unas decenas de comprobantes al mes hasta cientos de miles.",
+              ].map((t) => (
+                <li key={t} className="flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none text-emerald-600" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 6L9 17l-5-5" />
+                  </svg>
+                  {t}
+                </li>
+              ))}
+            </ul>
           </div>
 
           {/* Columna de prueba: panel de conciliación en vivo */}
@@ -203,7 +221,7 @@ export default function Home() {
         <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-4 px-6 py-8 sm:flex-row sm:items-center">
           <Marca className="text-sm text-neutral-800" />
           <p className="text-sm text-neutral-600">
-            Hecho para PyMEs del Perú · {new Date().getFullYear()}
+            Hecho en Perú · {new Date().getFullYear()}
           </p>
         </div>
       </footer>

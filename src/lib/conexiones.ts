@@ -18,10 +18,16 @@ export type SistemaErp = {
 };
 
 /**
- * Catálogo de sistemas frecuentes en PyMEs peruanas. Es una ayuda para elegir,
- * no una lista de integraciones disponibles: hoy no hay ninguna disponible.
- * Vive en el código y no en la BD a propósito —cambia con el mercado, no con el
+ * Catálogo de sistemas frecuentes en empresas peruanas. Es una ayuda para
+ * elegir, no una lista de integraciones disponibles: hoy no hay ninguna. Vive
+ * en el código y no en la BD a propósito —cambia con el mercado, no con el
  * esquema— y por eso `0017` no le pone un check de valores a la columna.
+ *
+ * ⚠️ Cubre los tres tamaños a propósito. La lista llegó a tener solo
+ * facturadores y ERPs de gama media, y **una empresa grande que no ve el suyo
+ * concluye que el producto no es para ella** — en la primera pantalla donde
+ * puede comprobar lo que promete la portada. Que falte el catálogo dice más que
+ * cualquier titular.
  */
 export const SISTEMAS_ERP: readonly SistemaErp[] = [
   { id: "nubefact", nombre: "Nubefact", nota: "Facturación electrónica" },
@@ -33,7 +39,12 @@ export const SISTEMAS_ERP: readonly SistemaErp[] = [
   { id: "siigo", nombre: "Siigo", nota: "Contable" },
   { id: "starsoft", nombre: "StarSoft", nota: "ERP" },
   { id: "ofisis", nombre: "Ofisis", nota: "ERP" },
+  { id: "softland", nombre: "Softland", nota: "ERP" },
+  { id: "odoo", nombre: "Odoo", nota: "ERP" },
   { id: "sap_b1", nombre: "SAP Business One", nota: "ERP" },
+  { id: "sap_s4", nombre: "SAP S/4HANA · ECC", nota: "ERP corporativo" },
+  { id: "dynamics", nombre: "Microsoft Dynamics 365", nota: "ERP corporativo" },
+  { id: "oracle", nombre: "Oracle (NetSuite / Fusion)", nota: "ERP corporativo" },
   { id: "otro", nombre: "Otro sistema", nota: "Dinos cuál" },
 ] as const;
 
