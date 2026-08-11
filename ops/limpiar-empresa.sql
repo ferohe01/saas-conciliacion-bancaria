@@ -12,11 +12,21 @@
 -- `RCLONE_REMOTE` está vacío. Antes de ejecutar nada, comprueba que hay un dump
 -- reciente en /opt/backups/supabase.
 --
--- ⚠️ Se ejecuta desde el SQL Editor de Studio, que corre como superusuario. El
--- rol de PostgREST tiene `statement_timeout = 8s` y estos borrados tardan más.
+-- ⚠️ SE EJECUTA DESDE EL SQL EDITOR DE STUDIO, y no es una preferencia: **por
+-- la API no se puede**. El rol de PostgREST lleva `statement_timeout = 8s` y
+-- además no puede desactivar triggers. Medido contra producción el 09/08/2026:
+-- borrar por REST **200 filas** de `aplicaciones_cobro` filtrando por empresa se
+-- cancela a los 8,7 s. No es el número de filas —lo caro es recorrer y ordenar
+-- 447.795— así que bajar el lote no arregla nada. Studio corre como
+-- superusuario, sin ese tope.
 --
--- CÓMO SE USA: ejecuta los bloques EN ORDEN, uno a uno, leyendo lo que devuelve
--- cada uno. El bloque 1 no borra nada: solo enseña qué se va a llevar.
+-- CÓMO SE USA: dos pasos. Pega el BLOQUE 1 y léelo —no borra nada, solo enseña
+-- qué se llevaría y de qué empresa—. Si el nombre y el RUC son los correctos,
+-- pega el BLOQUE 2 entero: borra, refresca estadísticas y comprueba.
+--
+-- Lo que había en WIN al medirlo (09/08/2026), para reconocer el bloque 1:
+--   comprobantes 452.309 · movimientos 450.999 · conciliaciones 1 (junio,
+--   APROBADA) · pares 447.795 · cobros aplicados 447.795 · cuentas 1 (se queda).
 -- ============================================================================
 
 
@@ -44,7 +54,7 @@ order by e.nombre;
 
 
 -- ---------------------------------------------------------------------------
--- 2) EL BORRADO
+-- 2) EL BORRADO  (pega este bloque entero, de aquí al final)
 --
 -- Sustituye el `where` del `select ... into` por el id exacto que devolvió el
 -- bloque 1. Se hace todo en UNA transacción: si algo falla, no queda a medias.
@@ -69,6 +79,14 @@ begin
   select e.id into strict v_empresa
     from public.empresas e
    where e.nombre ilike '%WIN%';   -- ← o: where e.id = '....'::uuid
+
+  -- Comprobado el 09/08/2026: el id de «WIN Telecomunicaciones - TEST» es
+  -- 05dade93-3aaf-4a7e-bba0-d7d9e0859080, y el otro inquilino (Proinnovate,
+  -- 031ae6cb-…) no casa con '%WIN%'. Si prefieres no fiarte del nombre,
+  -- sustituye el where por el id y borra este raise.
+  if v_empresa <> '05dade93-3aaf-4a7e-bba0-d7d9e0859080'::uuid then
+    raise notice '⚠️  Ojo: la empresa resuelta NO es la WIN de agosto de 2026.';
+  end if;
 
   raise notice 'Limpiando empresa %', v_empresa;
 
@@ -103,26 +121,19 @@ end $$;
 commit;
 
 
--- ---------------------------------------------------------------------------
--- 3) ESTADÍSTICAS
---
--- ⚠️ No es opcional. Estas tablas acaban de perder medio millón de filas y el
--- planificador sigue creyendo que están llenas: elegirá planes pensados para lo
--- que ya no hay. Es la misma lección de la 0029/0030 al revés — allí la tabla
--- creció, aquí se vació, y el efecto es el mismo.
--- ---------------------------------------------------------------------------
+-- ⚠️ Las estadísticas van FUERA de la transacción: `analyze` no puede correr
+-- dentro de un bloque explícito. No es opcional — estas tablas acaban de perder
+-- medio millón de filas y el planificador sigue creyendo que están llenas, así
+-- que elegiría planes pensados para lo que ya no hay. Es la lección de la
+-- 0029/0030 al revés: allí la tabla creció, aquí se vació, y el efecto es el
+-- mismo.
 analyze public.comprobantes;
 analyze public.movimientos_extracto;
 analyze public.matches_conciliacion;
 analyze public.aplicaciones_cobro;
 analyze public.jobs_conciliacion;
 
-
--- ---------------------------------------------------------------------------
--- 4) COMPROBAR QUE QUEDÓ LIMPIA
---
--- Los cinco primeros a cero; las cuentas bancarias intactas.
--- ---------------------------------------------------------------------------
+-- Y la comprobación: los cinco primeros a cero, las cuentas bancarias intactas.
 select
   e.nombre,
   (select count(*) from public.comprobantes         c  where c.empresa_id = e.id) as comprobantes,
@@ -137,7 +148,7 @@ where e.nombre ilike '%WIN%';
 
 
 -- ---------------------------------------------------------------------------
--- 5) OPCIONAL — empezar también sin la configuración de formatos
+-- 3) OPCIONAL — empezar también sin la configuración de formatos
 --
 -- Lo de arriba CONSERVA el formato de columnas aprendido y el modo de carga,
 -- que es lo que normalmente quieres: la corrida limpia es de datos, no de
