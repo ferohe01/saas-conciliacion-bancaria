@@ -17,6 +17,7 @@ import {
   type Config,
 } from "@/lib/parsing/mapeoComprobantes";
 import { permiteArchivoPropio } from "@/lib/modoCarga";
+import { registrarImportacion } from "@/lib/importacion-servidor";
 
 /**
  * Ingesta de comprobantes EN SERVIDOR, por lotes.
@@ -160,6 +161,10 @@ export async function POST(request: Request) {
     repetidasEnArchivo: 0,
     invalidas: 0,
   };
+  // Rango de fechas de lo que entra. Es lo que después permite saber QUÉ CARGAS
+  // alimentan un período sin recorrer medio millón de comprobantes (0043).
+  let fechaMin: string | null = null;
+  let fechaMax: string | null = null;
 
   // ── Qué comprobantes YA están cargados ────────────────────────────────────
   //
@@ -311,6 +316,8 @@ export async function POST(request: Request) {
       resumen.invalidas++;
       return;
     }
+    if (fechaMin === null || p.fecha < fechaMin) fechaMin = p.fecha;
+    if (fechaMax === null || p.fecha > fechaMax) fechaMax = p.fecha;
     const k = claveComprobante({ tipo: p.tipo, referencia: p.serie_numero });
     if (k !== null) {
       // Repetida dentro del propio archivo. Lo que ya está en la BASE se mira
@@ -383,6 +390,25 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+
+  // ── Qué pasó en esta carga, para poder contarlo después ──────────────────
+  //
+  // Estos cuatro contadores existían solo para el mensaje de la pantalla, que
+  // desaparece al recargar. Sin ellos guardados no hay forma de explicar por qué
+  // un archivo de 452.605 filas produce 452.309 comprobantes — y esa pregunta
+  // se hace SIEMPRE, en la primera demo, sobre datos que están bien.
+  //
+  // Se registra aunque no se insertara nada: "0 de 3.000, todas repetidas" es
+  // justo lo que hay que poder mirar más tarde.
+  await registrarImportacion({
+    lote,
+    empresaId: empresa.empresa_id,
+    archivo: archivo.name,
+    filasLeidas: filasProcesadas,
+    ...resumen,
+    fechaMin,
+    fechaMax,
+  });
 
   // Mismo motivo que en la ingesta del extracto: tras meter cientos de miles
   // de filas, el planificador necesita saberlo antes de la primera

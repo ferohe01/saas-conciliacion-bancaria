@@ -3,11 +3,16 @@ import { EncabezadoPagina, clasesBoton } from "@/components/ui";
 import { FiltroPeriodos } from "@/components/resumen/FiltroPeriodos";
 import { mesesRecientes, rangoDeMes } from "@/lib/periodo";
 import { montoPEN } from "@/lib/suscripcion";
-import { getResumenEjecutivo } from "@/lib/resumenEjecutivo-servidor";
+import {
+  getResumenEjecutivo,
+  getOrigenUltimaConciliacion,
+} from "@/lib/resumenEjecutivo-servidor";
 import {
   porcentajeAutomatizado,
   posicionNeta,
 } from "@/lib/resumenEjecutivo";
+import { OrigenPartidas } from "@/components/conciliacion/OrigenPartidas";
+import { formatearFecha } from "@/lib/parsing/resumen";
 
 /**
  * RESUMEN EJECUTIVO
@@ -74,7 +79,10 @@ export default async function ResumenPage({
   const rangoDesde = r1.desde <= r2.desde ? r1.desde : r2.desde;
   const rangoHasta = r1.hasta >= r2.hasta ? r1.hasta : r2.hasta;
 
-  const r = await getResumenEjecutivo(rangoDesde, rangoHasta);
+  const [r, origen] = await Promise.all([
+    getResumenEjecutivo(rangoDesde, rangoHasta),
+    getOrigenUltimaConciliacion(rangoDesde, rangoHasta),
+  ]);
   const auto = porcentajeAutomatizado(r.periodo);
   const neta = posicionNeta(r.hoy);
   const sinConciliar = r.periodo.partidas - r.periodo.partidasConciliadas;
@@ -221,6 +229,24 @@ export default async function ResumenPage({
           </p>
         )}
       </section>
+
+      {/* ── 4. ¿Y LO QUE NO ENTRÓ? ────────────────────────────────────────────
+          Va aquí, después de la confianza, porque responde a la pregunta que
+          viene justo después de ver el % conciliado: "mi archivo tenía más
+          filas que estas". Sin esto hay que abrir el Excel y cruzarlo a mano.
+          Desplegado a propósito: en esta pantalla es contenido, no una nota. */}
+      {origen && (origen.origen || origen.motor) && (
+        <OrigenPartidas
+          origen={origen.origen}
+          motor={origen.motor}
+          jobId={origen.jobId}
+          periodo={
+            origen.desde === origen.hasta
+              ? formatearFecha(origen.desde)
+              : `${formatearFecha(origen.desde)} – ${formatearFecha(origen.hasta)}`
+          }
+        />
+      )}
     </div>
   );
 }

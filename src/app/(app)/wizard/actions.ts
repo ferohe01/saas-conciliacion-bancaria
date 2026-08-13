@@ -6,6 +6,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { traerTodo, enLotes } from "@/lib/supabase/paginado";
 import { getEmpresaActual } from "@/lib/auth";
+import { registrarImportacion } from "@/lib/importacion-servidor";
 import {
   claveComprobante,
   dedupEnArchivo,
@@ -167,6 +168,19 @@ export async function importarComprobantes(
     repetidasEnArchivo: repetidas,
     invalidas,
   };
+
+  // Ficha de la carga, igual que en la ingesta por servidor: sin ella no se
+  // puede explicar después por qué un archivo de N filas da menos comprobantes.
+  // Va con `admin` porque la tabla no tiene política de insert a propósito: son
+  // contadores del sistema, no algo que el usuario declare.
+  await registrarImportacion({
+    lote,
+    empresaId: empresa.empresa_id,
+    archivo: null,
+    filasLeidas: parsed.data.length + invalidas,
+    ...resumen,
+    fechas: parsed.data.map((c) => c.fecha),
+  });
 
   revalidatePath("/comprobantes");
   return {

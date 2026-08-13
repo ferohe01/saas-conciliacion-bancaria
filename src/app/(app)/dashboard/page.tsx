@@ -41,6 +41,8 @@ import {
 } from "@/lib/reportes";
 import { FiltrosReporte } from "@/components/reportes/FiltrosReporte";
 import { AvisoSinAprobar } from "@/components/conciliacion/AvisoSinAprobar";
+import { OrigenPartidas } from "@/components/conciliacion/OrigenPartidas";
+import { motorDelResumen, origenDelJob } from "@/lib/origenPartidas-servidor";
 import { nombreMes } from "@/lib/periodo";
 
 type CuentaJoin =
@@ -68,9 +70,11 @@ type JobDash = {
   cuenta_id: string;
   periodo_desde: string;
   periodo_hasta: string;
+  origen_partidas: unknown;
   resultado: {
     matches?: { estado_revision?: string }[];
     cuadre?: { diferencia: number };
+    resumen?: ResumenJob;
   } | null;
 };
 
@@ -277,6 +281,14 @@ export default async function DashboardPage({
   const supabase = await createClient();
   const suscripcion = estadoSuscripcion(empresa ?? {});
 
+  // ⚠️ `origen_partidas` es una columna de la 0043. Si el despliegue va por
+  // delante de la migración, PostgREST responde con error a TODO el select y el
+  // panel se quedaría sin actividad reciente ni sugerencias pendientes: un
+  // detalle nuevo tumbando lo que ya funcionaba. Se pide aparte y con reintento
+  // sin la columna.
+  const COLUMNAS_RECIENTES =
+    "id, estado, estado_contable, cuenta_id, periodo_desde, periodo_hasta, resultado";
+
   const [
     { data: aprobadasData },
     { data: recientesData },
@@ -301,12 +313,20 @@ export default async function DashboardPage({
     // o reemplazada no es trabajo pendiente.
     supabase
       .from("jobs_conciliacion")
-      .select(
-        "id, estado, estado_contable, cuenta_id, periodo_desde, periodo_hasta, resultado",
-      )
+      .select(`${COLUMNAS_RECIENTES}, origen_partidas`)
       .not("estado_contable", "in", "(anulada,reemplazada)")
       .order("created_at", { ascending: false })
-      .limit(60),
+      .limit(60)
+      .then(async (r) =>
+        r.error
+          ? await supabase
+              .from("jobs_conciliacion")
+              .select(COLUMNAS_RECIENTES)
+              .not("estado_contable", "in", "(anulada,reemplazada)")
+              .order("created_at", { ascending: false })
+              .limit(60)
+          : r,
+      ),
     supabase.from("cuentas_bancarias").select("id", { count: "exact", head: true }),
     supabase
       .from("cuentas_bancarias")
@@ -407,6 +427,26 @@ export default async function DashboardPage({
   const jobConPendientes = enFoco.find((j) =>
     (j.resultado?.matches ?? []).some((m) => m.estado_revision === "pendiente"),
   );
+
+  // ── De dónde salieron las partidas de la última conciliación ──────────────
+  //
+  // La pregunta «mi archivo tiene 452.605 filas y aquí dice 452.177» se hace
+  // mirando ESTE panel, así que la respuesta tiene que estar aquí. Se toma la
+  // conciliación terminada más reciente del recorte: la cascada solo tiene
+  // sentido contra un archivo concreto, y sumar varias contaría dos veces las
+  // cargas que comparten.
+  const ultimaTerminada = enFoco.find(
+    (j) => j.estado === "completado" && j.resultado?.resumen,
+  );
+  const origen = ultimaTerminada
+    ? {
+        jobId: ultimaTerminada.id,
+        desde: ultimaTerminada.periodo_desde,
+        hasta: ultimaTerminada.periodo_hasta,
+        origen: origenDelJob(ultimaTerminada.origen_partidas),
+        motor: motorDelResumen(ultimaTerminada.resultado),
+      }
+    : null;
 
   if (sinCuentas) {
     return (
@@ -576,6 +616,23 @@ export default async function DashboardPage({
         <Tendencia datos={mensual} anio={anio} />
         <Metodos metodos={kpis.metodos} total={totalPartidas} />
       </div>
+
+      {/* Justo debajo de la distribución por método, que es donde se ve el
+          "sin conciliar" que dispara la pregunta. Plegado: es la respuesta a
+          una duda concreta, no algo que haya que mirar a diario. */}
+      {origen && (origen.origen || origen.motor) && (
+        <OrigenPartidas
+          compacto
+          origen={origen.origen}
+          motor={origen.motor}
+          jobId={origen.jobId}
+          periodo={
+            origen.desde === origen.hasta
+              ? formatearFecha(origen.desde)
+              : `${formatearFecha(origen.desde)} – ${formatearFecha(origen.hasta)}`
+          }
+        />
+      )}
 
       {recientes.length > 0 && (
         <section

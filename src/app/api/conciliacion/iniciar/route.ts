@@ -12,6 +12,7 @@ import { criteriosParaIa } from "@/lib/criteriosIniciales";
 import { estadoSuscripcion } from "@/lib/suscripcion";
 import { bloqueaRelanzamiento } from "@/lib/jobsAtascados";
 import { construirResiduo } from "@/lib/conciliacion/residuo";
+import { capturarOrigenPartidas } from "@/lib/origenPartidas-servidor";
 import { calcularCuadre } from "@/lib/conciliacion/cuadre";
 import { maxFilasConciliacion } from "@/lib/limites";
 import type { EstadoJob } from "@/lib/contract/enums";
@@ -242,6 +243,23 @@ export async function POST(request: Request) {
   // `conciliar_exacta` parte de él para saber empresa, cuenta, período y lote.
   // Por eso aquí el orden se invierte respecto al modo payload, donde el job se
   // inserta ya con las partidas validadas.
+  // ── De dónde salen las partidas: la foto, ANTES de tocar nada ────────────
+  //
+  // ⚠️⚠️ Se congela aquí y no se recalcula nunca. Al aprobar, los comprobantes
+  // casados pasan a `cobrado`, así que "del período y sin cobrar" se desploma de
+  // 452.177 a 4.382: una pantalla que lo recalculara enseñaría un número peor
+  // cada vez que alguien la mirase. Es el mismo fallo que la 0033 tuvo que
+  // arreglar en el resumen ejecutivo.
+  //
+  // Si falla, la conciliación sigue: se pierde la explicación, no el trabajo.
+  const origen = await capturarOrigenPartidas(
+    admin,
+    empresa.empresa_id,
+    req.periodo.desde,
+    req.periodo.hasta,
+    cuenta.moneda,
+  );
+
   const filaJob = {
     id: jobId,
     empresa_id: empresa.empresa_id,
@@ -249,6 +267,7 @@ export async function POST(request: Request) {
     usuario_id: usuario.id,
     periodo_desde: req.periodo.desde,
     periodo_hasta: req.periodo.hasta,
+    origen_partidas: origen,
     estado: "pendiente",
     // Nace como borrador: aprobarla es un acto humano posterior (Fase B).
     estado_contable: "borrador",
