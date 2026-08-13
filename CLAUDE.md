@@ -154,6 +154,10 @@ supabase/
                              cliente ("Conectar sistema"). SIN credenciales.
     0018_comprobantes_sin_duplicados.sql  Índice único por serie + lote de
                              importación (deshacer una carga).
+    0042_referencia_prefijo_entidad.sql  `ref_norm` descarta el prefijo de
+                             entidad (WIN-S001-123 ≡ S001-123).
+    0043_origen_partidas.sql         Ficha de cada carga + la cascada
+                             archivo → comprobantes → internos, congelada.
 tests/                     Vitest (unit).
 ```
 
@@ -689,6 +693,79 @@ conciliación al 0 % que el cliente no atribuye a su copia, sino al producto.
   export real: el que comprueba que **`SERIE-NÚMERO` y `N° OPERACIÓN` no se
   confunden** es el que más vale (ver la sección siguiente).
 
+### Detectar bien, y decir con qué se dudó
+
+«¿No sería mejor que el sistema convierta solo el archivo al formato de la
+plantilla?» — lo hace: `aplicarMapeo` **es** esa conversión, y la detección ya
+rellena los campos. La pregunta real es **quién decide** en las columnas donde
+equivocarse no da un error, sino un resultado plausible.
+
+Medido con el mayor real de 452.605 filas, la heurística anterior proponía
+**tres de seis campos mal**, y ninguno fallaba en pantalla:
+
+| Campo | Proponía | Qué habría pasado |
+|---|---|---|
+| monto | `Importe Moneda Base` | trae negativos → la carga entera se rechaza por `check (saldo >= 0)` |
+| tipo | `Tipo de Transacción` | sus valores son *Pago* y *Asiento* → **452.461 cobranzas cargadas como pagos** |
+| nº documento | `Nro. Documento` | es el asiento, no el recibo → el banco no conoce ese código → **0 %** |
+
+Cuatro reglas nuevas, todas en `deteccionComprobantes.ts` / `deteccion.ts`, con
+tests sobre la forma de un mayor contable:
+
+- ⚠️⚠️ **El contenido VETA al nombre.** Una columna cuyos valores no significan
+  nada para el campo no se propone aunque se llame igual. `fecha`, `monto`,
+  `tipo` y `moneda` exigen el **90 %** de valores reconocibles porque sin los
+  tres primeros la fila **entera** se descarta y un valor de moneda no
+  reconocido cae a PEN en silencio; el resto, el 50 %. **Al revés no**: si la
+  columna está vacía en la muestra no se veta nada — ausencia de evidencia no
+  es evidencia de contradicción.
+- **Cobertura y signo en el importe.** `Débito` está lleno en el 99,97 % de las
+  filas y `Crédito` en el 0,03 %, pero las dos son numéricas al 100 % de las
+  suyas: sin el factor de cobertura la heurística no las distingue. Y una
+  columna que **mezcla signos** no es el importe de un comprobante, es el
+  movimiento firmado de un mayor: se penaliza (no se veta — una nota de crédito
+  puede venir en negativo).
+- **`serie_numero` prefiere lo que NO se repite.** Es la identidad del
+  documento, con índice único detrás. En el mayor, `Nro. Documento` es el
+  asiento —repetido en cada línea— y `WIN - Nro. Documento` es el recibo, que es
+  lo que el banco conoce.
+- **Una columna vacía en toda la muestra no se propone para nada.** El mayor
+  trae `Documento Relacionado` sin un solo valor y ganaba por nombre.
+
+Con eso, el mismo archivo se detecta **6 de 6**, incluido dejar
+`referencia_externa` vacía —que es lo correcto— y no proponer `tipo`, que
+obliga a declararlo.
+
+⚠️ Y lo que no se puede resolver adivinando **se dice**: `detectarComprobantesConDudas`
+devuelve además las columnas que casi empataron, y el formulario las nombra bajo
+el campo («También podría ser **Importe Moneda Base**»). Un mayor tiene tres
+candidatas a importe y tres a número de documento; la heurística elige una, y el
+aviso es la única pista que el usuario puede contrastar con la vista previa. El
+aviso desaparece en cuanto toca el desplegable: ahí ya decidió él.
+
+### La vista previa mira la muestra entera, no las tres primeras filas
+
+Mostraba `muestras.slice(0, 3)` interpretadas. Con el mayor real eso produjo la
+peor pantalla posible: **las tres primeras filas del archivo son líneas de un
+asiento de crédito** —sin `Débito`, tipo «Asiento»—, así que la previa decía
+tres veces *«esta fila se omitiría»* sobre un archivo en el que 452.454 de
+452.605 filas entran perfectamente. El usuario ve que su mapeo no funciona
+cuando sí funciona, y lo cambia — o abandona.
+
+Enseñar el principio del archivo es apostar a que sea representativo, y en un
+export contable nunca lo es. `resumirMuestra` (puro, con tests) recorre la
+muestra y devuelve **filas que SÍ entran** para la tabla, más el recuento de lo
+omitido agrupado por causa.
+
+- **La alarma se reserva para cuando no entra NINGUNA**, que es el único estado
+  en que el mapeo está de verdad mal. Antes ese caso se confundía con el otro.
+- **Se dice también cuando no se omite nada** («✓ las 500 filas leídas se
+  cargarían»): un recuento que solo aparece con problemas deja sin saber si el
+  silencio significa «correcto» o «no se miró».
+- ⚠️ **La muestra NO es el archivo**, y la pantalla lo aclara. Decir «132 de
+  452.605 se omitirían» a partir de unos cientos de filas sería inventar una
+  cifra.
+
 ## El número de documento no es la referencia de emparejamiento
 
 Encontrado con datos reales de una recaudadora de telecom (450k movimientos/mes).
@@ -723,6 +800,50 @@ el mismo patrón que `empresas` (`revoke` + `grant` acotado, ver `0008`/`0010`),
 así que **toda columna nueva nace sin permiso de escritura**. De paso cubre
 `lote_importacion`, que la `0018` añadió sin tocar permisos y cuyo INSERT no se
 había ejercitado desde entonces.
+
+### Y el mismo recibo se escribe distinto en cada lado
+
+Del mismo cliente, mismo cobro, dos códigos:
+
+```
+mayor del ERP     WIN-S001-11618954
+extracto del BCP      S001-11618954
+```
+
+`ref_norm` daba `WINS00111618954` contra `S00111618954`, así que la capa exacta
+no los casaba, caían al residuo —donde tampoco casaban— y acababan en «sin
+conciliar» sin que nada explicara por qué. Son **276 recibos** repartidos por
+todo el mes, y el extracto trae **559 movimientos** con esa serie.
+
+La `0042` hace que `ref_norm` **descarte un primer segmento hecho SOLO de
+letras** —el nombre de la entidad que emite— y solo cuando lo que queda sigue
+pareciendo un código de documento. Las tres guardas no son adorno:
+
+- **letras Y dígitos en el resto** — sin esto, `F001-123` quedaría en `123`, y
+  `A-123` y `B-123` pasarían a ser la misma referencia. Un número pelado no
+  identifica nada.
+- **≥ 6 caracteres útiles** — una clave corta colisiona con cualquier cosa.
+- **primer segmento sin dígitos** — `SR11-02748951`, la serie normal de este
+  cliente (452.317 filas), **no se toca**: `SR11` lleva números, así que no es
+  un nombre de entidad. Es la condición que deja intacto lo que ya funcionaba.
+
+⚠️⚠️ **Es una función aplicada a los dos lados por igual, así que no puede
+romper un par que antes casaba**: si dos referencias eran iguales, sus formas
+canónicas lo siguen siendo. Lo único que puede aparecer son pares nuevos, y
+siguen exigiendo el mismo importe al céntimo.
+
+⚠️ **La regla está escrita CUATRO veces** —`ref_norm` en SQL, `normRef` en
+`01_exacta.js`, en `03a_agrupacion.js` y el TypeScript de
+`src/lib/normalizacion/referencia.ts`— porque los nodos de n8n no pueden
+importar nada. `tests/referencia.test.ts` fija la regla y comprueba que las
+copias no se hayan quedado atrás; el lado TypeScript ya tiene un solo origen
+(`diagnosticoPartida` lo re-exporta en vez de redefinirlo, que es como estaba).
+En los nodos de candidatos la forma canónica se **añade** a la cruda, nunca la
+sustituye: así ningún candidato que antes aparecía deja de aparecer.
+
+⚠️ Cambiar `ref_norm` **reescribe las dos tablas** (es `generated ... stored`),
+así que la migración termina con `analyze` y se aplica desde Studio, no por la
+API.
 
 ## ⚠️ PostgREST corta en 1.000 filas — TAMBIÉN el resultado de una función
 
@@ -1240,6 +1361,66 @@ de siete diagnósticos con la evidencia concreta.
   conciliación manual ocupa un movimiento y cambia la respuesta.
 - Solo el **lado interno** (las facturas del cliente). El simétrico se añade
   después sin tocar nada de esto.
+
+### «Mi archivo tiene 452.605 filas y aquí dice 452.177»
+
+La pregunta anterior es por UNA partida; esta es por el **recuento**, y salió en
+una demo. No había forma de contestarla desde la aplicación: hubo que abrir el
+Excel y cruzarlo contra la base para reconstruir una cuenta que el sistema tenía
+delante.
+
+```
+452.605  filas del mayor
+  − 296  no se cargaron (8 recibos repetidos, y el resto sin llegar a la base)
+452.309  comprobantes
+  − 132  de fechas fuera del período conciliado
+452.177  registros internos
+  − 447.795  conciliados
+    4.382  sin conciliar
+```
+
+Cada resta es legítima. Lo que no lo es: que el usuario tenga que descubrirlas
+por su cuenta. **Un número que no cuadra con su archivo no se queda ahí —
+contamina todos los demás de la pantalla.**
+
+La cascada se enseña en el **panel** (plegada, que es donde se hace la pregunta)
+y en el **resumen ejecutivo** (desplegada, ahí es contenido). Componente único,
+`OrigenPartidas`; lógica pura en `src/lib/origenPartidas.ts` con tests.
+
+- ⚠️⚠️ **La foto se CONGELA al iniciar** (`jobs_conciliacion.origen_partidas`,
+  `0043`) y no se recalcula nunca. Al aprobar, los 447.795 comprobantes casados
+  pasan a `cobrado`, así que «del período y sin cobrar» se desploma de 452.177 a
+  4.382: una pantalla que recalculara **se degradaría sola** y enseñaría un
+  número peor cada vez que alguien la mirase. Es exactamente el fallo que la
+  `0033` tuvo que arreglar en el resumen ejecutivo.
+- ⚠️ **La cuenta CIERRA siempre.** Cuando las causas conocidas no suman lo que
+  tienen que sumar, aparece una línea *«sin explicar»* con el resto en vez de
+  repartirlo. Una explicación que no cuadra es peor que ninguna: convierte una
+  duda concreta en desconfianza general. Hay test.
+- **Se enseñan también los ceros** («0 filas sin fecha ni importe»). Es lo que
+  convierte la lista en una cuenta comprobable; un 296 suelto parece un fallo.
+  Mismo criterio que el aviso de «se conservaron N por tener cobros aplicados».
+- **`importaciones_comprobantes` (`0043`) guarda lo que ya se contaba** al
+  importar —leídas, insertadas, repetidas, inválidas— y que hasta ahora solo
+  vivía en un mensaje que desaparece al recargar. Sin política de insert: son
+  contadores del sistema, no algo que el usuario declare, así que se escriben
+  con `service_role` desde las **dos** rutas de carga (API por lotes y server
+  action de la plantilla).
+- **`fecha_min`/`fecha_max` de cada carga** son lo que permite acotar la cascada
+  a *las cargas que alimentan este período*. Sin eso, una empresa con doce meses
+  cargados leería «fuera del período: 400.000», que es cierto y no dice nada.
+- **Para lo cargado antes de la `0043` se dice que no se sabe** (`alcance =
+  'empresa'`) y el bloque del archivo no se pinta. Media cascada sin avisar de
+  qué falta sería peor que ninguna.
+- ⚠️ El panel pide `origen_partidas` **con reintento sin esa columna**: si el
+  despliegue va por delante de la migración, PostgREST responde con error a todo
+  el `select` y el panel se quedaría sin actividad reciente ni sugerencias
+  pendientes. Un detalle nuevo no puede tumbar lo que ya funcionaba.
+- ⚠️ En `/resumen` se muestra **UNA** conciliación, no la suma del rango. Sumar
+  cascadas parece más completo y es falso en cuanto dos comparten carga de
+  comprobantes: las mismas filas del archivo se contarían dos veces. Lo que se
+  busca es poder decir «esto cuadra con mi Excel», y para eso hace falta un
+  período concreto contra un archivo concreto.
 
 ### El asistente: por qué se le puede dejar hablar
 

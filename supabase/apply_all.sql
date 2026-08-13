@@ -4607,3 +4607,348 @@ revoke all on function public.diagnostico_previo(uuid, date, date, integer)
   from public, anon;
 grant execute on function public.diagnostico_previo(uuid, date, date, integer)
   to authenticated, service_role;
+
+
+-- ============================================================================
+-- 0042_referencia_prefijo_entidad.sql — El mismo recibo con y sin prefijo
+--
+-- ── El caso ────────────────────────────────────────────────────────────────
+--
+-- El mismo cobro aparece con dos códigos distintos según quién lo escriba:
+--
+--     mayor del cliente (ERP)  →  WIN-S001-11618954
+--     extracto del banco       →      S001-11618954
+--
+-- Es LA MISMA operación. Como cadenas no lo son, así que `ref_norm` daba
+-- `WINS00111618954` contra `S00111618954`, la capa exacta no las casaba, caían
+-- al residuo —donde tampoco casaban— y terminaban en "sin conciliar" sin que
+-- nada dijera por qué. Son 276 recibos del cliente grande, repartidos por todo
+-- el mes, y en su extracto hay 559 movimientos con esa serie.
+--
+-- ── La regla ───────────────────────────────────────────────────────────────
+--
+-- Se descarta un PRIMER SEGMENTO HECHO SOLO DE LETRAS —el nombre de la entidad
+-- que emite (`WIN-`)— y solo cuando lo que queda sigue pareciendo un código de
+-- documento. Las tres condiciones tapan un falso positivo concreto:
+--
+--   · letras Y dígitos en el resto → `F001-123` no se queda en `123`, y `A-123`
+--     y `B-123` no pasan a ser la misma referencia. Un número pelado no
+--     identifica nada.
+--   · ≥ 6 caracteres útiles → una clave corta colisiona con cualquier cosa.
+--   · primer segmento sin dígitos → `SR11-02748951`, la serie normal de este
+--     cliente (452.317 filas), NO se toca: `SR11` lleva números, así que no es
+--     un nombre de entidad. Es la condición que deja intacto lo que ya
+--     funcionaba.
+--
+-- ⚠️⚠️ **No puede romper un emparejamiento que antes funcionaba.** Es una
+-- función aplicada a los dos lados por igual: si dos referencias eran iguales,
+-- sus formas canónicas siguen siéndolo. Lo único que puede aparecer son pares
+-- NUEVOS —los que colisionen al quitar el prefijo—, y siguen exigiendo además
+-- el mismo importe al céntimo y su `row_number()` dentro del grupo.
+--
+-- ⚠️ La expresión tiene que ser EXACTAMENTE la de `normRef` en
+-- `src/lib/normalizacion/referencia.ts` y la copiada en `n8n/01_exacta.js` y
+-- `n8n/03a_agrupacion.js`. Si divergieran, un par casaría en SQL y no en el
+-- motor —o al revés— y la diferencia sería invisible. Misma advertencia que la
+-- 0029, que es donde nació esta columna.
+--
+-- ⚠️ Deliberadamente SIN lookahead (`(?=.)`) aunque la regex de Postgres lo
+-- admita: con `ABC-` el resto queda vacío, no pasa el filtro de "letras y
+-- dígitos" y se cae al valor original. Las guardas ya lo cubren, y una regex
+-- que dice lo mismo en los tres lenguajes vale más que una más corta.
+--
+-- ⚠️ SE REESCRIBE LA TABLA ENTERA (`ref_norm` es `generated ... stored`), así
+-- que con medio millón de comprobantes esto tarda. Va desde el SQL Editor de
+-- Studio, que corre como superusuario y no tiene el `statement_timeout` de 8 s
+-- de PostgREST. Al final hay `analyze`: una tabla recién reescrita deja al
+-- planificador con estadísticas viejas, y por exactamente eso `residuo_internos`
+-- se pasó del timeout tras la 0029.
+-- ============================================================================
+
+
+-- ---------------------------------------------------------------------------
+-- comprobantes.ref_norm
+--
+-- Drop + add EN UNA SOLA sentencia: separarlas son dos reescrituras de la
+-- tabla. Al soltar la columna se van sus índices, así que se recrean debajo.
+-- ---------------------------------------------------------------------------
+alter table public.comprobantes
+  drop column if exists ref_norm,
+  add column ref_norm text
+  generated always as (
+    upper(regexp_replace(
+      case
+        when regexp_replace(
+               btrim(coalesce(referencia_externa, serie_numero, '')),
+               '^[A-Za-z]+[-_/ ]+', '')
+             <> btrim(coalesce(referencia_externa, serie_numero, ''))
+         and regexp_replace(
+               btrim(coalesce(referencia_externa, serie_numero, '')),
+               '^[A-Za-z]+[-_/ ]+', '') ~ '[A-Za-z]'
+         and regexp_replace(
+               btrim(coalesce(referencia_externa, serie_numero, '')),
+               '^[A-Za-z]+[-_/ ]+', '') ~ '[0-9]'
+         and length(regexp_replace(
+               regexp_replace(
+                 btrim(coalesce(referencia_externa, serie_numero, '')),
+                 '^[A-Za-z]+[-_/ ]+', ''),
+               '[^A-Za-z0-9]', '', 'g')) >= 6
+        then regexp_replace(
+               btrim(coalesce(referencia_externa, serie_numero, '')),
+               '^[A-Za-z]+[-_/ ]+', '')
+        else btrim(coalesce(referencia_externa, serie_numero, ''))
+      end, '[^A-Za-z0-9]', '', 'g'))
+  ) stored;
+
+-- ---------------------------------------------------------------------------
+-- movimientos_extracto.ref_norm — misma expresión, otra columna de origen.
+-- ---------------------------------------------------------------------------
+alter table public.movimientos_extracto
+  drop column if exists ref_norm,
+  add column ref_norm text
+  generated always as (
+    upper(regexp_replace(
+      case
+        when regexp_replace(
+               btrim(coalesce(referencia_banco, '')),
+               '^[A-Za-z]+[-_/ ]+', '')
+             <> btrim(coalesce(referencia_banco, ''))
+         and regexp_replace(
+               btrim(coalesce(referencia_banco, '')),
+               '^[A-Za-z]+[-_/ ]+', '') ~ '[A-Za-z]'
+         and regexp_replace(
+               btrim(coalesce(referencia_banco, '')),
+               '^[A-Za-z]+[-_/ ]+', '') ~ '[0-9]'
+         and length(regexp_replace(
+               regexp_replace(
+                 btrim(coalesce(referencia_banco, '')),
+                 '^[A-Za-z]+[-_/ ]+', ''),
+               '[^A-Za-z0-9]', '', 'g')) >= 6
+        then regexp_replace(
+               btrim(coalesce(referencia_banco, '')),
+               '^[A-Za-z]+[-_/ ]+', '')
+        else btrim(coalesce(referencia_banco, ''))
+      end, '[^A-Za-z0-9]', '', 'g'))
+  ) stored;
+
+-- Los índices se fueron con la columna. Mismos que la 0029: parciales, porque
+-- las filas sin referencia no participan del emparejamiento por código.
+create index if not exists idx_comprobantes_ref_norm
+  on public.comprobantes (empresa_id, ref_norm)
+  where ref_norm <> '';
+
+create index if not exists idx_mov_extracto_ref_norm
+  on public.movimientos_extracto (lote_id, ref_norm)
+  where ref_norm <> '';
+
+comment on column public.comprobantes.ref_norm is
+  'Referencia canónica para emparejar: mayúsculas, sin separadores y sin el '
+  'prefijo de entidad (WIN-S001-11618954 → S00111618954). Misma regla que '
+  'normRef en src/lib/normalizacion/referencia.ts y en n8n/01_exacta.js.';
+comment on column public.movimientos_extracto.ref_norm is
+  'Referencia del banco en forma canónica. Ver comprobantes.ref_norm.';
+
+-- ⚠️ Obligatorio tras reescribir una tabla grande: el planificador decide con
+-- estadísticas y las acaba de perder. Sin esto, la primera conciliación después
+-- de la migración elige un plan pensado para otra tabla y se cancela a los 8 s.
+analyze public.comprobantes;
+analyze public.movimientos_extracto;
+
+
+-- ============================================================================
+-- 0043_origen_partidas.sql — De tu archivo a la conciliación, sin huecos
+--
+-- ── El problema, tal cual apareció en una demo ──────────────────────────────
+--
+-- «El mayor tiene 452.605 filas y el panel dice 452.177 registros internos.
+-- ¿Dónde están los otros 428?» No había forma de contestarlo desde la
+-- aplicación. Hubo que abrir el Excel, cruzar contra la base y reconstruir a
+-- mano una cuenta que el sistema tenía delante:
+--
+--     452.605 filas del archivo
+--       − 296  no se cargaron (repetidas / sin datos / ya existían)
+--     452.309 comprobantes
+--       − 132  fuera del período conciliado
+--     452.177 registros internos
+--       − 447.795 conciliados
+--       =   4.382 sin conciliar
+--
+-- Cada resta tiene una explicación distinta y todas son legítimas. Lo que no es
+-- legítimo es que el usuario tenga que descubrirlas por su cuenta: un número
+-- que no cuadra con su archivo destruye la confianza en TODOS los demás, por
+-- muy correctos que sean.
+--
+-- ── Dos piezas ─────────────────────────────────────────────────────────────
+--
+-- 1) `importaciones_comprobantes` — qué pasó en cada carga. La ruta de ingesta
+--    ya contaba insertados / repetidos / inválidos / ya existentes, pero solo
+--    para ponerlo en un mensaje que desaparece al recargar la página.
+--
+-- 2) `jobs_conciliacion.origen_partidas` — la cascada CONGELADA en el momento
+--    de conciliar.
+--
+-- ⚠️⚠️ Lo segundo no es una comodidad, es lo único que puede funcionar: al
+-- aprobar, los 447.795 comprobantes casados pasan a `cobrado`, así que "del
+-- período y sin cobrar" se desploma de 452.177 a 4.382. Una pantalla que
+-- recalculara se degradaría sola y enseñaría un número peor cada vez que
+-- alguien la mirase — exactamente el fallo que la 0033 tuvo que arreglar en el
+-- resumen ejecutivo. La foto se toma antes de que el motor corra y ya no se
+-- toca. Mismo criterio que `abonos_no_registrados`: el informe sigue diciendo
+-- lo que dijo el día que se emitió.
+-- ============================================================================
+
+
+-- ---------------------------------------------------------------------------
+-- 1) Qué pasó en cada carga de comprobantes
+--
+-- Una fila por importación. `fecha_min`/`fecha_max` no son decorativas: son lo
+-- que permite saber QUÉ CARGAS alimentan un período sin recorrer medio millón
+-- de comprobantes para averiguarlo.
+-- ---------------------------------------------------------------------------
+create table if not exists public.importaciones_comprobantes (
+  lote                 uuid primary key,
+  empresa_id           uuid not null references public.empresas (id) on delete cascade,
+  archivo              text,
+  filas_leidas         integer not null default 0,
+  insertados           integer not null default 0,
+  ya_existian          integer not null default 0,
+  repetidas_en_archivo integer not null default 0,
+  invalidas            integer not null default 0,
+  fecha_min            date,
+  fecha_max            date,
+  created_at           timestamptz not null default now()
+);
+
+create index if not exists idx_importaciones_empresa_rango
+  on public.importaciones_comprobantes (empresa_id, fecha_min, fecha_max);
+
+alter table public.importaciones_comprobantes enable row level security;
+
+-- Se LEE desde la aplicación (con sesión) y se ESCRIBE solo desde el servidor
+-- con `service_role`, que salta RLS. No hay política de insert a propósito:
+-- estos contadores describen lo que hizo el sistema, no algo que el usuario
+-- declare.
+drop policy if exists importaciones_select on public.importaciones_comprobantes;
+create policy importaciones_select on public.importaciones_comprobantes
+  for select using (public.es_miembro(empresa_id));
+
+comment on table public.importaciones_comprobantes is
+  'Qué pasó en cada carga de comprobantes (leídas, insertadas, repetidas, '
+  'inválidas). Alimenta la cascada "de tu archivo a la conciliación".';
+
+
+-- ---------------------------------------------------------------------------
+-- 2) La foto del origen de las partidas, dentro del job
+-- ---------------------------------------------------------------------------
+alter table public.jobs_conciliacion
+  add column if not exists origen_partidas jsonb;
+
+comment on column public.jobs_conciliacion.origen_partidas is
+  'Cascada archivo → comprobantes → internos, CONGELADA al iniciar. No se '
+  'recalcula: tras aprobar, los comprobantes casados pasan a cobrado y el '
+  'mismo cálculo daría un número peor cada vez.';
+
+
+-- ---------------------------------------------------------------------------
+-- 3) El contador
+--
+-- ⚠️ Una SOLA pasada sobre `comprobantes` con `filter`, no cinco subconsultas.
+-- Es la lección de la 0027: cuatro `select` sobre 452.309 filas tardaban 6,19 s
+-- contra un `statement_timeout` de 8 s. Los mismos números salen de una pasada.
+--
+-- ⚠️ `security definer` + acceso solo a `service_role`: lo llama el backend al
+-- iniciar, con la empresa que ya resolvió de la sesión. Es el mismo patrón que
+-- `conciliar_exacta` — y por eso aquí SÍ puede aceptar `p_empresa_id`, al
+-- contrario que las funciones que invoca el navegador (`resumen_saldos`,
+-- `diagnostico_previo`), donde un parámetro sería un `?empresa_id=` en manos de
+-- cualquiera.
+--
+-- El ALCANCE se acota a las cargas que solapan el período. Sin eso, una empresa
+-- con doce meses cargados vería "fuera del período: 400.000", que es cierto y
+-- no dice nada. Si no hay ninguna carga registrada —comprobantes anteriores a
+-- esta migración— se cuenta la empresa entera y se devuelve `alcance =
+-- 'empresa'` para que la pantalla no prometa lo que no sabe.
+-- ---------------------------------------------------------------------------
+create or replace function public.origen_partidas(
+  p_empresa_id uuid,
+  p_desde      date,
+  p_hasta      date,
+  p_moneda     text default null
+)
+returns table (
+  alcance            text,
+  cargas             bigint,
+  archivo_filas      bigint,
+  archivo_repetidas  bigint,
+  archivo_invalidas  bigint,
+  archivo_existentes bigint,
+  archivo_insertados bigint,
+  cargados           bigint,
+  fuera_periodo      bigint,
+  ya_cobrados        bigint,
+  otra_moneda        bigint,
+  internos           bigint
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_lotes uuid[];
+  v_moneda text := coalesce(p_moneda, 'PEN');
+begin
+  select array_agg(i.lote),
+         count(*), coalesce(sum(i.filas_leidas), 0),
+         coalesce(sum(i.repetidas_en_archivo), 0), coalesce(sum(i.invalidas), 0),
+         coalesce(sum(i.ya_existian), 0), coalesce(sum(i.insertados), 0)
+    into v_lotes, cargas, archivo_filas,
+         archivo_repetidas, archivo_invalidas, archivo_existentes, archivo_insertados
+    from public.importaciones_comprobantes i
+   where i.empresa_id = p_empresa_id
+     and i.fecha_min <= p_hasta
+     and i.fecha_max >= p_desde;
+
+  alcance := case when v_lotes is null then 'empresa' else 'cargas' end;
+
+  select
+    count(*),
+    count(*) filter (where c.fecha < p_desde or c.fecha > p_hasta),
+    count(*) filter (
+      where c.fecha between p_desde and p_hasta
+        and c.estado in ('cobrado', 'anulado')
+    ),
+    count(*) filter (
+      where c.fecha between p_desde and p_hasta
+        and c.estado not in ('cobrado', 'anulado')
+        and coalesce(c.moneda, 'PEN') <> v_moneda
+    ),
+    -- ⚠️ Mismo criterio EXACTO que `pares_exactos` y `residuo_internos`: si esta
+    -- cifra no fuera la que el motor recibe, la cascada explicaría una resta que
+    -- no ocurrió.
+    count(*) filter (
+      where c.fecha between p_desde and p_hasta
+        and c.estado not in ('cobrado', 'anulado')
+        and coalesce(c.moneda, 'PEN') = v_moneda
+    )
+    into cargados, fuera_periodo, ya_cobrados, otra_moneda, internos
+    from public.comprobantes c
+   where c.empresa_id = p_empresa_id
+     and (v_lotes is null or c.lote_importacion = any(v_lotes));
+
+  return next;
+end;
+$$;
+
+revoke all on function public.origen_partidas(uuid, date, date, text)
+  from public, anon, authenticated;
+grant execute on function public.origen_partidas(uuid, date, date, text)
+  to service_role;
+
+comment on function public.origen_partidas(uuid, date, date, text) is
+  'Cascada archivo → comprobantes → registros internos de un período. La llama '
+  'el backend al iniciar y el resultado se congela en jobs.origen_partidas.';
+
+-- Apoya la pasada de arriba cuando hay lotes: sin él, filtrar por lote sobre
+-- medio millón de filas obliga a recorrer la tabla entera.
+create index if not exists idx_comprobantes_lote_fecha
+  on public.comprobantes (empresa_id, lote_importacion, fecha);
