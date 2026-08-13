@@ -6,8 +6,7 @@ import {
   AYUDA_COMPROBANTE,
   OBLIGATORIOS,
   faltaEnConfig,
-  aplicarMapeo,
-  motivoOmision,
+  resumirMuestra,
   type CampoComprobante,
   type Config,
 } from "@/lib/parsing/mapeoComprobantes";
@@ -27,6 +26,8 @@ import { Boton } from "@/components/ui";
  * conciliación da 0 %. Ver la fecha ya formateada y el importe ya normalizado
  * delata el error antes de importar nada.
  */
+
+const NUM = (n: number) => n.toLocaleString("es-PE");
 
 /**
  * «Declara esto para todo el archivo»: la salida cuando el export no trae la
@@ -136,6 +137,7 @@ export function MapeoComprobantesForm({
   headers,
   muestras,
   config,
+  alternativas,
   onCambio,
   onConfirmar,
   onCancelar,
@@ -145,6 +147,8 @@ export function MapeoComprobantesForm({
   headers: string[];
   muestras: Record<string, unknown>[];
   config: Config;
+  /** Columnas que casi empataron con la detectada, por campo. */
+  alternativas?: Partial<Record<CampoComprobante, string[]>>;
   onCambio: (c: Config) => void;
   onConfirmar: () => void;
   onCancelar: () => void;
@@ -152,7 +156,11 @@ export function MapeoComprobantesForm({
   ocupado?: boolean;
 }) {
   const falta = faltaEnConfig(config);
-  const ejemplos = muestras.slice(0, 3);
+  // Sobre la muestra ENTERA, no sobre las tres primeras filas: en un export
+  // contable el principio del archivo no es representativo y la previa acababa
+  // diciendo "esta fila se omitiría" tres veces sobre un archivo correcto.
+  const muestra = resumirMuestra(muestras, config);
+  const omitidas = muestra.total - muestra.entran;
 
   const setCampo = (campo: CampoComprobante, header: string) => {
     const mapeo = { ...config.mapeo };
@@ -178,6 +186,15 @@ export function MapeoComprobantesForm({
         {CAMPOS_COMPROBANTE.map((campo) => {
           const obligatorio = OBLIGATORIOS.includes(campo);
           const ayuda = AYUDA_COMPROBANTE[campo];
+          // Solo se avisa mientras siga puesta la columna que la detección
+          // eligió: en cuanto el usuario toca el desplegable, ya decidió él y
+          // repetirle la duda es ruido.
+          const dudas =
+            config.mapeo[campo] != null
+              ? (alternativas?.[campo] ?? []).filter(
+                  (h) => h !== config.mapeo[campo],
+                )
+              : [];
           return (
             <label key={campo} className="block">
               <span className="mb-1 block text-sm font-medium text-neutral-700">
@@ -199,6 +216,23 @@ export function MapeoComprobantesForm({
               {ayuda && (
                 <span className="mt-1 block text-xs text-neutral-500">
                   {ayuda}
+                </span>
+              )}
+              {/* ⚠️ El aviso de empate. La detección eligió entre varias
+                  columnas parecidas y puede haberse equivocado; en este archivo
+                  eso no da un error, da una conciliación al 0 % media hora
+                  después. Decir con qué dudó cuesta una línea y es la única
+                  pista que el usuario puede contrastar con la vista previa. */}
+              {dudas.length > 0 && (
+                <span className="mt-1 block text-xs text-amber-800">
+                  También podría ser{" "}
+                  {dudas.map((h, i) => (
+                    <span key={h}>
+                      {i > 0 && " o "}
+                      <strong className="font-medium">{h}</strong>
+                    </span>
+                  ))}
+                  . Compruébalo en la vista previa de abajo.
                 </span>
               )}
             </label>
@@ -232,43 +266,37 @@ export function MapeoComprobantesForm({
         aviso="Si no indicas nada se cargarán como soles (PEN)."
       />
 
-      {ejemplos.length > 0 && (
+      {muestra.total > 0 && (
         <div>
           <p className="mb-2 text-sm font-medium text-neutral-700">
-            Así quedarían tus primeras filas
+            Así quedarían tus filas
           </p>
-          <div className="overflow-x-auto rounded-xl border border-neutral-200 bg-white">
-            <table className="min-w-full text-left text-sm">
-              <thead className="bg-neutral-50 text-xs text-neutral-500">
-                <tr>
-                  <th className="px-3 py-2">Fecha</th>
-                  <th className="px-3 py-2">Importe</th>
-                  <th className="px-3 py-2">Moneda</th>
-                  <th className="px-3 py-2">Tipo</th>
-                  <th className="px-3 py-2">Documento</th>
-                  <th className="px-3 py-2">Referencia</th>
-                  <th className="px-3 py-2">Contraparte</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ejemplos.map((m, i) => {
-                  const f = aplicarMapeo(m, config);
-                  if (!f) {
-                    // Se dice QUÉ falta, no lo que podría faltar: enumerar los
-                    // tres manda a revisar los dos que están bien.
-                    const falta = motivoOmision(m, config);
-                    return (
-                      <tr key={i} className="border-t border-neutral-100">
-                        <td
-                          colSpan={7}
-                          className="px-3 py-2 text-sm text-amber-700"
-                        >
-                          Esta fila se omitiría: falta {falta.join(" y ")}.
-                        </td>
-                      </tr>
-                    );
-                  }
-                  return (
+
+          {/* ⚠️ NINGUNA entra: eso sí es una alarma, y hasta ahora se confundía
+              con la de arriba. Es el estado en que el mapeo está mal de verdad. */}
+          {muestra.entran === 0 ? (
+            <p className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Con este formato no se cargaría <strong>ninguna</strong> de las{" "}
+              {NUM(muestra.total)} filas que hemos leído
+              {muestra.motivos[0] && <>: falta {muestra.motivos[0].falta.join(" y ")}</>}.
+              Revisa las columnas de arriba.
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-neutral-200 bg-white">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-neutral-50 text-xs text-neutral-500">
+                  <tr>
+                    <th className="px-3 py-2">Fecha</th>
+                    <th className="px-3 py-2">Importe</th>
+                    <th className="px-3 py-2">Moneda</th>
+                    <th className="px-3 py-2">Tipo</th>
+                    <th className="px-3 py-2">Documento</th>
+                    <th className="px-3 py-2">Referencia</th>
+                    <th className="px-3 py-2">Contraparte</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {muestra.ejemplos.map((f, i) => (
                     <tr key={i} className="border-t border-neutral-100">
                       <td className="px-3 py-2 tabular-nums">
                         {formatearFecha(f.fecha)}
@@ -282,11 +310,46 @@ export function MapeoComprobantesForm({
                       <td className="px-3 py-2">{f.referencia_externa ?? "—"}</td>
                       <td className="px-3 py-2">{f.razon_social ?? "—"}</td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Cuánto se queda fuera y por qué. Se dice TAMBIÉN cuando no se
+              omite nada: un recuento que solo aparece con problemas deja sin
+              saber si el silencio significa "correcto" o "no se miró". */}
+          {muestra.entran > 0 && (
+            <p
+              className={`mt-2 text-sm ${
+                omitidas > 0 ? "text-neutral-600" : "text-emerald-800"
+              }`}
+            >
+              {omitidas > 0 ? (
+                <>
+                  De las {NUM(muestra.total)} filas que hemos leído,{" "}
+                  <strong>{NUM(omitidas)} se omitirían</strong>
+                  {muestra.motivos.slice(0, 2).map((m, i) => (
+                    <span key={m.falta.join("|")}>
+                      {i === 0 ? " (" : "; "}
+                      {NUM(m.filas)} por falta de {m.falta.join(" y ")}
+                      {i === Math.min(muestra.motivos.length, 2) - 1 ? ")" : ""}
+                    </span>
+                  ))}
+                  . El resto se cargaría.
+                </>
+              ) : (
+                <>✓ Las {NUM(muestra.total)} filas leídas se cargarían.</>
+              )}
+            </p>
+          )}
+
+          {/* ⚠️ La muestra NO es el archivo. Decir "132 de 452.605" a partir de
+              las primeras filas sería inventarse una cifra. */}
+          <p className="mt-1 text-xs text-neutral-500">
+            Es una comprobación sobre el principio del archivo, no sobre las
+            filas que se importarán.
+          </p>
         </div>
       )}
 

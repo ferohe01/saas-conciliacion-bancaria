@@ -16,8 +16,9 @@ import {
   faltanColumnasDelMapeo,
   describirDeclaraciones,
   type Config,
+  type CampoComprobante,
 } from "@/lib/parsing/mapeoComprobantes";
-import { detectarColumnasComprobante } from "@/lib/parsing/deteccionComprobantes";
+import { detectarComprobantesConDudas } from "@/lib/parsing/deteccionComprobantes";
 import { MapeoComprobantesForm } from "@/components/comprobantes/MapeoComprobantesForm";
 import type { ResumenComprobantes } from "@/app/(app)/wizard/actions";
 
@@ -90,6 +91,8 @@ export function ZonaComprobantes({
     headers: string[];
     muestras: Record<string, unknown>[];
     config: Config;
+    /** Con qué columnas dudó la detección. Se enseña junto al campo. */
+    alternativas?: Partial<Record<CampoComprobante, string[]>>;
   } | null>(null);
   /**
    * Archivo listo para subir con el formato guardado, esperando que el usuario
@@ -165,12 +168,13 @@ export function ZonaComprobantes({
             if (faltan.length > 0) {
               // El formato guardado no encaja: se vuelve a preguntar, con la
               // detección de ESTE archivo y lo guardado como punto de partida.
-              const detectado = detectarColumnasComprobante(headers, filas);
+              const detectado = detectarComprobantesConDudas(headers, filas);
               setMapeando({
                 archivo: file,
                 headers,
                 muestras: filas,
-                config: { mapeo: detectado, tipoFijo: null, monedaFija: null },
+                config: { mapeo: detectado.mapeo, tipoFijo: null, monedaFija: null },
+                alternativas: detectado.alternativas,
               });
               onMapeando?.(true);
               return;
@@ -194,14 +198,13 @@ export function ZonaComprobantes({
             // cosa. Antes esto mandaba a otra pantalla, y tener DOS sitios
             // donde cargar comprobantes en el mismo paso confundía más de lo
             // que ayudaba.
+            const detectado = detectarComprobantesConDudas(headers, filas);
             setMapeando({
               archivo: file,
               headers,
               muestras: filas,
-              config: {
-                mapeo: detectarColumnasComprobante(headers, filas),
-                tipoFijo: null,
-              },
+              config: { mapeo: detectado.mapeo, tipoFijo: null },
+              alternativas: detectado.alternativas,
             });
             onMapeando?.(true);
             return;
@@ -391,6 +394,7 @@ export function ZonaComprobantes({
           headers={mapeando.headers}
           muestras={mapeando.muestras}
           config={mapeando.config}
+          alternativas={mapeando.alternativas}
           moneda={moneda}
           ocupado={subiendo}
           onCambio={(config) => setMapeando({ ...mapeando, config })}

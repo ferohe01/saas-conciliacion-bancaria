@@ -174,14 +174,68 @@ export function detectarCon<C extends string>(
   headers: string[],
   muestras: Record<string, unknown>[],
 ): Partial<Record<C, string>> {
+  return detectarConDetalle(campos, keywords, contenido, headers, muestras).mapeo;
+}
+
+/**
+ * Cuánto tiene que acercarse otro encabezado al elegido para que se considere
+ * un empate y se avise.
+ *
+ * ⚠️ El aviso no es cosmético. Un mayor contable trae TRES columnas que podrían
+ * ser el importe (`Importe Moneda Base`, `Débito`, `Crédito`) y tres que podrían
+ * ser el número de documento. La heurística elige una en silencio, y elegir mal
+ * no da un error: da una conciliación al 0 % media hora después, o el dinero del
+ * lado contrario. Cuando hay duda real, lo honesto es decirlo y que mire la
+ * vista previa.
+ */
+const UMBRAL_EMPATE = 0.6;
+
+/** Cuántas alternativas se nombran. Más de dos es ruido, no ayuda. */
+const MAX_ALTERNATIVAS = 2;
+
+export type DeteccionDetallada<C extends string> = {
+  mapeo: Partial<Record<C, string>>;
+  /** Otros encabezados que casi empataron con el elegido, por campo. */
+  alternativas: Partial<Record<C, string[]>>;
+};
+
+/**
+ * La detección, además de qué eligió, con qué dudó.
+ *
+ * `detectarCon` es esta misma función tirando las alternativas: el extracto no
+ * las usa (su Paso 2 ya enseña la vista previa columna a columna) y no hacía
+ * falta tocarlo.
+ */
+export function detectarConDetalle<C extends string>(
+  campos: readonly C[],
+  keywords: Record<C, string[]>,
+  contenido: (campo: C, valores: unknown[]) => number,
+  headers: string[],
+  muestras: Record<string, unknown>[],
+): DeteccionDetallada<C> {
   type Celda = { campo: C; header: string; score: number };
   const celdas: Celda[] = [];
 
+  // ⚠️ Una columna VACÍA en toda la muestra no se propone para nada, aunque se
+  // llame igual que el campo. Un mayor contable trae `Documento Relacionado`
+  // sin un solo valor, y ganaba por nombre a la columna que sí lleva el número:
+  // mapear una columna vacía es mapear a la nada, y el usuario descubre que no
+  // se cargó ninguna fila. Elegirla a mano sigue siendo posible.
+  const conDatos = headers.filter((h) =>
+    muestras.some((f) => f[h] != null && String(f[h]).trim() !== ""),
+  );
+  // Si la muestra viene vacía entera (archivo sin filas previas), se detecta
+  // solo por nombre, como antes: no hay evidencia que contradiga nada.
+  const candidatos = conDatos.length > 0 ? conDatos : headers;
+
   for (const campo of campos) {
-    for (const header of headers) {
+    for (const header of candidatos) {
       const valores = muestras.map((f) => f[header]);
       const score =
         puntajeConLista(keywords[campo], header) + contenido(campo, valores);
+      // Un score no positivo incluye el VETO por contenido (`-Infinity`): una
+      // columna cuyos valores contradicen al campo no se propone ni aunque se
+      // llame como él.
       if (score > 0) celdas.push({ campo, header, score });
     }
   }
@@ -189,16 +243,35 @@ export function detectarCon<C extends string>(
   // Asignación greedy por puntaje descendente, sin reutilizar header ni campo.
   celdas.sort((a, b) => b.score - a.score);
   const mapeo: Partial<Record<C, string>> = {};
+  const elegido: Partial<Record<C, number>> = {};
   const headersUsados = new Set<string>();
 
   for (const c of celdas) {
     if (mapeo[c.campo] != null) continue;
     if (headersUsados.has(c.header)) continue;
     mapeo[c.campo] = c.header;
+    elegido[c.campo] = c.score;
     headersUsados.add(c.header);
   }
 
-  return mapeo;
+  const alternativas: Partial<Record<C, string[]>> = {};
+  for (const campo of campos) {
+    const ganador = mapeo[campo];
+    const suScore = elegido[campo];
+    if (ganador == null || suScore == null) continue;
+    const cerca = celdas
+      .filter(
+        (c) =>
+          c.campo === campo &&
+          c.header !== ganador &&
+          c.score >= suScore * UMBRAL_EMPATE,
+      )
+      .slice(0, MAX_ALTERNATIVAS)
+      .map((c) => c.header);
+    if (cerca.length > 0) alternativas[campo] = cerca;
+  }
+
+  return { mapeo, alternativas };
 }
 
 export function detectarColumnas(

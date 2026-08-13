@@ -174,17 +174,22 @@ describe("vista previa del mapeo", () => {
     expect(celdas).toBe(titulos);
   });
 
-  it("el colSpan de la fila omitida cubre todas las columnas", () => {
+  it("la tabla NO pinta filas omitidas: se cuentan aparte", () => {
+    // Antes había una fila a todo lo ancho («esta fila se omitiría: falta…»)
+    // y la previa eran las TRES PRIMERAS filas del archivo. Con un mayor
+    // contable eso daba tres avisos rojos sobre un archivo correcto: sus
+    // primeras líneas son un asiento de crédito. Ahora la tabla enseña filas
+    // que sí entran y lo omitido se resume debajo, con su recuento.
     const fs = require("node:fs") as typeof import("node:fs");
     const comp = fs.readFileSync(
       "src/components/comprobantes/MapeoComprobantesForm.tsx",
       "utf8",
     );
-    const titulos = comp
-      .slice(comp.indexOf("<thead"), comp.indexOf("</thead>"))
-      .match(/<th[ >]/g)!.length;
-    const span = comp.match(/colSpan=\{(\d+)\}/);
-    expect(Number(span![1])).toBe(titulos);
+    expect(comp).not.toContain("colSpan");
+    expect(comp).toContain("resumirMuestra");
+    expect(comp).not.toContain("muestras.slice(0, 3)");
+    // Y la muestra no se presenta como si fuera el archivo entero.
+    expect(comp).toContain("no sobre las");
   });
 });
 

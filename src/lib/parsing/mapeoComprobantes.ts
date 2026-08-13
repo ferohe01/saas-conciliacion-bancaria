@@ -262,6 +262,71 @@ export function motivoOmision(
   return falta;
 }
 
+export type ResumenMuestra = {
+  /** Filas leídas de la previa. NO es el tamaño del archivo. */
+  total: number;
+  entran: number;
+  /** Hasta `maxEjemplos` filas ya interpretadas, de las que SÍ entran. */
+  ejemplos: FilaComprobante[];
+  /** Por qué se omite el resto, de más filas a menos. */
+  motivos: { falta: string[]; filas: number }[];
+};
+
+/**
+ * Qué haría este mapeo con la muestra entera.
+ *
+ * ── Por qué no basta con enseñar las tres primeras filas ────────────────────
+ *
+ * La vista previa mostraba `muestras.slice(0, 3)` y las interpretaba. Con un
+ * mayor contable real eso dio la peor pantalla posible: las tres primeras filas
+ * del archivo son líneas de un asiento de crédito (sin débito, tipo «Asiento»),
+ * así que la previa decía **tres veces «esta fila se omitiría»** sobre un
+ * archivo de 452.605 filas en el que 452.454 se cargan perfectamente.
+ *
+ * El usuario ve que su mapeo "no funciona" cuando funciona, y lo cambia — o
+ * abandona. Enseñar las primeras filas es apostar a que el principio del
+ * archivo sea representativo, y en un export contable nunca lo es.
+ *
+ * Así que se recorre la muestra: se enseñan filas que SÍ entran, y lo que se
+ * queda fuera se cuenta y se explica en una línea. La alarma se reserva para
+ * cuando de verdad la hay —que no entre ninguna—, que es justo el caso en que
+ * antes se confundía con el otro.
+ *
+ * ⚠️ `total` son las filas LEÍDAS para la previa (unos cientos), no las del
+ * archivo. Quien lo muestre tiene que decirlo así: afirmar «132 de 452.605 se
+ * omitirían» a partir de una muestra sería inventar una cifra.
+ */
+export function resumirMuestra(
+  muestras: Record<string, unknown>[],
+  config: Config,
+  maxEjemplos = 3,
+): ResumenMuestra {
+  const ejemplos: FilaComprobante[] = [];
+  const porMotivo = new Map<string, { falta: string[]; filas: number }>();
+  let entran = 0;
+
+  for (const fila of muestras) {
+    const interpretada = aplicarMapeo(fila, config);
+    if (interpretada) {
+      entran++;
+      if (ejemplos.length < maxEjemplos) ejemplos.push(interpretada);
+      continue;
+    }
+    const falta = motivoOmision(fila, config);
+    const clave = falta.join("|");
+    const previo = porMotivo.get(clave);
+    if (previo) previo.filas++;
+    else porMotivo.set(clave, { falta, filas: 1 });
+  }
+
+  return {
+    total: muestras.length,
+    entran,
+    ejemplos,
+    motivos: [...porMotivo.values()].sort((a, b) => b.filas - a.filas),
+  };
+}
+
 /**
  * El mapeo de la plantilla: cada campo en la columna que lleva su nombre.
  *

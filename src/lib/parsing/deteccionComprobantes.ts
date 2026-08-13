@@ -1,6 +1,6 @@
 import { normalizarFecha } from "@/lib/normalizacion/fecha";
 import { normalizarMonto } from "@/lib/normalizacion/monto";
-import { detectarCon } from "./deteccion";
+import { detectarConDetalle, type DeteccionDetallada } from "./deteccion";
 import {
   CAMPOS_COMPROBANTE,
   normalizarTipo,
@@ -32,9 +32,14 @@ const KEYWORDS: Record<CampoComprobante, string[]> = {
     "vencimiento", "f. vencimiento", "fecha vencimiento", "vence",
     "fecha de pago", "due",
   ],
+  // ⚠️ `debito`/`credito`/`debe`/`haber` están aquí porque el export de un ERP
+  // contable NO se llama "importe": un libro mayor trae `Débito` y `Crédito`, y
+  // sin estas palabras la única candidata reconocible era `Importe Moneda Base`
+  // —la columna con signo, que es justo la que no se debe usar—.
   monto: [
     "monto", "importe", "total", "amount", "valor", "precio",
     "total comprobante", "importe total", "soles", "mto",
+    "debito", "credito", "debe", "haber",
   ],
   tipo: ["tipo", "tipo documento", "tipo comprobante", "clase", "type"],
   // El número del documento: identifica la factura y no se repite.
@@ -78,6 +83,49 @@ function fraccion<T>(items: T[], pred: (x: T) => boolean): number {
 }
 
 /**
+ * Fracción mínima de valores RECONOCIBLES para que una columna se proponga.
+ *
+ * ── Por qué existe ─────────────────────────────────────────────────────────
+ *
+ * El nombre del encabezado pesa mucho, y con razón: casi siempre acierta. Pero
+ * con un libro mayor real la columna `Tipo de Transacción` ganaba el campo
+ * `tipo` solo por llamarse así, y sus valores son *Asiento* y *Pago*: ni uno
+ * solo significa "cobranza". El resultado habría sido cargar 452.461 cobranzas
+ * **como pagos** —el dinero entero del lado contrario— y descartar el resto por
+ * "sin tipo". Nada de eso falla en pantalla: la importación dice "452.461
+ * comprobantes agregados" y se ve perfecta.
+ *
+ * Así que el contenido puede VETAR al nombre. No al revés: si la columna está
+ * vacía en la muestra no se veta nada, porque ausencia de evidencia no es
+ * evidencia de contradicción.
+ *
+ * ── Por qué dos umbrales ───────────────────────────────────────────────────
+ *
+ * `fecha`, `monto` y `tipo` son mortales de necesidad: sin cualquiera de los
+ * tres la fila **entera** se descarta, así que una columna que no clasifique el
+ * 90 % está tirando datos en silencio. `moneda` va con ellas porque un valor no
+ * reconocido cae a PEN sin decir nada. El resto se ve en la vista previa y
+ * admite más ruido.
+ */
+const MINIMO_RECONOCIDO: Partial<Record<CampoComprobante, number>> = {
+  fecha: 0.9,
+  monto: 0.9,
+  tipo: 0.9,
+  moneda: 0.9,
+  fecha_vencimiento: 0.5,
+  ruc_contraparte: 0.5,
+};
+
+/** Veto: la columna contradice al campo, no se propone ni llamándose igual. */
+const VETO = Number.NEGATIVE_INFINITY;
+
+function conVeto(campo: CampoComprobante, valida: number, peso: number): number {
+  const minimo = MINIMO_RECONOCIDO[campo];
+  if (minimo != null && valida < minimo) return VETO;
+  return valida * peso;
+}
+
+/**
  * Puntaje por lo que hay DENTRO de la columna.
  *
  * Vale más que el nombre en los casos ambiguos: un export puede llamar "DOC" a
@@ -90,26 +138,71 @@ function puntajeContenido(campo: CampoComprobante, valores: unknown[]): number {
   switch (campo) {
     case "fecha":
     case "fecha_vencimiento":
-      return fraccion(noVacios, (v) => normalizarFecha(v) != null) * 2.5;
-    case "monto":
+      return conVeto(
+        campo,
+        fraccion(noVacios, (v) => normalizarFecha(v) != null),
+        2.5,
+      );
+    case "monto": {
       // Numérico pero NO fecha: un serial o una fecha en número se leen como
       // importe y arruinarían el mapeo sin que nada lo delate.
-      return (
-        fraccion(
-          noVacios,
-          (v) => normalizarMonto(v) != null && normalizarFecha(v) == null,
-        ) * 2
-      );
+      const montos = noVacios
+        .map((v) => (normalizarFecha(v) == null ? normalizarMonto(v) : null))
+        .filter((n): n is number => n != null);
+      const valida = montos.length / noVacios.length;
+
+      // ⚠️ COBERTURA: `Débito` está lleno en el 99,97 % de un libro de
+      // recaudación y `Crédito` en el 0,03 %, pero los dos son numéricos al
+      // 100 % de sus filas. Sin este factor la heurística no las distingue, y
+      // elegir `Crédito` deja el archivo casi entero sin importe — o sea,
+      // descartado por "datos incompletos".
+      const cobertura = noVacios.length / valores.length;
+
+      // ⚠️ SIGNOS MEZCLADOS: una columna con positivos y negativos no es el
+      // importe de un comprobante, es el movimiento firmado de un mayor. En
+      // este sistema el signo lo pone el TIPO (cobranza + / pago −), y un monto
+      // negativo produce un saldo negativo que la base rechaza: la carga entera
+      // falla. Se penaliza en vez de vetar porque una nota de crédito puede
+      // venir en negativo legítimamente.
+      const mezcla =
+        montos.some((n) => n > 0) && montos.some((n) => n < 0) ? 0.5 : 1;
+
+      const base = conVeto(campo, valida, 2);
+      return base === VETO ? VETO : base * cobertura * mezcla;
+    }
     case "tipo":
-      return fraccion(noVacios, (v) => normalizarTipo(v) != null) * 2.5;
+      return conVeto(
+        campo,
+        fraccion(noVacios, (v) => normalizarTipo(v) != null),
+        2.5,
+      );
     case "moneda":
-      return fraccion(noVacios, (v) => normalizarMoneda(v) != null) * 2.5;
+      return conVeto(
+        campo,
+        fraccion(noVacios, (v) => normalizarMoneda(v) != null),
+        2.5,
+      );
     case "ruc_contraparte":
       // RUC peruano: 11 dígitos empezando por 10, 15, 17 o 20.
-      return (
-        fraccion(noVacios, (v) => /^(10|15|17|20)\d{9}$/.test(String(v).trim())) *
-        2.5
+      return conVeto(
+        campo,
+        fraccion(noVacios, (v) => /^(10|15|17|20)\d{9}$/.test(String(v).trim())),
+        2.5,
       );
+    case "serie_numero": {
+      // ⚠️ UNICIDAD. `serie_numero` es la IDENTIDAD del documento: lleva índice
+      // único y es lo que impide cargar dos veces la misma factura. Entre dos
+      // columnas que se llaman parecido, la que repite valores es peor
+      // candidata — y en un mayor real esa diferencia es la que decide todo:
+      // `Nro. Documento` es el asiento (se repite en cada línea del mismo
+      // asiento) y `WIN - Nro. Documento` es el recibo, que es lo que el banco
+      // conoce. Elegir el primero da una conciliación al 0 %.
+      //
+      // Sin veto: un archivo puede traer legítimamente números repetidos (la
+      // 0018 lo contempla y el índice es parcial). Solo inclina la balanza.
+      const distintos = new Set(noVacios.map((v) => String(v).trim())).size;
+      return (distintos / noVacios.length) * 1.5;
+    }
     default:
       return 0;
   }
@@ -119,7 +212,23 @@ export function detectarColumnasComprobante(
   headers: string[],
   muestras: Record<string, unknown>[],
 ): MapeoComprobantes {
-  return detectarCon(
+  return detectarComprobantesConDudas(headers, muestras).mapeo;
+}
+
+/**
+ * La detección y, además, **con qué dudó**.
+ *
+ * ⚠️ Las alternativas no son un adorno de la interfaz: son el único aviso de
+ * que la heurística eligió entre varias candidatas parecidas. En un mayor
+ * contable hay tres columnas que podrían ser el importe y tres que podrían ser
+ * el número de documento, y la que decide el resultado de la conciliación es
+ * una sola. Elegir mal no da un error — da un 0 % media hora después.
+ */
+export function detectarComprobantesConDudas(
+  headers: string[],
+  muestras: Record<string, unknown>[],
+): DeteccionDetallada<CampoComprobante> {
+  return detectarConDetalle(
     CAMPOS_COMPROBANTE,
     KEYWORDS,
     puntajeContenido,
