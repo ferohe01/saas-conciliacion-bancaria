@@ -35,7 +35,21 @@ const comunesEntre = (a, b) => {
 };
 // Referencia normalizada, igual que en la capa exacta: si dos partidas traen el
 // MISMO codigo de operacion, esa es una identidad mas fuerte que un nombre.
-const normRef = (r) => String(r ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+// COPIA EXACTA de 01_exacta.js / src/lib/normalizacion/referencia.ts / ref_norm.
+// Descarta un primer segmento de solo letras (`WIN-S001-11618954` ->
+// `S001-11618954`) cuando lo que queda sigue teniendo letras, digitos y >= 6
+// caracteres utiles; `SR11-02748951` no se toca.
+const limpiarRef = (s) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+const normRef = (r) => {
+  const s = String(r ?? "").trim();
+  if (s === "") return "";
+  const resto = s.replace(/^[A-Za-z]+[-_/ ]+/, "");
+  if (resto !== s && /[A-Za-z]/.test(resto) && /[0-9]/.test(resto)
+      && limpiarRef(resto).length >= 6) {
+    return limpiarRef(resto);
+  }
+  return limpiarRef(s);
+};
 const compartenPalabra = (a, b) => { for (const w of a) if (b.has(w)) return true; return false; };
 // Sobre timestamps YA parseados. La version anterior recibia cadenas y llamaba
 // a Date.parse dos veces POR PAR: con 4.382 x 3.204 pendientes son 28 millones

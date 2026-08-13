@@ -10,7 +10,27 @@ const internos = payload.registros_internos ?? [];
 const bancarios = payload.movimientos_bancarios ?? [];
 
 const cents = (m) => Math.round(Number(m) * 100);
-const normRef = (r) => String(r ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+// Referencia canonica. COPIA EXACTA de src/lib/normalizacion/referencia.ts y de
+// la expresion de `ref_norm` (migraciones 0029 / 0042). Si las tres divergen, un
+// par casa en SQL y no aqui —o al reves— y la diferencia es invisible.
+//
+// Ademas de mayusculas y quitar separadores, descarta un primer segmento hecho
+// SOLO de letras: el mismo recibo llega como `WIN-S001-11618954` desde el ERP
+// del cliente y como `S001-11618954` desde el banco. Solo se quita si lo que
+// queda sigue teniendo letras Y digitos y al menos 6 caracteres utiles; por eso
+// `SR11-02748951` no se toca (SR11 lleva digitos: no es un nombre de entidad).
+const limpiarRef = (s) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+const normRef = (r) => {
+  const s = String(r ?? '').trim();
+  if (s === '') return '';
+  const resto = s.replace(/^[A-Za-z]+[-_/ ]+/, '');
+  if (resto !== s && /[A-Za-z]/.test(resto) && /[0-9]/.test(resto)
+      && limpiarRef(resto).length >= 6) {
+    return limpiarRef(resto);
+  }
+  return limpiarRef(s);
+};
 
 const idxPorRef = new Map();
 const idxPorFecha = new Map();

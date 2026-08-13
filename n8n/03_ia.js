@@ -44,8 +44,24 @@ const esRefToken = (t) => t.length >= 4 && /[A-Z]/.test(t) && /[0-9]/.test(t);
 const refsDeTexto = (texto, set) => {
   for (const tok of String(texto ?? "").toUpperCase().split(/[^A-Z0-9]+/)) if (esRefToken(tok)) set.add(tok);
 };
+// Forma canonica de la referencia: la misma de 01_exacta.js / ref_norm. Se
+// aniade ADEMAS de la cruda, nunca en su lugar: asi ningun candidato que antes
+// aparecia deja de aparecer, y los `WIN-S001-...` del ERP alcanzan a los
+// `S001-...` del banco.
+const limpiarRef = (s) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+const canonRef = (r) => {
+  const s = String(r ?? "").trim();
+  if (s === "") return "";
+  const resto = s.replace(/^[A-Za-z]+[-_/ ]+/, "");
+  if (resto !== s && /[A-Za-z]/.test(resto) && /[0-9]/.test(resto)
+      && limpiarRef(resto).length >= 6) {
+    return limpiarRef(resto);
+  }
+  return limpiarRef(s);
+};
 const refCampo = (ref, set) => {
-  const c = String(ref ?? "").toUpperCase().replace(/[^A-Z0-9]/g, ""); if (esRefToken(c)) set.add(c);
+  const c = limpiarRef(String(ref ?? "")); if (esRefToken(c)) set.add(c);
+  const k = canonRef(ref); if (k !== c && esRefToken(k)) set.add(k);
 };
 const refsInterno = (it) => { const s = new Set(); refCampo(it.referencia, s); refsDeTexto(it.descripcion, s); return s; };
 const refsBanco = (bc) => { const s = new Set(); refCampo(bc.referencia_banco, s); refsDeTexto(bc.glosa, s); return s; };

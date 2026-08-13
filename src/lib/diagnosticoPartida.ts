@@ -1,4 +1,5 @@
 import { palabras } from "@/lib/precedentes";
+import { normRef } from "@/lib/normalizacion/referencia";
 
 /**
  * ¿Por qué no se concilió esta partida?
@@ -89,10 +90,14 @@ export type ConfigDiagnostico = {
 
 const MS_DIA = 86_400_000;
 
-/** Misma normalización que `normRef` en n8n/01_exacta.js y que `ref_norm`. */
-export function normRef(r: string): string {
-  return r.toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
+/**
+ * Misma normalización que `normRef` en n8n/01_exacta.js y que `ref_norm`.
+ *
+ * Se re-exporta —en vez de definirse aquí, como estaba— para que el diagnóstico
+ * no pueda contestar «no coincide la referencia» sobre dos códigos que el motor
+ * SÍ considera el mismo. Fuente única en `lib/normalizacion/referencia.ts`.
+ */
+export { normRef };
 
 const cent = (m: number) => Math.round(m * 100);
 const dias = (a: string, b: string) =>
