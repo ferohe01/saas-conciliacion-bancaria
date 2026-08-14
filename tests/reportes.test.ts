@@ -264,3 +264,61 @@ describe("enFocoDelFiltro", () => {
     expect(r).toHaveLength(0);
   });
 });
+
+describe("el gráfico de métodos no mezcla unidades", () => {
+  /**
+   * ⚠️ Un par consume una partida de CADA lado; una partida suelta no es un
+   * par. La barra sumaba las cuatro filas —448.070 pares + 7.313 sueltas— y
+   * daba un total de 455.383 que no era ni pares ni partidas: el "2 %" de sin
+   * conciliar no significaba nada. Un cliente lo cazó a la primera.
+   */
+  const job = (r: Partial<ResumenJob>): JobReporte => ({
+    id: "j1",
+    anio: 2026,
+    mes: 6,
+    periodoDesde: "2026-06-01",
+    periodoHasta: "2026-06-30",
+    banco: "BCP",
+    cuentaId: "c1",
+    numero: null,
+    diferenciaCuadre: 0,
+    createdAt: "2026-06-30T00:00:00Z",
+    resumen: {
+      total_internos: 452454,
+      total_bancarios: 450999,
+      conciliados_exactos: 448070,
+      conciliados_difusos: 0,
+      sugeridos_ia: 0,
+      sin_conciliar_internos: 4384,
+      sin_conciliar_bancarios: 2929,
+      ...r,
+    },
+  });
+
+  it("la base de la barra son PARES, no pares + sueltas", () => {
+    const k = calcularKpis([job({})]);
+    expect(k.paresConciliados).toBe(448070);
+    expect(k.paresConciliados).not.toBe(448070 + 7313);
+  });
+
+  it("separa los dos lados: 7.313 no responde a lo que se pregunta", () => {
+    const k = calcularKpis([job({})]);
+    expect(k.sinConciliarInternos).toBe(4384);
+    expect(k.sinConciliarBancarios).toBe(2929);
+    expect(k.sinConciliar).toBe(7313);
+  });
+
+  it("el % de sueltas va sobre las partidas de los dos lados, y cuadra", () => {
+    const k = calcularKpis([job({})]);
+    expect(k.partidas).toBe(452454 + 450999);
+    // 7.313 de 903.453 es 0,8 %, no el 2 % que salía de la base mezclada.
+    expect(k.pctSinConciliar).toBeCloseTo(0.8, 1);
+  });
+
+  it("sin conciliaciones no divide por cero", () => {
+    const k = calcularKpis([]);
+    expect(k.paresConciliados).toBe(0);
+    expect(k.pctSinConciliar).toBe(0);
+    expect(k.partidas).toBe(0);
+  });
+});

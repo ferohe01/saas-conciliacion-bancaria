@@ -195,19 +195,35 @@ function Tendencia({
   );
 }
 
-/** Distribución por método. Paleta Okabe-Ito: esto es un gráfico, no UI. */
+/**
+ * Distribución por método. Paleta Okabe-Ito: esto es un gráfico, no UI.
+ *
+ * ⚠️⚠️ **El gráfico cuenta PARES, y "sin conciliar" no es un método.**
+ *
+ * Antes las cuatro filas iban en la misma barra: 448.070 (pares emparejados) y
+ * 7.313 (partidas sueltas de los dos lados). Son dos unidades distintas, así que
+ * el total —455.383— no era ni pares ni partidas, y el "2 %" que salía de ahí no
+ * significaba nada. Un cliente lo cazó a la primera: «sin conciliar debería
+ * decir 4.384», que son las suyas.
+ *
+ * Ahora la barra responde a lo que promete el título —de lo conciliado, cómo se
+ * consiguió— y lo suelto se dice aparte, separado por lado y con su porcentaje
+ * sobre las partidas, que es la única base con la que cuadra.
+ */
 function Metodos({
   metodos,
   total,
+  sueltas,
 }: {
   metodos: { exacta: number; difusa: number; ia: number; sin_conciliar: number };
+  /** Pares conciliados: exacta + difusa + IA. */
   total: number;
+  sueltas: { internos: number; bancarios: number; pct: number };
 }) {
   const filas = [
     { clave: "exacta", label: "Exacta", valor: metodos.exacta },
     { clave: "difusa", label: "Difusa", valor: metodos.difusa },
     { clave: "ia", label: "Sugerido IA", valor: metodos.ia },
-    { clave: "sin_conciliar", label: "Sin conciliar", valor: metodos.sin_conciliar },
   ] as const;
 
   return (
@@ -266,6 +282,39 @@ function Metodos({
         <p className="mt-4 text-sm text-neutral-600">
           Todavía no hay partidas conciliadas que resumir.
         </p>
+      )}
+
+      {/* Lo que NO se concilió, fuera de la barra y separado por lado: es la
+          cifra que de verdad se busca aquí, y sumar los dos lados en un solo
+          número no responde a ninguna pregunta. */}
+      {sueltas.internos + sueltas.bancarios > 0 && (
+        <div className="mt-4 border-t border-neutral-200 pt-3">
+          <Link
+            href="/reportes/sin-conciliar"
+            className="group flex items-center gap-2.5 text-sm"
+          >
+            <span
+              aria-hidden
+              className="h-2.5 w-2.5 shrink-0 rounded-sm"
+              style={{ backgroundColor: COLOR_METODO.sin_conciliar }}
+            />
+            <span className="flex-1 text-neutral-700 group-hover:text-blue-700">
+              Sin conciliar
+            </span>
+            <span className="tabular-nums text-neutral-900">
+              {NUM(sueltas.internos + sueltas.bancarios)}
+            </span>
+            <span className="w-12 text-right tabular-nums text-neutral-500">
+              {sueltas.pct}%
+            </span>
+          </Link>
+          <p className="mt-1 pl-5 text-xs text-neutral-600">
+            <span className="tabular-nums">{NUM(sueltas.internos)}</span> de tus
+            registros y{" "}
+            <span className="tabular-nums">{NUM(sueltas.bancarios)}</span> del
+            banco, sobre el total de partidas de los dos lados.
+          </p>
+        </div>
       )}
     </section>
   );
@@ -395,11 +444,7 @@ export default async function DashboardPage({
 
   const kpis = calcularKpis(jobsDef);
   const mensual = porMes(jobsDef);
-  const totalPartidas =
-    kpis.metodos.exacta +
-    kpis.metodos.difusa +
-    kpis.metodos.ia +
-    kpis.metodos.sin_conciliar;
+  // La barra de métodos va sobre PARES conciliados; lo suelto se cuenta aparte.
 
   const sinCuentas = (numCuentas ?? 0) === 0;
 
@@ -614,7 +659,15 @@ export default async function DashboardPage({
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Tendencia datos={mensual} anio={anio} />
-        <Metodos metodos={kpis.metodos} total={totalPartidas} />
+        <Metodos
+          metodos={kpis.metodos}
+          total={kpis.paresConciliados}
+          sueltas={{
+            internos: kpis.sinConciliarInternos,
+            bancarios: kpis.sinConciliarBancarios,
+            pct: kpis.pctSinConciliar,
+          }}
+        />
       </div>
 
       {/* Justo debajo de la distribución por método, que es donde se ve el

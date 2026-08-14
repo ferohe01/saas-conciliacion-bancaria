@@ -151,18 +151,15 @@ function DistribucionMetodos({
   kpis: Kpis;
   filtroQuery: string;
 }) {
+  // ⚠️⚠️ La barra cuenta PARES; "sin conciliar" son PARTIDAS sueltas y no es un
+  // método. Mezclarlos daba un total (455.383) que no era ni una cosa ni la
+  // otra, y un porcentaje que no significaba nada. Va debajo, separado por lado.
   const m = kpis.metodos;
-  const total = m.exacta + m.difusa + m.ia + m.sin_conciliar || 1;
+  const total = kpis.paresConciliados || 1;
   const segs = [
     { k: "Exacta", slug: "exacta", v: m.exacta, c: COLOR_METODO.exacta },
     { k: "Difusa", slug: "difusa", v: m.difusa, c: COLOR_METODO.difusa },
     { k: "Sugerido IA", slug: "ia", v: m.ia, c: COLOR_METODO.ia },
-    {
-      k: "Sin conciliar",
-      slug: "sin-conciliar",
-      v: m.sin_conciliar,
-      c: COLOR_METODO.sin_conciliar,
-    },
   ];
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white p-5">
@@ -226,6 +223,47 @@ function DistribucionMetodos({
           </li>
         ))}
       </ul>
+
+      {/* Lo que NO se emparejó, fuera de la barra y con los dos lados a la
+          vista: «7.313» es la suma de dos cosas distintas y no responde a lo
+          que se pregunta mirando esto. */}
+      {kpis.sinConciliarInternos + kpis.sinConciliarBancarios > 0 && (
+        <div className="mt-3 border-t border-neutral-200 pt-3">
+          <Link
+            href={`/reportes/sin-conciliar?${filtroQuery}`}
+            className="group flex min-h-9 items-center justify-between rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-neutral-50"
+          >
+            <span className="flex items-center gap-2">
+              <span
+                className="h-3 w-3 rounded-sm"
+                style={{ background: COLOR_METODO.sin_conciliar }}
+                aria-hidden
+              />
+              <span className="text-neutral-700 group-hover:text-blue-700">
+                Sin conciliar
+              </span>
+            </span>
+            <span className="flex items-center gap-2 tabular-nums text-neutral-900">
+              {NUM(kpis.sinConciliarInternos + kpis.sinConciliarBancarios)}{" "}
+              <span className="text-neutral-600">({kpis.pctSinConciliar}%)</span>
+              <span
+                aria-hidden
+                className="text-neutral-500 group-hover:text-blue-700"
+              >
+                →
+              </span>
+            </span>
+          </Link>
+          <p className="mt-1 px-2 text-xs text-neutral-600">
+            <span className="tabular-nums">{NUM(kpis.sinConciliarInternos)}</span>{" "}
+            de tus registros y{" "}
+            <span className="tabular-nums">{NUM(kpis.sinConciliarBancarios)}</span>{" "}
+            del banco, sobre las{" "}
+            <span className="tabular-nums">{NUM(kpis.partidas)}</span> partidas de
+            los dos lados.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

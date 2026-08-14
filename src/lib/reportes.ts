@@ -134,7 +134,15 @@ export type Kpis = {
   pctAutomatizacion: number;
   jobsCuadrados: number;
   pctCuadre: number;
+  /** Sueltas de cada lado. La suma sola no responde a lo que se pregunta. */
+  sinConciliarInternos: number;
+  sinConciliarBancarios: number;
+  /** Registros + movimientos: la base con la que el % de sueltas cuadra. */
+  partidas: number;
+  pctSinConciliar: number;
   metodos: { exacta: number; difusa: number; ia: number; sin_conciliar: number };
+  /** Pares emparejados, la base del gráfico de métodos. */
+  paresConciliados: number;
 };
 
 export function calcularKpis(jobs: JobReporte[]): Kpis {
@@ -169,10 +177,29 @@ export function calcularKpis(jobs: JobReporte[]): Kpis {
     autoConciliados,
     sugeridosIa: ia,
     sinConciliar,
+    // ⚠️ Los dos lados POR SEPARADO, además de la suma.
+    //
+    // «Sin conciliar: 7.313» es la suma de 4.384 registros tuyos y 2.929
+    // movimientos del banco, y a nadie le sirve así: quien mira el panel quiere
+    // saber cuántas partidas SUYAS quedaron sueltas. Un cliente lo cazó a la
+    // primera —«debería decir 4.384»— y tenía razón en el fondo aunque el
+    // total fuera correcto.
+    sinConciliarInternos: sinInt,
+    sinConciliarBancarios: sinBanc,
+    /** Los dos lados juntos: la única base con la que el % de sueltas cuadra. */
+    partidas: registros + movimientos,
+    pctSinConciliar: pct(sinConciliar, registros + movimientos),
     pctAutomatizacion: pct(autoConciliados, registros),
     jobsCuadrados: cuadrados,
     pctCuadre: pct(cuadrados, jobs.length),
     metodos: { exacta, difusa, ia, sin_conciliar: sinConciliar },
+    /**
+     * ⚠️ Solo lo CONCILIADO, y en pares. Es la base honesta del gráfico «cómo se
+     * concilió»: un par consume una partida de cada lado, así que sumarle las
+     * sueltas mezcla dos unidades y da un total (455.383) que no es ni pares ni
+     * partidas. El 2 % que salía de ahí no significaba nada.
+     */
+    paresConciliados: exacta + difusa + ia,
   };
 }
 
