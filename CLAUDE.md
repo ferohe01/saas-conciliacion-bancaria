@@ -1422,6 +1422,46 @@ y en el **resumen ejecutivo** (desplegada, ahí es contenido). Componente único
   busca es poder decir «esto cuadra con mi Excel», y para eso hace falta un
   período concreto contra un archivo concreto.
 
+### Y de lo que quedó suelto, qué es (`residuo_explicado`, 0044)
+
+La cascada termina en «4.384 sin conciliar» y ahí se paraba — que es justo donde
+empieza la pregunta del cliente. Contestarla exigía abrir los dos Excel y cruzar
+450.999 movimientos contra 452.454 comprobantes a mano. Ese cruce está en la
+base; solo faltaba pedirlo.
+
+Cada partida suelta se clasifica por un hecho **consultable**:
+
+- **su código no aparece en el otro lado** — 4.382 recibos (S/ 434.844) y 2.645
+  movimientos. Es el grueso, y no tiene arreglo técnico.
+- **su código SÍ está, pero no casaron** — importe distinto, o ese movimiento ya
+  se llevó otro comprobante con el mismo código. Son pocos y son los únicos que
+  merecen una mirada: hay las dos caras.
+- **sin código** — solo emparejables por importe y fecha.
+
+⚠️⚠️ **Se afirma el hecho, no la conclusión.** El sistema puede comprobar que un
+código no está en el extracto; que «se cobró por otro canal» es una lectura del
+negocio —muy probable, no comprobada— y ponerla en boca del sistema la
+convertiría en un dato. Cada línea lleva el hecho y, aparte y en condicional, lo
+que suele significar. Mismo criterio que `precedentes.ts` y `diagnosticoPartida`.
+
+⚠️ **Las series descompensadas son el hallazgo que cambia la conversación.** De
+los códigos que empiezan por `S001` el banco trae 559 y los libros 276: eso no
+es un problema de emparejamiento, es que **faltan documentos**, y ninguna mejora
+del motor lo va a arreglar. Se agrupa por los cuatro primeros caracteres del
+código **canónico**, y solo funciona gracias a la 0042: sin quitar el prefijo de
+entidad, `WIN-S001-…` y `S001-…` caerían en grupos distintos y la comparación no
+diría nada. Se enseña solo cuando la diferencia es real (≥20 códigos y ≥10 %):
+señalar empates es ruido, y el ruido enseña a ignorar el recuadro.
+
+- **Se pide AL PULSAR.** Recorre las dos tablas enteras —segundos a este
+  volumen— y el panel se abre a diario. Mismo criterio que el «¿Por qué?» de
+  cada partida y que el asistente.
+- **No se congela**, al revés que la cascada: aquí sí envejecería mintiendo,
+  porque conciliar a mano cambia el residuo. La pantalla dice que se calculó en
+  ese momento.
+- Solo modo tabla; en modo payload devuelve `null` y la pantalla lo explica en
+  vez de fingir que no hay nada suelto.
+
 ### El asistente: por qué se le puede dejar hablar
 
 Fases 3 y 4: el modelo **sintetiza** los dos análisis anteriores y responde

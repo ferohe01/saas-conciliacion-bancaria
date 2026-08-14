@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ResiduoExplicado } from "./ResiduoExplicado";
 import {
   cascadaPartidas,
   resumenDiferencia,
@@ -147,9 +148,13 @@ export function OrigenPartidas({
         </section>
       ))}
 
+      {/* La cascada termina en «sin conciliar», que es donde empieza la
+          pregunta de verdad. Va aquí y no en otra pantalla. */}
+      {jobId && <ResiduoExplicado jobId={jobId} />}
+
       {jobId && (
         <p className="text-sm text-neutral-600">
-          Cada partida sin conciliar puede explicarse una a una en{" "}
+          Y cada partida puede explicarse una a una en{" "}
           <Link
             href={`/conciliacion/${jobId}`}
             className="font-medium text-blue-700 hover:underline"

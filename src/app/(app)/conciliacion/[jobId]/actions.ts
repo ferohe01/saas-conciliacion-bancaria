@@ -1121,3 +1121,34 @@ export async function explicarPartida(
 
   return { ok: true, texto: r.texto };
 }
+
+/**
+ * De lo que quedó sin conciliar: cuántas partidas tienen su código en el otro
+ * lado y cuántas no.
+ *
+ * ⚠️ SE PIDE AL PULSAR, no al cargar la pantalla. La consulta recorre las dos
+ * tablas enteras —a medio millón de filas son segundos— y el panel se abre a
+ * diario. Mismo criterio que el «¿Por qué?» de cada partida y que el asistente:
+ * el trabajo caro se hace cuando alguien lo pide, no por si acaso.
+ *
+ * ⚠️ Cliente de SESIÓN: la función resuelve la empresa desde `auth.uid()` y
+ * comprueba que el job sea suyo. Con `admin` no habría usuario y devolvería
+ * `null` sin error — el fallo silencioso de siempre.
+ */
+export async function explicarResiduo(
+  jobId: string,
+): Promise<{ ok: boolean; datos?: unknown; error?: string }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("residuo_explicado", {
+    p_job_id: jobId,
+  });
+  if (error) {
+    console.error("[conciliacion] no se pudo explicar el residuo:", error);
+    return {
+      ok: false,
+      error:
+        "No se pudo analizar lo que quedó sin conciliar. Vuelve a intentarlo en un momento.",
+    };
+  }
+  return { ok: true, datos: data };
+}
