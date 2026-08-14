@@ -1,99 +1,88 @@
 -- ============================================================================
--- medir-residuo.sql — Cuánto tarda de verdad el análisis del residuo
+-- medir-residuo.sql — Qué parte del análisis del residuo se come los 8 s
 --
--- `residuo_explicado()` NO se puede probar desde el SQL Editor: resuelve la
--- empresa con `auth.uid()` y ahí no hay sesión, así que devuelve `null` al
--- instante sin ejecutar nada. Eso es correcto —es su frontera de seguridad—
--- pero deja sin forma de medirla cuando el botón «Analizar» falla.
+-- `residuo_explicado()` no se puede medir desde el SQL Editor: resuelve la
+-- empresa con `auth.uid()`, allí no hay sesión, y devuelve `null` al instante
+-- sin ejecutar nada. Eso es su frontera de seguridad y está bien — pero deja
+-- sin forma de cronometrarla cuando el botón «Analizar» falla.
 --
--- Esto es su cuerpo, con los identificadores puestos a mano y sin la
--- comprobación de pertenencia. Solo LEE.
+-- Esto es su cuerpo troceado, con los identificadores puestos a mano y sin la
+-- comprobación de pertenencia. Solo LEE; no cambia nada.
 --
 -- CÓMO SE USA
---   1. Rellena los dos valores de abajo (el job y su lote de extracto).
---   2. Pégalo entero en el SQL Editor de Studio.
---   3. Mira el `Execution Time` del final:
---        < 8.000 ms  → la función entra; si el botón falla, NO es el tiempo
---        > 8.000 ms  → es el `statement_timeout` de PostgREST, hay que acelerar
+--   Ejecuta los bloques UNO A UNO y anota el tiempo de cada uno (Studio lo
+--   muestra abajo a la derecha). El que se dispare es el culpable.
 --
--- ⚠️ Studio corre como superusuario y NO tiene ese tope, así que aquí la
--- consulta termina siempre. Lo que importa no es que acabe: es cuánto tarda.
+-- ⚠️ Studio corre como superusuario y NO tiene el tope de 8 s, así que aquí
+-- todos terminan. Lo que importa no es que acaben: es cuánto tardan.
 -- ============================================================================
 
--- Los dos identificadores. Salen de:
---   select id, lote_extracto_id, empresa_id, cuenta_id, periodo_desde, periodo_hasta
---     from jobs_conciliacion order by created_at desc limit 5;
-\set job    'rec-2026-06-527538'
-\set lote   'b3bba531-128a-4c6e-a236-1a894736d4f0'
+-- ── 0) Los identificadores de la última conciliación ────────────────────────
+select id, lote_extracto_id, empresa_id, cuenta_id, periodo_desde, periodo_hasta,
+       pg_size_pretty(pg_column_size(payload_entrada)::bigint) as payload,
+       jsonb_array_length(payload_entrada -> 'registros_internos')   as internos,
+       jsonb_array_length(payload_entrada -> 'movimientos_bancarios') as movimientos
+  from public.jobs_conciliacion
+ order by created_at desc
+ limit 3;
 
-explain (analyze, buffers, timing)
-with j as (
-  select empresa_id, cuenta_id, periodo_desde, periodo_hasta, lote_extracto_id
-    from public.jobs_conciliacion where id = :'job'
-),
-casados_c as materialized (
-  select unnest(m.comprobante_ids) as id
-    from public.matches_conciliacion m where m.job_id = :'job'
-),
-casados_m as materialized (
-  select unnest(m.movimiento_ids) as id
-    from public.matches_conciliacion m where m.job_id = :'job'
-),
-int_pend as materialized (
-  select c.ref_norm as ref,
-         case when c.tipo = 'pago' then -abs(c.monto) else abs(c.monto) end as monto
-    from public.comprobantes c, j
-   where c.empresa_id = j.empresa_id
-     and c.fecha between j.periodo_desde and j.periodo_hasta
-     and c.estado not in ('cobrado', 'anulado')
-     and not exists (select 1 from casados_c k where k.id = c.id)
-),
-mov_pend as materialized (
-  select m.ref_norm as ref, m.monto
-    from public.movimientos_extracto m
-   where m.lote_id = :'lote'::uuid
-     and not exists (select 1 from casados_m k where k.id = m.id)
-),
-int_clas as (
-  select case
-           when p.ref = '' then 'sin_codigo'
-           when exists (select 1 from public.movimientos_extracto m
-                         where m.lote_id = :'lote'::uuid and m.ref_norm = p.ref)
-             then 'codigo_en_el_otro_lado'
-           else 'sin_rastro'
-         end as motivo, p.monto
-    from int_pend p
-),
-mov_clas as (
-  select case
-           when p.ref = '' then 'sin_codigo'
-           when exists (select 1 from public.comprobantes c, j
-                         where c.empresa_id = j.empresa_id
-                           and c.ref_norm = p.ref
-                           and c.fecha between j.periodo_desde and j.periodo_hasta)
-             then 'codigo_en_el_otro_lado'
-           else 'sin_rastro'
-         end as motivo, p.monto
-    from mov_pend p
-),
-tot_banco as (
-  select left(m.ref_norm, 4) as serie, count(distinct m.ref_norm) as n
-    from public.movimientos_extracto m
-   where m.lote_id = :'lote'::uuid and m.ref_norm <> ''
-   group by 1
-),
-tot_libros as (
-  select left(c.ref_norm, 4) as serie, count(distinct c.ref_norm) as n
-    from public.comprobantes c, j
-   where c.empresa_id = j.empresa_id
-     and c.ref_norm <> ''
-     and c.fecha between j.periodo_desde and j.periodo_hasta
-   group by 1
+
+-- ── 1) Leer el job entero (incluye desempaquetar el payload) ────────────────
+-- Si esto ya tarda segundos, el problema es el tamaño del JSONB, no las
+-- consultas de después.
+explain (analyze, buffers)
+select * from public.jobs_conciliacion where id = 'rec-2026-06-527538';
+
+
+-- ── 2) Sacar el residuo del payload y unirlo por clave primaria ─────────────
+-- Debería ser instantáneo: son ~4.400 búsquedas por PK. Si aquí aparece un
+-- "Seq Scan on comprobantes", el planificador eligió recorrer la tabla entera
+-- porque no sabe cuántas filas trae el jsonb — y ese es el problema.
+explain (analyze, buffers)
+with j as (select * from public.jobs_conciliacion where id = 'rec-2026-06-527538')
+select count(*)
+  from j,
+       jsonb_to_recordset(j.payload_entrada -> 'registros_internos')
+         as r(comprobante_id uuid)
+  join public.comprobantes c on c.id = r.comprobante_id;
+
+
+-- ── 3) Descontar lo que n8n casó después del residuo ────────────────────────
+-- Con la 0047 esto son tres búsquedas por índice. Si tarda, el índice
+-- `idx_matches_job_metodo` no se está usando.
+explain (analyze, buffers)
+select count(*)
+  from public.matches_conciliacion m
+ where m.job_id = 'rec-2026-06-527538'
+   and m.metodo in ('difusa', 'ia', 'manual');
+
+
+-- ── 4) La pregunta «¿está su código en el otro lado?» ───────────────────────
+-- ~4.400 sondas al índice del extracto. Debería ser cosa de milisegundos.
+explain (analyze, buffers)
+with j as (select * from public.jobs_conciliacion where id = 'rec-2026-06-527538'),
+pend as (
+  select c.ref_norm as ref
+    from j,
+         jsonb_to_recordset(j.payload_entrada -> 'registros_internos')
+           as r(comprobante_id uuid)
+    join public.comprobantes c on c.id = r.comprobante_id
 )
-select
-  (select count(*) from int_clas where motivo = 'sin_rastro')             as int_sin_rastro,
-  (select count(*) from int_clas where motivo = 'codigo_en_el_otro_lado') as int_con_codigo,
-  (select count(*) from mov_clas where motivo = 'sin_rastro')             as mov_sin_rastro,
-  (select count(*) from mov_clas where motivo = 'codigo_en_el_otro_lado') as mov_con_codigo,
-  (select n from tot_banco  where serie = 'S001')                          as s001_banco,
-  (select n from tot_libros where serie = 'S001')                          as s001_libros;
+select count(*) filter (
+         where exists (select 1 from public.movimientos_extracto m, j
+                        where m.lote_id = j.lote_extracto_id and m.ref_norm = p.ref)
+       ) as con_codigo_en_el_banco,
+       count(*) as total
+  from pend p;
+
+
+-- ── 5) El recuento por serie (la OTRA función, `residuo_series`) ────────────
+-- Esta sí recorre las dos tablas enteras a propósito. Va en su propia llamada,
+-- así que si es la lenta, la clasificación no debería verse afectada.
+explain (analyze, buffers)
+select left(m.ref_norm, 4) as serie, count(distinct m.ref_norm)
+  from public.movimientos_extracto m
+ where m.lote_id = (select lote_extracto_id from public.jobs_conciliacion
+                     where id = 'rec-2026-06-527538')
+   and m.ref_norm <> ''
+ group by 1;
