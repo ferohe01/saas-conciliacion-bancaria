@@ -1142,8 +1142,26 @@ export async function explicarResiduo(
   const { data, error } = await supabase.rpc("residuo_explicado", {
     p_job_id: jobId,
   });
-  if (error) {
-    console.error("[conciliacion] no se pudo explicar el residuo:", error);
+  if (!error) {
+    // ⚠️ Las series van en su PROPIA llamada, con su propio presupuesto de 8 s.
+    // Ese recuento sí tiene que recorrer las dos tablas enteras —la pregunta es
+    // cuántos códigos hay en total—, así que puede no llegar; y si no llega, lo
+    // que se pierde es un detalle, no la clasificación. Una parte cara no puede
+    // llevarse por delante la que sí cabe.
+    const series = await supabase.rpc("residuo_series", { p_job_id: jobId });
+    if (series.error) {
+      console.error("[conciliacion] sin recuento por serie:", series.error);
+    }
+    return {
+      ok: true,
+      datos: {
+        ...(data as Record<string, unknown> | null),
+        series: series.error ? [] : series.data,
+      },
+    };
+  }
+  console.error("[conciliacion] no se pudo explicar el residuo:", error);
+  {
     // ⚠️ El mensaje distingue el TIMEOUT del resto, y no es un detalle: son dos
     // averías con arreglos opuestos —una consulta que hay que acelerar frente a
     // una función que hay que corregir— y con el mismo texto para las dos hubo
@@ -1158,5 +1176,4 @@ export async function explicarResiduo(
         : `No se pudo analizar lo que quedó sin conciliar (código ${error.code ?? "desconocido"}). Suele ser que falte aplicar la última migración.`,
     };
   }
-  return { ok: true, datos: data };
 }
