@@ -721,7 +721,18 @@ function LineaCuadre({
   );
 }
 
-// ── Resumen del triaje: cuánto trabajo queda, no cuánto se hizo ─────────────
+/**
+ * Dos cajas, y no una: **lo que falta** y **lo que ya está**.
+ *
+ * ⚠️ Estaban juntas y no se entendía nada. Bajo el título «Trabajo que te
+ * queda» convivían «63 partidas», «208 pares resueltos» —que no es trabajo
+ * pendiente, es lo contrario— y una barra al 95 % sin decir de qué. Tres
+ * unidades distintas en cuatro centímetros: partidas sueltas, pares, y un
+ * porcentaje cuya base había que adivinar.
+ *
+ * Ahora cada caja responde UNA pregunta y enseña su base. El porcentaje dice
+ * sobre cuántas partidas se calcula, que es lo que lo vuelve comprobable.
+ */
 function ResumenTriaje({
   porRevisar,
   sinConciliar,
@@ -734,46 +745,75 @@ function ResumenTriaje({
   totalPartidas: number;
 }) {
   const pendiente = porRevisar + sinConciliar;
-  const pctListo =
-    totalPartidas > 0
-      ? Math.round(((totalPartidas - sinConciliar) / totalPartidas) * 100)
-      : 100;
+  const emparejadas = Math.max(0, totalPartidas - sinConciliar);
+  const pct =
+    totalPartidas > 0 ? Math.round((emparejadas / totalPartidas) * 100) : 100;
+  const NUM = (n: number) => n.toLocaleString("es-PE");
+
   return (
-    <Tarjeta>
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p className="text-xs font-medium text-neutral-500">
-            Trabajo que te queda
+    <div className="grid gap-4 sm:grid-cols-2">
+      {/* ── Lo que falta ────────────────────────────────────────────────── */}
+      <Tarjeta>
+        <p className="text-xs font-medium text-neutral-500">
+          Trabajo que te queda
+        </p>
+        <p className="mt-1 text-2xl font-bold tabular-nums text-neutral-900">
+          {pendiente === 0 ? "Nada pendiente" : `${NUM(pendiente)} partidas`}
+        </p>
+        {pendiente > 0 ? (
+          <ul className="mt-2 space-y-1 text-sm text-neutral-700">
+            {porRevisar > 0 && (
+              <li>
+                <span className="font-medium tabular-nums">{NUM(porRevisar)}</span>{" "}
+                esperan tu criterio
+                <span className="text-neutral-500"> — la IA propuso un par</span>
+              </li>
+            )}
+            {sinConciliar > 0 && (
+              <li>
+                <span className="font-medium tabular-nums">{NUM(sinConciliar)}</span>{" "}
+                sin pareja
+                <span className="text-neutral-500">
+                  {" "}
+                  — nadie las reclama todavía
+                </span>
+              </li>
+            )}
+          </ul>
+        ) : (
+          <p className="mt-2 text-sm text-neutral-600">
+            Todas las partidas tienen pareja y ninguna espera decisión.
           </p>
-          <p className="mt-1 text-2xl font-bold tabular-nums text-neutral-900">
-            {pendiente === 0 ? "Nada pendiente" : `${pendiente} partidas`}
-          </p>
-          <p className="mt-1 text-sm text-neutral-600">
-            <span className="tabular-nums">{porRevisar}</span> por revisar ·{" "}
-            <span className="tabular-nums">{sinConciliar}</span> sin conciliar ·{" "}
-            <span className="tabular-nums">{conciliados}</span> pares resueltos
-          </p>
-        </div>
-        <div className="min-w-[10rem] flex-1">
-          <div className="flex items-baseline justify-between text-sm">
-            <span className="text-neutral-600">Emparejado</span>
-            <span className="font-semibold tabular-nums text-neutral-900">
-              {pctListo}%
-            </span>
-          </div>
+        )}
+      </Tarjeta>
+
+      {/* ── Lo que ya está ──────────────────────────────────────────────── */}
+      <Tarjeta>
+        <p className="text-xs font-medium text-neutral-500">Ya emparejado</p>
+        <p className="mt-1 text-2xl font-bold tabular-nums text-neutral-900">
+          {pct}%
+        </p>
+        <div
+          className="mt-2 h-2 w-full overflow-hidden rounded-full bg-neutral-100"
+          role="img"
+          aria-label={`${pct}% de las partidas tienen pareja`}
+        >
           <div
-            className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-neutral-100"
-            role="img"
-            aria-label={`${pctListo}% de las partidas emparejadas`}
-          >
-            <div
-              className="h-2 rounded-full bg-emerald-500"
-              style={{ width: `${pctListo}%` }}
-            />
-          </div>
+            className="h-2 rounded-full bg-emerald-500"
+            style={{ width: `${pct}%` }}
+          />
         </div>
-      </div>
-    </Tarjeta>
+        {/* ⚠️ El porcentaje SIEMPRE con su base. Un 95 % suelto no se puede
+            comprobar, y en esta pantalla conviven dos unidades —partidas y
+            pares— que se confunden con facilidad. */}
+        <p className="mt-2 text-sm text-neutral-600">
+          <span className="tabular-nums">{NUM(emparejadas)}</span> de{" "}
+          <span className="tabular-nums">{NUM(totalPartidas)}</span> partidas, en{" "}
+          <span className="tabular-nums">{NUM(conciliados)}</span>{" "}
+          {conciliados === 1 ? "par" : "pares"}.
+        </p>
+      </Tarjeta>
+    </div>
   );
 }
 
