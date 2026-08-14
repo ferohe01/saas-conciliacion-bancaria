@@ -1732,6 +1732,39 @@ una. Si algún día 20 siguen siendo demasiadas, el paso siguiente es agregar en
 SQL (vista o RPC) y devolver las pocas filas del resumen, no traer 19.000 para
 sumarlas en Node.
 
+## ⚠️⚠️ Un índice PARCIAL solo se usa si repites su condición
+
+Los dos índices de referencias son parciales, porque las filas sin código no
+participan del emparejamiento (0029 / 0042):
+
+```sql
+create index idx_mov_extracto_ref_norm
+  on movimientos_extracto (lote_id, ref_norm)
+  where ref_norm <> '';                          -- ← la condición
+```
+
+Una consulta que pregunte `where lote_id = X and ref_norm = $1` **no puede usar
+ese índice**: Postgres no sabe si `$1` es la cadena vacía —viene de otra fila, no
+es una constante— así que no puede garantizar que lo buscado esté dentro del
+índice, y lo descarta. Cae a recorrer la tabla, y con 450.999 filas por sonda eso
+agota el `statement_timeout` de 8 s él solo.
+
+Costó **cuatro migraciones y cuatro despliegues**. `residuo_explicado` (0044)
+hacía justo eso, y cada intento de arreglarlo atacó otra cosa —el anti-join, el
+origen de los datos, la estimación de filas— sin rozar la causa. La pista estaba
+a la vista: `pares_exactos` empareja medio millón de filas en 32 s y lleva
+`and c.ref_norm <> ''` escrito desde siempre.
+
+- **Regla: toda consulta contra una columna con índice parcial repite el `where`
+  del índice.** Aunque sea redundante para el resultado — no lo es para el plan.
+- ⚠️ **Y la regla de método, que es la que de verdad falló:** cuando algo se pasa
+  de tiempo, `explain analyze` ANTES de la segunda hipótesis. Comparar filas
+  estimadas contra reales señala el nodo en un minuto; razonar sobre el código
+  costó cuatro rondas. `ops/medir-residuo.sql` deja la sonda aislada para poder
+  hacerlo desde Studio — que es obligatorio, porque una función `definer` que
+  resuelve la empresa con `auth.uid()` **no se puede medir llamándola**: sin
+  sesión devuelve `null` al instante.
+
 ## ⚠️ Postgres corta a los 8 s, y supabase-js NO lanza el error
 
 Hermano de los otros topes silenciosos, y el más caro de todos: aquí lo que se
