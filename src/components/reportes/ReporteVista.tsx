@@ -5,6 +5,7 @@ import {
   type PuntoMensual,
   type FilaBanco,
   type FilaTipo,
+  ETIQUETA_METODO,
 } from "@/lib/reportes";
 import { formatearFecha } from "@/lib/parsing/resumen";
 
@@ -157,9 +158,9 @@ function DistribucionMetodos({
   const m = kpis.metodos;
   const total = kpis.paresConciliados || 1;
   const segs = [
-    { k: "Exacta", slug: "exacta", v: m.exacta, c: COLOR_METODO.exacta },
-    { k: "Difusa", slug: "difusa", v: m.difusa, c: COLOR_METODO.difusa },
-    { k: "Sugerido IA", slug: "ia", v: m.ia, c: COLOR_METODO.ia },
+    { k: ETIQUETA_METODO.exacta, slug: "exacta", v: m.exacta, c: COLOR_METODO.exacta },
+    { k: ETIQUETA_METODO.difusa, slug: "difusa", v: m.difusa, c: COLOR_METODO.difusa },
+    { k: ETIQUETA_METODO.ia, slug: "ia", v: m.ia, c: COLOR_METODO.ia },
   ];
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white p-5">
@@ -240,7 +241,7 @@ function DistribucionMetodos({
                 aria-hidden
               />
               <span className="text-neutral-700 group-hover:text-blue-700">
-                Sin conciliar
+                {ETIQUETA_METODO.sin_conciliar}
               </span>
             </span>
             <span className="flex items-center gap-2 tabular-nums text-neutral-900">

@@ -36,6 +36,7 @@ import {
   enFocoDelFiltro,
   deduplicarUltimoPorPeriodo,
   COLOR_METODO,
+  ETIQUETA_METODO,
   type JobReporte,
   type ResumenJob,
 } from "@/lib/reportes";
@@ -220,10 +221,11 @@ function Metodos({
   total: number;
   sueltas: { internos: number; bancarios: number; pct: number };
 }) {
+  // Las etiquetas salen de `ETIQUETA_METODO`: una sola fuente para toda la app.
   const filas = [
-    { clave: "exacta", label: "Exacta", valor: metodos.exacta },
-    { clave: "difusa", label: "Difusa", valor: metodos.difusa },
-    { clave: "ia", label: "Sugerido IA", valor: metodos.ia },
+    { clave: "exacta", label: ETIQUETA_METODO.exacta, valor: metodos.exacta },
+    { clave: "difusa", label: ETIQUETA_METODO.difusa, valor: metodos.difusa },
+    { clave: "ia", label: ETIQUETA_METODO.ia, valor: metodos.ia },
   ] as const;
 
   return (
@@ -299,7 +301,7 @@ function Metodos({
               style={{ backgroundColor: COLOR_METODO.sin_conciliar }}
             />
             <span className="flex-1 text-neutral-700 group-hover:text-blue-700">
-              Sin conciliar
+              {ETIQUETA_METODO.sin_conciliar}
             </span>
             <span className="tabular-nums text-neutral-900">
               {NUM(sueltas.internos + sueltas.bancarios)}

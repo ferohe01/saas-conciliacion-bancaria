@@ -102,6 +102,31 @@ export const COLOR_METODO = {
   sin_conciliar: "#D55E00",
 } as const;
 
+/**
+ * Cómo se llama cada método EN TODA LA APLICACIÓN.
+ *
+ * ⚠️ Estaban escritas cuatro veces —la insignia de cada par, el panel, los
+ * reportes y el detalle por tipo— y no coincidían: el panel decía «Sugerido IA»
+ * y la insignia del mismo par decía «IA». Un cliente lo cazó comparando dos
+ * pantallas y preguntando cuál era la buena.
+ *
+ * No es cosmético. El nombre del método es la unidad con la que el usuario
+ * razona sobre su conciliación; si cambia de pantalla en pantalla, cada una
+ * parece hablar de algo distinto y las cifras dejan de poder compararse.
+ *
+ * `sin_conciliar` va aquí aunque no sea un método: aparece en las mismas listas
+ * y tenía el mismo problema.
+ */
+export const ETIQUETA_METODO = {
+  exacta: "Exacta",
+  difusa: "Difusa",
+  ia: "Sugerido IA",
+  manual: "Manual",
+  sin_conciliar: "Sin conciliar",
+} as const;
+
+export type ClaveMetodo = keyof typeof ETIQUETA_METODO;
+
 function pct(parte: number, total: number): number {
   return total > 0 ? Math.round((parte / total) * 1000) / 10 : 0;
 }

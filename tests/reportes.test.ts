@@ -11,6 +11,7 @@ import {
   porTipoDiferencia,
   type JobReporte,
   type ResumenJob,
+  ETIQUETA_METODO,
 } from "@/lib/reportes";
 
 function resumen(p: Partial<ResumenJob>): ResumenJob {
@@ -320,5 +321,47 @@ describe("el gráfico de métodos no mezcla unidades", () => {
     expect(k.paresConciliados).toBe(0);
     expect(k.pctSinConciliar).toBe(0);
     expect(k.partidas).toBe(0);
+  });
+});
+
+describe("el mismo método se llama igual en todas partes", () => {
+  /**
+   * ⚠️ Las etiquetas estaban escritas cuatro veces —la insignia de cada par, el
+   * panel, los reportes y el detalle por tipo— y no coincidían: el panel decía
+   * «Sugerido IA» y la insignia del MISMO par decía «IA». Un cliente lo cazó
+   * comparando dos pantallas y preguntando cuál era la buena.
+   *
+   * El nombre del método es la unidad con la que el usuario razona sobre su
+   * conciliación. Si cambia de pantalla en pantalla, cada una parece hablar de
+   * algo distinto y las cifras dejan de poder compararse.
+   */
+  const fs = require("node:fs") as typeof import("node:fs");
+  const PANTALLAS = [
+    "src/components/ui/Badge.tsx",
+    "src/app/(app)/dashboard/page.tsx",
+    "src/components/reportes/ReporteVista.tsx",
+    "src/app/(app)/reportes/tipo/[categoria]/page.tsx",
+  ];
+
+  it("ninguna pantalla escribe la etiqueta a mano", () => {
+    for (const p of PANTALLAS) {
+      const src = fs.readFileSync(p, "utf8");
+      // Las que quedaron sueltas antes: `texto: "IA"` y `label: "Sugerido IA"`.
+      expect(src, `${p} define su propia etiqueta de método`).not.toMatch(
+        /(texto|label|k):\s*"(Exacta|Difusa|IA|Sugerido IA|Manual)"/,
+      );
+      expect(src).toContain("ETIQUETA_METODO");
+    }
+  });
+
+  it("cubre los cuatro métodos del contrato y las sueltas", () => {
+    expect(Object.keys(ETIQUETA_METODO).sort()).toEqual([
+      "difusa", "exacta", "ia", "manual", "sin_conciliar",
+    ]);
+  });
+
+  it("«ia» dice que es una sugerencia, no un hecho", () => {
+    // La IA propone; quien decide es la persona. La etiqueta lo dice.
+    expect(ETIQUETA_METODO.ia).toBe("Sugerido IA");
   });
 });

@@ -277,6 +277,12 @@ export function ResultadoReview({
           distintas para lo mismo en dos pantallas es peor que una imprecisa. */}
       <ResumenTriaje
         porRevisar={cola.length}
+        sugeridosIa={resultado.resumen?.sugeridos_ia ?? 0}
+        iaAuto={
+          resultado.matches.filter(
+            (m) => m.metodo === "ia" && m.estado_revision === "auto",
+          ).length
+        }
         sinConciliar={
           resultado.resumen
             ? resultado.resumen.sin_conciliar_internos +
@@ -738,11 +744,17 @@ function ResumenTriaje({
   sinConciliar,
   conciliados,
   totalPartidas,
+  sugeridosIa,
+  iaAuto,
 }: {
   porRevisar: number;
   sinConciliar: number;
   conciliados: number;
   totalPartidas: number;
+  /** Cuántas propuso la IA en total. Es lo que el panel llama «Sugerido IA». */
+  sugeridosIa: number;
+  /** De esas, cuántas se cerraron solas por llegar al umbral de confianza. */
+  iaAuto: number;
 }) {
   const pendiente = porRevisar + sinConciliar;
   const emparejadas = Math.max(0, totalPartidas - sinConciliar);
@@ -766,7 +778,22 @@ function ResumenTriaje({
               <li>
                 <span className="font-medium tabular-nums">{NUM(porRevisar)}</span>{" "}
                 esperan tu criterio
-                <span className="text-neutral-500"> — la IA propuso un par</span>
+                {/* ⚠️ El panel dice «Sugerido IA: 41» y aquí ponía 39, sin nada
+                    que explicara la diferencia: son las que se cerraron solas
+                    por llegar al umbral de confianza. Dos cifras que no cuadran
+                    en dos pantallas obligan a elegir cuál creerse. */}
+                <span className="text-neutral-500">
+                  {sugeridosIa > porRevisar
+                    ? ` — de las ${NUM(sugeridosIa)} que sugirió la IA`
+                    : " — la IA propuso un par"}
+                </span>
+              </li>
+            )}
+            {iaAuto > 0 && (
+              <li className="text-neutral-500">
+                <span className="tabular-nums">{NUM(iaAuto)}</span> se
+                conciliaron solas: la IA llegó al umbral de confianza y no
+                necesitan tu revisión.
               </li>
             )}
             {sinConciliar > 0 && (

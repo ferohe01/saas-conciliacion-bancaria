@@ -1,6 +1,7 @@
 import type { MetodoMatch, EstadoJob } from "@/lib/contract/enums";
 import { ETIQUETA, type EstadoContable } from "@/lib/cicloContable";
 import { saludDelJob } from "@/lib/jobsAtascados";
+import { ETIQUETA_METODO } from "@/lib/reportes";
 
 /**
  * Badges del sistema — ver DESIGN.md § Components › Badges de método.
@@ -9,11 +10,14 @@ import { saludDelJob } from "@/lib/jobsAtascados";
  * acompaña, nunca sustituye. Es el compromiso de accesibilidad del producto.
  */
 
-const METODO: Record<MetodoMatch, { texto: string; clase: string }> = {
-  exacta: { texto: "Exacta", clase: "bg-emerald-100 text-emerald-800" },
-  difusa: { texto: "Difusa", clase: "bg-blue-100 text-blue-800" },
-  ia: { texto: "IA", clase: "bg-violet-100 text-violet-800" },
-  manual: { texto: "Manual", clase: "bg-neutral-200 text-neutral-700" },
+// ⚠️ El TEXTO sale de `ETIQUETA_METODO`, que es el mismo que usan el panel y los
+// reportes. Aquí vivía su propia copia y decía «IA» donde el panel decía
+// «Sugerido IA»: dos nombres para el mismo par en dos pantallas.
+const CLASE: Record<MetodoMatch, string> = {
+  exacta: "bg-emerald-100 text-emerald-800",
+  difusa: "bg-blue-100 text-blue-800",
+  ia: "bg-violet-100 text-violet-800",
+  manual: "bg-neutral-200 text-neutral-700",
 };
 
 export function BadgeMetodo({
@@ -25,16 +29,16 @@ export function BadgeMetodo({
   confianza?: number | null;
   className?: string;
 }) {
-  const m = METODO[metodo];
+  const clase = CLASE[metodo];
   const pct =
     metodo === "ia" && confianza != null
       ? ` ${Math.round(confianza * 100)}%`
       : "";
   return (
     <span
-      className={`inline-block shrink-0 rounded px-1.5 py-0.5 text-xs font-medium tabular-nums ${m.clase} ${className}`}
+      className={`inline-block shrink-0 rounded px-1.5 py-0.5 text-xs font-medium tabular-nums ${clase} ${className}`}
     >
-      {m.texto}
+      {ETIQUETA_METODO[metodo]}
       {pct}
     </span>
   );

@@ -6,6 +6,7 @@ import {
   categoriaDeMatch,
   etiquetaTipo,
   etiquetaEstadoRevision,
+  ETIQUETA_METODO,
 } from "@/lib/reportes";
 import { EstadoVacio } from "@/components/ui";
 import { ExportarTabla } from "@/components/reportes/ExportarTabla";
@@ -17,9 +18,9 @@ import type {
 } from "@/lib/contract/payload";
 
 const METODO_LABEL: Record<string, string> = {
-  exacta: "Exacta",
-  difusa: "Difusa",
-  ia: "IA",
+  exacta: ETIQUETA_METODO.exacta,
+  difusa: ETIQUETA_METODO.difusa,
+  ia: ETIQUETA_METODO.ia,
   manual: "Manual",
 };
 
