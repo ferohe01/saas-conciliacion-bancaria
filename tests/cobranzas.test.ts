@@ -304,3 +304,89 @@ describe("tope por saldo disponible (doble descuento)", () => {
     expect(r).toHaveLength(0);
   });
 });
+
+describe("modo tabla: los pares que NO son exactos también cobran", () => {
+  /**
+   * ⚠️ Faltaba entero. En modo tabla el reparto se delegó a
+   * `aplicar_cobros_exactos`, que —por diseño— solo toca los pares `exacta`:
+   * son 1:1 y del mismo importe, así que no hay aritmética que hacer. Todo lo
+   * demás debía seguir pasando por este módulo… y nadie lo llamaba.
+   *
+   * Una conciliación aprobada de 180 pares aplicaba 163 cobros: los 17
+   * restantes no descontaban saldo, «Por cobrar» mostraba de más, y el aviso de
+   * «se actualizó en parte» no se iba por muchas veces que se pulsara
+   * Reintentar, porque el reintento repetía exactamente lo mismo.
+   *
+   * Estos casos fijan que la aritmética existe para ellos y da lo esperado.
+   */
+  const conf = { tolerancia_monto_abs: 5, tolerancia_monto_pct: 0.5 };
+
+  it("comisión ETIQUETADA como tal: cobra la factura entera", () => {
+    // Venta de 2.000, abono de 1.995,50. El banco se quedó 4,50 de comisión, así
+    // que el cliente pagó su deuda completa y el comprobante queda saldado.
+    const apl = calcularAplicaciones(
+      [{
+        ids_internos: ["c1"], ids_movimientos: ["m1"],
+        estado_revision: "auto", categoria_diferencia: "comision_bancaria",
+      }],
+      [{ id_interno: "c1", comprobante_id: "c1", monto: 2000 }],
+      [{ id_movimiento: "m1", monto: 1995.5 }],
+      conf,
+    );
+    expect(apl).toHaveLength(1);
+    expect(apl[0]!.monto_aplicado).toBe(2000);
+  });
+
+  it("la MISMA diferencia sin etiquetar deja saldo pendiente", () => {
+    // ⚠️ La absorción no la decide el tamaño de la diferencia sino la categoría
+    // que puso el motor: si nadie dijo que era una comisión, faltan 4,50 de
+    // cobrar y el comprobante queda `parcial`. Es lo correcto — dar por saldado
+    // lo que no se sabe qué es sería inventarse un cobro.
+    const apl = calcularAplicaciones(
+      [{ ids_internos: ["c1"], ids_movimientos: ["m1"], estado_revision: "auto" }],
+      [{ id_interno: "c1", comprobante_id: "c1", monto: 2000 }],
+      [{ id_movimiento: "m1", monto: 1995.5 }],
+      conf,
+    );
+    expect(apl[0]!.monto_aplicado).toBe(1995.5);
+  });
+
+  it("agrupación 1:N: reparte el depósito entre las tres facturas", () => {
+    const apl = calcularAplicaciones(
+      [{ ids_internos: ["a", "b", "c"], ids_movimientos: ["m"], estado_revision: "aceptado" }],
+      [
+        { id_interno: "a", comprobante_id: "a", monto: 1200 },
+        { id_interno: "b", comprobante_id: "b", monto: 850 },
+        { id_interno: "c", comprobante_id: "c", monto: 2450 },
+      ],
+      [{ id_movimiento: "m", monto: 4500 }],
+      conf,
+    );
+    expect(apl).toHaveLength(3);
+    expect(apl.reduce((s, a) => s + a.monto_aplicado, 0)).toBeCloseTo(4500, 2);
+  });
+
+  it("N:1: la factura cobrada en dos depósitos genera dos aplicaciones", () => {
+    const apl = calcularAplicaciones(
+      [{ ids_internos: ["f"], ids_movimientos: ["m1", "m2"], estado_revision: "aceptado" }],
+      [{ id_interno: "f", comprobante_id: "f", monto: 8000 }],
+      [
+        { id_movimiento: "m1", monto: 5000 },
+        { id_movimiento: "m2", monto: 3000 },
+      ],
+      conf,
+    );
+    expect(apl.reduce((s, a) => s + a.monto_aplicado, 0)).toBeCloseTo(8000, 2);
+  });
+
+  it("un par rechazado no cobra nada", () => {
+    expect(
+      calcularAplicaciones(
+        [{ ids_internos: ["c1"], ids_movimientos: ["m1"], estado_revision: "rechazado" }],
+        [{ id_interno: "c1", comprobante_id: "c1", monto: 100 }],
+        [{ id_movimiento: "m1", monto: 100 }],
+        conf,
+      ),
+    ).toEqual([]);
+  });
+});

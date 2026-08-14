@@ -22,6 +22,7 @@ import { promptPartida, promptSeguimiento, type Mensaje } from "@/lib/ia/prompts
 import { verificarCifras } from "@/lib/ia/verificacion";
 import {
   calcularAplicaciones,
+  ESTADOS_CONFIRMADOS,
   type RegistroPayload,
   type MovimientoPayload,
 } from "@/lib/cobranzas";
@@ -202,6 +203,9 @@ const MAX_VUELTAS_COBROS = 500;
 async function aplicarCobrosModoTabla(
   jobId: string,
   admin: ReturnType<typeof createAdminClient>,
+  empresaId: string,
+  usuarioId: string | null,
+  tolerancias: { tolerancia_monto_abs?: number; tolerancia_monto_pct?: number },
 ): Promise<SincronizacionCobros> {
   const limpieza = await admin.rpc("limpiar_cobros_desconfirmados", {
     p_job_id: jobId,
@@ -245,7 +249,13 @@ async function aplicarCobrosModoTabla(
       return { ok: false, aplicadas };
     }
     const n = Number(data ?? 0);
-    if (n === 0) return { ok: true, aplicadas };
+    if (n === 0) {
+      // Las exactas están; faltan las que exigen aritmética de reparto.
+      const resto = await aplicarCobrosNoExactos(
+        jobId, admin, empresaId, usuarioId, tolerancias,
+      );
+      return { ok: resto.ok, aplicadas: aplicadas + resto.aplicadas };
+    }
     aplicadas += n;
 
     // Tras el primer lote la tabla deja de estar vacía, que es el salto que
@@ -255,6 +265,124 @@ async function aplicarCobrosModoTabla(
   }
   console.error(`[cobranzas] ${jobId} no terminó de aplicar en ${MAX_VUELTAS_COBROS} vueltas`);
   return { ok: false, aplicadas };
+}
+
+/**
+ * Los cobros de los pares que NO son de la capa exacta.
+ *
+ * ⚠️⚠️ **Faltaba entero.** En modo tabla el reparto se delegó a
+ * `aplicar_cobros_exactos`, que —por diseño y con razón— solo toca los pares
+ * `exacta`: son 1:1 y del mismo importe, así que el factor de reparto es 1 y no
+ * hay aritmética que hacer. Todo lo demás —comisiones absorbidas por la capa
+ * difusa, agrupaciones 1:N, pagos parciales, conciliaciones manuales— debía
+ * seguir pasando por `lib/cobranzas.ts`, que es donde vive esa aritmética… y
+ * nadie lo llamaba.
+ *
+ * El resultado: una conciliación aprobada de 180 pares aplicaba 163 cobros. Los
+ * 17 restantes no descontaban saldo, «Por cobrar» mostraba de más, y el aviso de
+ * «se actualizó en parte» no se iba por muchas veces que se pulsara Reintentar,
+ * porque el reintento repetía exactamente lo mismo.
+ *
+ * Son POCOS por construcción: lo que llega aquí es lo que el motor no pudo casar
+ * al céntimo, decenas o cientos incluso en el cliente de medio millón de
+ * partidas. Por eso puede hacerse en Node sin trocear.
+ *
+ * ⚠️ Se INSERTA lo que falta; no se borra y rehace. El conjunto completo de este
+ * job incluye las 447.795 exactas que escribió la base, y rehacerlo desde aquí
+ * las borraría.
+ */
+async function aplicarCobrosNoExactos(
+  jobId: string,
+  admin: ReturnType<typeof createAdminClient>,
+  empresaId: string,
+  usuarioId: string | null,
+  tolerancias: { tolerancia_monto_abs?: number; tolerancia_monto_pct?: number },
+): Promise<{ ok: boolean; aplicadas: number }> {
+  const { data: filas, error } = await admin
+    .from("matches_conciliacion")
+    .select("comprobante_ids, movimiento_ids, estado_revision, categoria_diferencia")
+    .eq("job_id", jobId)
+    .in("metodo", ["difusa", "ia", "manual"])
+    .in("estado_revision", [...ESTADOS_CONFIRMADOS]);
+  if (error) {
+    console.error(`[cobranzas] no se pudieron leer los pares no exactos de ${jobId}:`, error);
+    return { ok: false, aplicadas: 0 };
+  }
+  const pares = (filas ?? []) as {
+    comprobante_ids: string[];
+    movimiento_ids: string[];
+    estado_revision: string;
+    categoria_diferencia: string | null;
+  }[];
+  if (pares.length === 0) return { ok: true, aplicadas: 0 };
+
+  // Las partidas, por su uuid: es el id con el que el par las referencia.
+  const idsComp = [...new Set(pares.flatMap((p) => p.comprobante_ids))];
+  const idsMov = [...new Set(pares.flatMap((p) => p.movimiento_ids))];
+
+  const registros: RegistroPayload[] = [];
+  for (const lote of enLotes(idsComp)) {
+    const { data } = await admin
+      .from("comprobantes")
+      .select("id, monto, tipo")
+      .in("id", lote);
+    for (const c of data ?? []) {
+      const monto = Math.abs(Number(c.monto ?? 0));
+      registros.push({
+        id_interno: c.id as string,
+        comprobante_id: c.id as string,
+        monto: c.tipo === "pago" ? -monto : monto,
+      });
+    }
+  }
+  const movimientos: MovimientoPayload[] = [];
+  for (const lote of enLotes(idsMov)) {
+    const { data } = await admin
+      .from("movimientos_extracto")
+      .select("id, monto")
+      .in("id", lote);
+    for (const m of data ?? []) {
+      movimientos.push({ id_movimiento: m.id as string, monto: Number(m.monto ?? 0) });
+    }
+  }
+
+  const disponible = await disponiblePorComprobante(jobId, registros);
+  const aplicaciones = calcularAplicaciones(
+    pares.map((p) => ({
+      ids_internos: p.comprobante_ids,
+      ids_movimientos: p.movimiento_ids,
+      estado_revision: p.estado_revision,
+      categoria_diferencia: p.categoria_diferencia,
+    })),
+    registros,
+    movimientos,
+    tolerancias,
+    disponible,
+  );
+  if (aplicaciones.length === 0) return { ok: true, aplicadas: 0 };
+
+  let aplicadas = 0;
+  for (const lote of enLotes(aplicaciones, 500)) {
+    // `ignoreDuplicates`: reintentar no puede duplicar ni fallar contra la clave
+    // única (comprobante_id, job_id, id_movimiento).
+    const { error: errIns } = await admin
+      .from("aplicaciones_cobro")
+      .upsert(
+        lote.map((a) => ({
+          ...a,
+          job_id: jobId,
+          empresa_id: empresaId,
+          usuario_id: usuarioId,
+        })),
+        { onConflict: "comprobante_id,job_id,id_movimiento", ignoreDuplicates: true },
+      );
+    if (errIns) {
+      console.error(`[cobranzas] fallo aplicando los no exactos de ${jobId}:`, errIns);
+      return { ok: false, aplicadas };
+    }
+    aplicadas += lote.length;
+  }
+  return { ok: true, aplicadas };
 }
 
 /**
@@ -378,7 +506,9 @@ async function sincronizarCobranzas(
     // 447.795 aplicaciones desde Node serían ~900 peticiones y un cuarto de
     // hora; en SQL son lotes de 5.000 a ~2,7 s.
     if (job.lote_extracto_id) {
-      return aplicarCobrosModoTabla(jobId, admin);
+      const cfg = (job.payload_entrada as { config?: Record<string, number> } | null)?.config ?? {};
+      return aplicarCobrosModoTabla(jobId, admin, job.empresa_id as string,
+        (job.usuario_id as string | null) ?? null, cfg);
     }
 
     const payload = job.payload_entrada as {
@@ -896,7 +1026,7 @@ export async function estadoCobros(jobId: string): Promise<EstadoCobros> {
       .from("matches_conciliacion")
       .select("id", { count: "exact", head: true })
       .eq("job_id", jobId)
-      .in("estado_revision", ["auto", "aceptado", "modificado"]),
+      .in("estado_revision", [...ESTADOS_CONFIRMADOS]),
     admin
       .from("aplicaciones_cobro")
       .select("id", { count: "exact", head: true })

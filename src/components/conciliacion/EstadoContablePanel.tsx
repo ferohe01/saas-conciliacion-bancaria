@@ -273,9 +273,13 @@ export function EstadoContablePanel({
           >
             {pendiente ? "Aplicando…" : "Reintentar la aplicación de cobros"}
           </Boton>
+          {/* ⚠️ La advertencia de tiempo solo cuando el tiempo es un problema.
+              «Con medio millón de pares tarda varios minutos» en una
+              conciliación de 180 no informa: alarma, y encima con una cifra que
+              no tiene nada que ver con lo que el usuario está mirando. */}
           <p className="mt-2 text-xs text-amber-800">
-            Continúa donde se quedó, no repite lo ya aplicado. Con medio millón
-            de pares tarda varios minutos.
+            Continúa donde se quedó, no repite lo ya aplicado.
+            {cobros!.esperados > 50_000 && " Con este volumen tarda varios minutos."}
           </p>
         </div>
       )}
