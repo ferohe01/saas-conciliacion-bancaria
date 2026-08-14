@@ -92,3 +92,54 @@ describe("detección de la columna de referencia", () => {
     expect(conEncabezados(["Fecha", "Recibo"]).referencia).toBe("Recibo");
   });
 });
+
+describe("extracto bancario peruano: la columna «Operación»", () => {
+  /**
+   * ⚠️ El caso que mordió en una demo. Un extracto del BCP trae una columna
+   * `Operación` con el código del movimiento. Por nombre encajaba en `tipo`
+   * —«operacion» estaba en sus palabras— y de `referencia` se había EXCLUIDO a
+   * propósito para que no compitiera con «nro operación». Resultado: `tipo` mal
+   * puesto, con valores que no significan nada, y `referencia` SIN MAPEAR, que
+   * es la columna de la que depende todo el emparejamiento.
+   */
+  const extracto = [
+    { Fecha: "01/06/2026", Descripción: "ABONO TRANSF. PLASTICOS DEL PACIFICO", Monto: "7351.72", Saldo: "45851.72", Operación: "30010039", Sucursal: "0451" },
+    { Fecha: "02/06/2026", Descripción: "PAGO PROVEEDOR BACKUS", Monto: "-6592.01", Saldo: "39259.71", Operación: "30010040", Sucursal: "0451" },
+    { Fecha: "03/06/2026", Descripción: "ABONO TRANSF. COMERCIAL NUNEZ", Monto: "12251.62", Saldo: "51511.33", Operación: "30010041", Sucursal: "0451" },
+  ];
+
+  it("la manda a REFERENCIA, no a tipo", () => {
+    const m = detectarColumnas(Object.keys(extracto[0]!), extracto);
+    expect(m.referencia).toBe("Operación");
+    expect(m.tipo).toBeUndefined();
+  });
+
+  it("acierta el resto del extracto", () => {
+    const m = detectarColumnas(Object.keys(extracto[0]!), extracto);
+    expect(m.fecha).toBe("Fecha");
+    expect(m.monto).toBe("Monto");
+    expect(m.descripcion).toBe("Descripción");
+  });
+
+  it("una columna específica le gana a «Operación»", () => {
+    // La señal débil pierde contra una palabra específica: era el motivo por el
+    // que se excluyó, y se conserva.
+    const conRecibos = extracto.map((f) => ({ ...f, Recibos: `SR11-0${f.Operación}` }));
+    const m = detectarColumnas(Object.keys(conRecibos[0]!), conRecibos);
+    expect(m.referencia).toBe("Recibos");
+  });
+
+  it("una columna de tipo DE VERDAD sí se detecta", () => {
+    const conTipo = extracto.map((f, i) => ({ ...f, Movimiento: i === 1 ? "cargo" : "abono" }));
+    const m = detectarColumnas(Object.keys(conTipo[0]!), conTipo);
+    expect(m.tipo).toBe("Movimiento");
+    expect(m.referencia).toBe("Operación");
+  });
+
+  it("no confunde el saldo con la referencia", () => {
+    // `Saldo` son números con decimales: eso es un importe, no un código.
+    const m = detectarColumnas(Object.keys(extracto[0]!), extracto);
+    expect(m.referencia).not.toBe("Saldo");
+    expect(m.monto).not.toBe("Saldo");
+  });
+});

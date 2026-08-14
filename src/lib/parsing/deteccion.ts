@@ -78,10 +78,7 @@ const KEYWORDS: Record<CampoCanonico, string[]> = {
     // que acertar a mano cuál es, y si no lo hace la conciliación da 0%.
     "recibo",
     "recibos",
-    // ⚠️ "operacion" a secas NO va aquí. Un extracto puede traer una columna
-    // "OPERACIÓN" que es un correlativo del banco, no el código con el que se
-    // casa contra el comprobante — y competiría con la columna buena. Las
-    // formas específicas ("nro operacion") sí están arriba.
+    // ⚠️ "operacion" a secas va en DEBILES, no aquí: ver la nota de esa lista.
   ],
   contraparte: [
     "contraparte",
@@ -101,6 +98,25 @@ const KEYWORDS: Record<CampoCanonico, string[]> = {
     "observacion",
     "observaciones",
   ],
+};
+
+/**
+ * Señales DÉBILES: valen si nadie mejor las reclama, y pierden contra una
+ * palabra específica.
+ *
+ * ⚠️ `operacion` estaba EXCLUIDA de `referencia` para que no compitiera con la
+ * columna buena («nro operación», «recibos»). El remedio salió peor que la
+ * enfermedad: `operacion` seguía en las palabras de `tipo`, así que un extracto
+ * con una columna llamada «Operación» —lo más normal del mundo en un banco
+ * peruano— se la asignaba a *tipo*, donde sus valores no significan nada, y
+ * dejaba **referencia sin mapear**: justo la columna de la que depende todo el
+ * emparejamiento.
+ *
+ * Lo que se quería decir no era «esta palabra no vale», sino «vale menos». Eso
+ * es un peso, no una exclusión.
+ */
+const DEBILES: Partial<Record<CampoCanonico, string[]>> = {
+  referencia: ["operacion", "operación", "codigo", "numero operacion"],
 };
 
 const VALORES_TIPO = new Set([
@@ -130,6 +146,32 @@ function puntajeConLista(lista: string[], header: string): number {
   return mejor;
 }
 
+/**
+ * Fracción mínima de valores reconocibles para PROPONER una columna, por campo.
+ *
+ * ⚠️ El contenido VETA al nombre. Un extracto del BCP trae una columna
+ * «Operación» con códigos numéricos: por nombre encajaba en `tipo`, y ninguno de
+ * sus valores significa nada como tipo de movimiento. El resultado era el peor
+ * posible — `tipo` mal puesto y `referencia` sin mapear, que es la columna de la
+ * que depende TODO el emparejamiento.
+ *
+ * Sin evidencia no se veta: una columna vacía en la muestra no contradice nada
+ * (y para eso ya está el filtro de columnas vacías).
+ */
+const MINIMO_RECONOCIDO: Partial<Record<CampoCanonico, number>> = {
+  fecha: 0.9,
+  monto: 0.9,
+  tipo: 0.9,
+};
+
+const VETO = Number.NEGATIVE_INFINITY;
+
+function conVeto(campo: CampoCanonico, valida: number, peso: number): number {
+  const minimo = MINIMO_RECONOCIDO[campo];
+  if (minimo != null && valida < minimo) return VETO;
+  return valida * peso;
+}
+
 function puntajeContenido(
   campo: CampoCanonico,
   valores: unknown[],
@@ -139,21 +181,31 @@ function puntajeContenido(
 
   switch (campo) {
     case "fecha":
-      return fraccion(noVacios, (v) => normalizarFecha(v) != null) * 2.5;
+      return conVeto(campo, fraccion(noVacios, (v) => normalizarFecha(v) != null), 2.5);
     case "monto": {
       // Numérico pero NO fecha (evita confundir seriales/fechas con montos).
       const numerico = fraccion(
         noVacios,
         (v) => normalizarMonto(v) != null && normalizarFecha(v) == null,
       );
-      return numerico * 2;
+      return conVeto(campo, numerico, 2);
     }
     case "tipo":
-      return (
-        fraccion(noVacios, (v) =>
-          VALORES_TIPO.has(normalizarTexto(String(v))),
-        ) * 2.5
+      return conVeto(
+        campo,
+        fraccion(noVacios, (v) => VALORES_TIPO.has(normalizarTexto(String(v)))),
+        2.5,
       );
+    case "referencia": {
+      // ⚠️ Una referencia IDENTIFICA: cuanto menos se repite, mejor candidata.
+      // Es lo que permite que «Operación» —señal débil por nombre— gane a una
+      // columna que se llame parecido pero repita valores. Y nunca es un número
+      // con decimales: eso es un importe.
+      const codigos = noVacios.filter((v) => !/^-?\d+[.,]\d{1,2}$/.test(String(v).trim()));
+      if (codigos.length === 0) return VETO;
+      const distintos = new Set(codigos.map((v) => String(v).trim())).size;
+      return (distintos / codigos.length) * 1.5;
+    }
     default:
       return 0;
   }
@@ -173,8 +225,9 @@ export function detectarCon<C extends string>(
   contenido: (campo: C, valores: unknown[]) => number,
   headers: string[],
   muestras: Record<string, unknown>[],
+  debiles?: Partial<Record<C, string[]>>,
 ): Partial<Record<C, string>> {
-  return detectarConDetalle(campos, keywords, contenido, headers, muestras).mapeo;
+  return detectarConDetalle(campos, keywords, contenido, headers, muestras, debiles).mapeo;
 }
 
 /**
@@ -212,6 +265,8 @@ export function detectarConDetalle<C extends string>(
   contenido: (campo: C, valores: unknown[]) => number,
   headers: string[],
   muestras: Record<string, unknown>[],
+  /** Palabras que valen si nadie mejor las reclama. Ver `DEBILES`. */
+  debiles?: Partial<Record<C, string[]>>,
 ): DeteccionDetallada<C> {
   type Celda = { campo: C; header: string; score: number };
   const celdas: Celda[] = [];
@@ -231,8 +286,13 @@ export function detectarConDetalle<C extends string>(
   for (const campo of campos) {
     for (const header of candidatos) {
       const valores = muestras.map((f) => f[header]);
-      const score =
-        puntajeConLista(keywords[campo], header) + contenido(campo, valores);
+      // Una señal débil vale 1: pierde contra cualquier palabra específica
+      // (que valen 2 o 3) pero gana a no mapear nada.
+      const porNombre = Math.max(
+        puntajeConLista(keywords[campo], header),
+        puntajeConLista(debiles?.[campo] ?? [], header) > 0 ? 1 : 0,
+      );
+      const score = porNombre + contenido(campo, valores);
       // Un score no positivo incluye el VETO por contenido (`-Infinity`): una
       // columna cuyos valores contradicen al campo no se propone ni aunque se
       // llame como él.
@@ -278,5 +338,5 @@ export function detectarColumnas(
   headers: string[],
   muestras: Record<string, unknown>[],
 ): MapeoColumnas {
-  return detectarCon(CAMPOS, KEYWORDS, puntajeContenido, headers, muestras);
+  return detectarCon(CAMPOS, KEYWORDS, puntajeContenido, headers, muestras, DEBILES);
 }
