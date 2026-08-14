@@ -1144,10 +1144,18 @@ export async function explicarResiduo(
   });
   if (error) {
     console.error("[conciliacion] no se pudo explicar el residuo:", error);
+    // ⚠️ El mensaje distingue el TIMEOUT del resto, y no es un detalle: son dos
+    // averías con arreglos opuestos —una consulta que hay que acelerar frente a
+    // una función que hay que corregir— y con el mismo texto para las dos hubo
+    // que ir a los logs del contenedor para saber cuál era. El código de
+    // Postgres se enseña porque quien mira esta pantalla es quien administra el
+    // sistema, y sin él la siguiente pregunta es siempre la misma.
+    const timeout = error.code === "57014";
     return {
       ok: false,
-      error:
-        "No se pudo analizar lo que quedó sin conciliar. Vuelve a intentarlo en un momento.",
+      error: timeout
+        ? "El análisis tardó más de lo que la base permite (8 s) y se canceló. Con este volumen hay que acelerarlo: avísanos."
+        : `No se pudo analizar lo que quedó sin conciliar (código ${error.code ?? "desconocido"}). Suele ser que falte aplicar la última migración.`,
     };
   }
   return { ok: true, datos: data };

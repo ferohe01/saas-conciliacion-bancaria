@@ -28,10 +28,16 @@ RUN npm run build
 # ─── 3. Runtime ───────────────────────────────────────────────────────
 FROM node:22-alpine AS runner
 WORKDIR /app
+# Opcional: el commit desplegado, para que /api/health pueda decirlo. Si el
+# orquestador no lo pasa, /api/health responde con el BUILD_ID, que ya distingue
+# un redespliegue real de uno que no reconstruyó nada.
+ARG GIT_SHA=""
+
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
-    HOSTNAME=0.0.0.0
+    HOSTNAME=0.0.0.0 \
+    GIT_SHA=$GIT_SHA
 
 RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 
