@@ -361,3 +361,72 @@ describe("cuadre: diferencias dentro de los pares", () => {
     expect(c.diferencia).toBe(0);
   });
 });
+
+/**
+ * ⚠️⚠️ EL CÓDIGO DE OPERACIÓN PERUANO ES NUMÉRICO.
+ *
+ * `esRefToken` exige una letra y un dígito. Para extraer códigos de un texto
+ * libre está bien —un número suelto en una glosa puede ser un importe o una
+ * fecha— pero se aplicaba también al CAMPO de referencia, que es una referencia
+ * por definición: el usuario lo dijo al mapear esa columna.
+ *
+ * Consecuencia: con códigos como `30010182` —los que usa cualquier banco
+ * peruano— `comparteRef` no se cumplía nunca, y la etapa de candidatos perdía su
+ * único vínculo fuerte. Toda retención, detracción o percepción —que comparte
+ * código con su movimiento y solo difiere en el importe— quedaba fuera de la
+ * banda de monto y jamás llegaba al modelo. Medido con una conciliación real de
+ * 233 × 221: el LLM recibió CERO shortlists y contestó, con razón, `{"pares":[]}`.
+ */
+describe("candidatos IA: el código de operación numérico cuenta como referencia", () => {
+  const DIR3 = "n8n";
+  const correr = (entrada: unknown) => {
+    const src = readFileSync(join(DIR3, "ia_llm_01_candidatos.js"), "utf8")
+      .replace("$('Webhook').first().json", "({ body: {} })");
+    return new Function("$json", src)(entrada)[0].json;
+  };
+
+  /** Una retención: mismo código, el banco deposita 367,34 menos. */
+  const retencion = (codigo: string) => ({
+    job_id: "t",
+    metadata: {},
+    config: { tolerancia_ia_monto: 10, ventana_ia_dias: 30, top_k_candidatos: 5 },
+    total_internos: 1,
+    total_bancarios: 1,
+    matches: [],
+    pendientes_internos: [{
+      id_interno: "REG-1", fecha: "2026-06-01", monto: 12244.56, tipo: "cobranza",
+      referencia: codigo, contraparte: "Rosa Elvira Quispe Mamani", descripcion: "",
+    }],
+    pendientes_bancarios: [{
+      id_movimiento: "BCO-1", fecha: "2026-06-01", monto: 11877.22, tipo: "abono",
+      referencia_banco: codigo, glosa: "ABONO TRANSF. ROSA ELVIRA QUISPE M (NETO RETENC)",
+    }],
+  });
+
+  const shortlists = (r: { ia_user?: string }) => {
+    const u = r.ia_user ?? "";
+    const cuerpo = u.slice(u.indexOf("Candidatos por registro interno:"));
+    return JSON.parse(cuerpo.slice(cuerpo.indexOf("\n") + 1)) as {
+      candidatos: { comparte_ref: boolean; score: number }[];
+    }[];
+  };
+
+  it("un código numérico llega al modelo pese a salirse de la banda", () => {
+    // Diferencia de 367,34 con la banda en 10: sin compartir referencia estaría
+    // descartado. Es EL caso de las retenciones peruanas.
+    const s = shortlists(correr(retencion("30010182")));
+    expect(s).toHaveLength(1);
+    expect(s[0]!.candidatos[0]!.comparte_ref).toBe(true);
+  });
+
+  it("un código alfanumérico sigue funcionando igual", () => {
+    const s = shortlists(correr(retencion("SR11-02748951")));
+    expect(s[0]!.candidatos[0]!.comparte_ref).toBe(true);
+  });
+
+  it("un código demasiado corto NO se toma por referencia", () => {
+    // Con menos de cuatro caracteres cualquier cosa colisiona.
+    const s = shortlists(correr(retencion("12")));
+    expect(s.length === 0 || s[0]!.candidatos[0]!.comparte_ref === false).toBe(true);
+  });
+});

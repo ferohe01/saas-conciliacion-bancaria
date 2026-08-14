@@ -78,9 +78,21 @@ const canonRef = (r) => {
   }
   return limpiarRef(s);
 };
+// ⚠️⚠️ El CAMPO de referencia es una referencia POR DEFINICION: el usuario lo
+// dijo al mapear esa columna. `esRefToken` exige una letra y un digito —bien
+// para extraer codigos de un texto libre, donde un numero suelto puede ser un
+// importe o una fecha— pero aplicado al campo descarta los codigos de operacion
+// PERUANOS, que son puramente numericos (30010182).
+//
+// Con eso, `comparteRef` no se cumplia nunca y la etapa de candidatos perdia su
+// unico vinculo fuerte: toda retencion, detraccion o percepcion —que comparte
+// codigo con su movimiento y solo difiere en el importe— quedaba fuera de la
+// banda de monto y jamas llegaba al modelo. En una prueba de 233 x 221 el LLM
+// recibio CERO shortlists y contesto, con razon, que no habia ningun par.
+const esRefCampo = (t) => t.length >= 4;
 const refCampo = (ref, set) => {
-  const c = limpiarRef(String(ref ?? "")); if (esRefToken(c)) set.add(c);
-  const k = canonRef(ref); if (k !== c && esRefToken(k)) set.add(k);
+  const c = limpiarRef(String(ref ?? "")); if (esRefCampo(c)) set.add(c);
+  const k = canonRef(ref); if (k !== c && esRefCampo(k)) set.add(k);
 };
 const refsInterno = (it) => { const s = new Set(); refCampo(it.referencia, s); refsDeTexto(it.descripcion, s); return s; };
 const refsBanco = (bc) => { const s = new Set(); refCampo(bc.referencia_banco, s); refsDeTexto(bc.glosa, s); return s; };

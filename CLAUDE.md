@@ -348,6 +348,38 @@ Hay tests de la cadena entera (`tests/n8nNodos.test.ts`) con el residuo real y
 la IA caída: ninguna partida se pierde, el cuadre sale, y una adjudicación sobre
 un registro que el modelo no vio se rechaza.
 
+#### ⚠️⚠️ El código de operación peruano es NUMÉRICO, y la IA no lo veía
+
+`esRefToken` exige **una letra y un dígito**. Para extraer códigos de un texto
+libre está bien —un número suelto en una glosa puede ser un importe o una
+fecha— pero se aplicaba también al **campo** de referencia, que es una
+referencia por definición: el usuario lo dijo al mapear esa columna.
+
+Con códigos como `30010182` —los que usa cualquier banco peruano— `comparteRef`
+**no se cumplía nunca**, y la etapa de candidatos perdía su único vínculo
+fuerte. La regla dice que compartir referencia salta la banda de monto:
+
+    if (!comparteRef && difAbs > tolIa) continue;
+
+Así que toda **retención, detracción o percepción** —que comparte código con su
+movimiento y solo difiere en el importe— quedaba fuera de la banda y jamás
+llegaba al modelo. Medido con una conciliación real de 233 × 221 partidas: el
+LLM recibió **cero shortlists** y contestó, con razón, `{"pares":[]}`.
+
+Desde fuera eso es indistinguible de «la IA miró y no encontró nada», que es lo
+que hizo perder el rastro: el nodo estaba verde, el job completaba, y la
+conclusión natural era que faltaba credencial o que había que ampliar
+`tolerancia_ia_monto`. Ninguna de las dos.
+
+- **El campo de referencia acepta cualquier token de ≥4 caracteres**; la
+  extracción desde texto libre conserva la exigencia de letra + dígito, que es
+  donde tenía sentido.
+- Tras el arreglo, la misma conciliación pasa de **0 a 28 shortlists**, todas con
+  `comparte_ref` y score 0,85–0,92.
+- ⚠️ No afecta a la capa exacta ni a la agrupación: las dos usan `normRef` sobre
+  el campo entero, no tokens. Por eso los 163 pares exactos y las 13
+  agrupaciones sí salían — y por eso el fallo pasó desapercibido.
+
 #### Y el prompt de la IA no cabía en ningún modelo
 
 `ia_llm_01_candidatos.js` abortó por lo mismo, pero al medirlo apareció algo
