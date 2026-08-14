@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { traerTodo, enLotes } from "@/lib/supabase/paginado";
 import { getEmpresaActual } from "@/lib/auth";
 import { registrarImportacion } from "@/lib/importacion-servidor";
@@ -254,7 +255,54 @@ async function borrarComprobantes(
     borrados += n;
   }
 
+  await limpiarFichasVacias();
   return { ok: true, borrados, protegidos };
+}
+
+/**
+ * Quita las fichas de carga que se quedaron sin ninguna fila.
+ *
+ * ⚠️ Una ficha de importación no es un dato transaccional, así que se olvida con
+ * facilidad — y no es inocua: alimenta la cascada «de tu archivo a la
+ * conciliación». Sin esto, una empresa recién vaciada anunciaba en su siguiente
+ * conciliación «las 8 cargas de este período · 1.584 filas leídas» sobre un
+ * archivo de 236 que se acababa de subir por primera vez.
+ *
+ * Solo se van las que quedaron a cero: si una carga conserva comprobantes
+ * —porque tenían cobros aplicados y no se pudieron borrar— su ficha sigue
+ * describiendo algo que existe.
+ *
+ * Son decenas como mucho (`lotes_importacion` trae 50), así que preguntar una a
+ * una es barato. Un fallo aquí no rompe el borrado, que ya ocurrió.
+ */
+async function limpiarFichasVacias(): Promise<void> {
+  try {
+    const empresa = await getEmpresaActual();
+    if (!empresa) return;
+    const admin = createAdminClient();
+    // ⚠️ Con `admin` y filtro explícito de empresa: RLS no aplica aquí.
+    const { data: fichas } = await admin
+      .from("importaciones_comprobantes")
+      .select("lote")
+      .eq("empresa_id", empresa.empresa_id);
+
+    for (const f of (fichas ?? []) as { lote: string }[]) {
+      const { count } = await admin
+        .from("comprobantes")
+        .select("id", { count: "exact", head: true })
+        .eq("empresa_id", empresa.empresa_id)
+        .eq("lote_importacion", f.lote);
+      if ((count ?? 0) === 0) {
+        await admin
+          .from("importaciones_comprobantes")
+          .delete()
+          .eq("lote", f.lote)
+          .eq("empresa_id", empresa.empresa_id);
+      }
+    }
+  } catch (e) {
+    console.error("[comprobantes] no se pudieron limpiar las fichas de carga:", e);
+  }
 }
 
 /* eslint-enable @typescript-eslint/no-explicit-any */

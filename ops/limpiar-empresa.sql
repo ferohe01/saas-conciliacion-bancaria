@@ -113,6 +113,19 @@ begin
   get diagnostics v_borrados = row_count;
   raise notice '  comprobantes borrados: %', v_borrados;
 
+  -- ⚠️ Las FICHAS DE CARGA, que no son datos transaccionales y por eso es fácil
+  -- olvidarlas. Alimentan la cascada «de tu archivo a la conciliación»
+  -- (`origen_partidas`, 0043): si sobreviven, la siguiente conciliación de una
+  -- empresa recién vaciada anuncia «las 8 cargas de este período · 1.584 filas
+  -- leídas» sobre un archivo de 236 filas que se acaba de subir por primera vez.
+  --
+  -- Pasó: este script es anterior a la 0043 y nadie lo actualizó al crear la
+  -- tabla. Regla para la próxima tabla nueva por empresa: o entra aquí, o entra
+  -- en cascada desde una que ya esté.
+  delete from public.importaciones_comprobantes where empresa_id = v_empresa;
+  get diagnostics v_borrados = row_count;
+  raise notice '  fichas de importación borradas: %', v_borrados;
+
   alter table public.aplicaciones_cobro enable trigger trg_saldo_comprobante;
   alter table public.reversiones_cobro  enable trigger trg_saldo_reversion;
   alter table public.reversiones_cobro  enable trigger trg_validar_reversion;
