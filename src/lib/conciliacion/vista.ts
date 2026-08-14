@@ -145,12 +145,33 @@ export async function cargarVistaResultado(
     excluido_aprendizaje: m.excluido_aprendizaje,
   }));
 
+  // ⚠️⚠️ SIN DUPLICAR. Una partida del residuo que n8n acabó emparejando está
+  // en los DOS sitios: en el payload con su id sintético («REG-0007») y aquí
+  // hidratada con su uuid, que es el que referencia el par.
+  //
+  // Dejar las dos no era un detalle de memoria: la copia del payload no la
+  // menciona ningún match, así que la pantalla la contaba **como sin
+  // conciliar** — y la pintaba en esa lista— mientras la otra copia aparecía en
+  // "Ya conciliado". La misma partida en los dos paneles, y el recuento inflado:
+  // en una conciliación de 233 × 221 decía «128 sin conciliar · 72 %
+  // emparejado» cuando la verdad era 78 y el 83 %.
+  //
+  // Gana la hidratada: es la que los pares referencian.
+  const hidratadosInt = new Set(comps.map((c) => c.comprobante_id));
+  const hidratadosMov = new Set(movs.map((m) => m.movimiento_id));
+  const residuoInt = (payload?.registros_internos ?? []).filter(
+    (r) => r.comprobante_id == null || !hidratadosInt.has(r.comprobante_id),
+  );
+  const residuoMov = (payload?.movimientos_bancarios ?? []).filter(
+    (m) => m.movimiento_id == null || !hidratadosMov.has(m.movimiento_id),
+  );
+
   return {
     resultado: { ...resultadoBase, matches },
     // El residuo del payload sigue haciendo falta: de ahí salen las fichas del
     // panel "Sin conciliar", que referencia partidas que ningún par toca.
-    internos: [...(payload?.registros_internos ?? []), ...comps],
-    bancarios: [...(payload?.movimientos_bancarios ?? []), ...movs],
+    internos: [...residuoInt, ...comps],
+    bancarios: [...residuoMov, ...movs],
     totalPares: totalPares ?? matches.length,
     idsMatches: matchesTabla.map((m) => m.id),
   };

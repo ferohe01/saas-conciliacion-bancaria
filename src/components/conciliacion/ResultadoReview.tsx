@@ -269,9 +269,20 @@ export function ResultadoReview({
         onExportar={() => void exportarResultadoExcel(resultado, jobId)}
       />
 
+      {/* ⚠️ El recuento de sueltas sale del RESUMEN, no de las listas de la
+          pantalla — igual que `conciliados`. Las listas traen un tope de pares
+          y el residuo del payload; contar sobre ellas da un número que depende
+          de cuánto se cargó, no de cuánto quedó. El resumen es del período
+          entero y es el mismo que enseñan el panel y los reportes: dos cifras
+          distintas para lo mismo en dos pantallas es peor que una imprecisa. */}
       <ResumenTriaje
         porRevisar={cola.length}
-        sinConciliar={sinConciliarInt.length + sinConciliarMov.length}
+        sinConciliar={
+          resultado.resumen
+            ? resultado.resumen.sin_conciliar_internos +
+              resultado.resumen.sin_conciliar_bancarios
+            : sinConciliarInt.length + sinConciliarMov.length
+        }
         conciliados={totalPares ?? conciliados.length}
         totalPartidas={totalPartidas}
       />
