@@ -175,7 +175,7 @@ export function OrigenPartidas({
       {periodo && <span className="ml-2 text-neutral-600">· {periodo}</span>}
       {dif && (
         <span className="mt-1 block text-sm font-normal text-neutral-600">
-          {NUM(dif.total)} partidas de tu archivo no acabaron conciliadas:{" "}
+          {NUM(dif.total)} partidas {dif.base} no acabaron conciliadas:{" "}
           {dif.frase}
         </span>
       )}

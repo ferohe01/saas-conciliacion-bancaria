@@ -347,36 +347,53 @@ export function cascadaPartidas(
 export function resumenDiferencia(
   origen: OrigenPartidas | null,
   motor: ResultadoMotor | null,
-): { total: number; frase: string } | null {
+): { total: number; base: string; frase: string } | null {
   if (!origen || !motor) return null;
-  const partida =
-    origen.alcance === "cargas" && origen.archivoFilas > 0
-      ? origen.archivoFilas
-      : origen.cargados;
+  const conArchivo = origen.alcance === "cargas" && origen.archivoFilas > 0;
+  const partida = conArchivo ? origen.archivoFilas : origen.cargados;
   const total = partida - motor.conciliados;
   if (total <= 0) return null;
 
-  const partes: string[] = [];
-  const noCargadas =
-    origen.alcance === "cargas" && origen.archivoFilas > 0
-      ? origen.archivoFilas - origen.cargados
-      : 0;
-  if (noCargadas > 0) partes.push(`${fmt(noCargadas)} no llegaron a cargarse`);
-  if (origen.fueraPeriodo > 0)
-    partes.push(`${fmt(origen.fueraPeriodo)} son de fechas fuera del período`);
-  if (origen.yaCobrados > 0)
-    partes.push(`${fmt(origen.yaCobrados)} ya estaban cobrados`);
-  if (origen.otraMoneda > 0)
-    partes.push(`${fmt(origen.otraMoneda)} están en otra moneda`);
-  const sinConciliar = motor.internos - motor.conciliados;
-  if (sinConciliar > 0)
-    partes.push(`${fmt(sinConciliar)} entraron pero no encontraron pareja`);
+  // ⚠️ Las causas son EXACTAMENTE las de la cascada, con sus mismas palabras. La
+  // primera versión metía en un solo saco «no llegaron a cargarse» todo lo que
+  // no estaba hoy en la base, y eso dijo «1.348 no llegaron a cargarse» sobre
+  // una empresa donde 282 no llegaron y **1.066 sí llegaron y se borraron
+  // después**. La frase contradecía a la tabla que tenía justo debajo.
+  const causas: { n: number; texto: string }[] = [
+    { n: origen.archivoRepetidas, texto: "venían repetidas en el archivo" },
+    { n: origen.archivoInvalidas, texto: "no traían fecha, importe o tipo" },
+    { n: origen.archivoExistentes, texto: "ya estaban cargadas de antes" },
+    {
+      n: conArchivo ? Math.max(0, origen.archivoInsertados - origen.cargados) : 0,
+      texto: "se quitaron después de cargarlas",
+    },
+    { n: origen.fueraPeriodo, texto: "son de fechas fuera del período" },
+    { n: origen.yaCobrados, texto: "ya estaban cobradas o anuladas" },
+    { n: origen.otraMoneda, texto: "están en otra moneda" },
+    {
+      n: motor.internos - motor.conciliados,
+      texto: "entraron pero no encontraron pareja",
+    },
+  ].filter((c) => c.n > 0);
+
+  causas.sort((a, b) => b.n - a.n);
+  const dichas = causas.slice(0, 3).map((c) => `${fmt(c.n)} ${c.texto}`);
+  const resto = causas.length - dichas.length;
+  if (resto > 0) dichas.push(`${resto} causa${resto === 1 ? "" : "s"} más`);
 
   return {
     total,
+    // ⚠️ Se nombra la BASE. Con ocho cargas del mismo archivo, «partidas de tu
+    // archivo» es falso: el archivo tiene 236 filas y la suma de lo leído son
+    // 1.584. Decir de dónde sale el número es lo que permite reconocerlo.
+    base: conArchivo
+      ? origen.cargas === 1
+        ? "de tu archivo"
+        : `de las ${fmt(origen.cargas)} cargas de este período`
+      : "de tus comprobantes",
     frase:
-      partes.length > 0
-        ? `${partes.slice(0, -1).join(", ")}${partes.length > 1 ? " y " : ""}${partes.at(-1)}.`
+      dichas.length > 0
+        ? `${dichas.slice(0, -1).join(", ")}${dichas.length > 1 ? " y " : ""}${dichas.at(-1)}.`
         : "El detalle está en la cascada.",
   };
 }

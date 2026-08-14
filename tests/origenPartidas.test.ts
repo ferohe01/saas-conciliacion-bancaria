@@ -132,10 +132,64 @@ describe("resumenDiferencia", () => {
   it("resume el caso real en una frase con sus causas", () => {
     const r = resumenDiferencia(WIN, MOTOR)!;
     expect(r.total).toBe(452_605 - 447_795);
-    expect(r.frase).toContain("296 no llegaron a cargarse");
-    expect(r.frase).toContain("132 son de fechas fuera del período");
+    expect(r.base).toBe("de tu archivo");
     // es-PE separa los miles con coma, como el resto de la aplicación.
     expect(r.frase).toContain("4,382 entraron pero no encontraron pareja");
+    expect(r.frase).toContain("288 no traían fecha, importe o tipo");
+    expect(r.frase).toContain("132 son de fechas fuera del período");
+  });
+
+  it("⚠️ NO llama «no llegaron a cargarse» a lo que se borró después", () => {
+    // El caso real que lo destapó: ocho cargas del mismo archivo con borrados
+    // entre medias. La frase decía «1.348 no llegaron a cargarse» cuando 282 no
+    // llegaron y 1.066 sí llegaron y se quitaron — contradiciendo a la tabla
+    // que tenía justo debajo.
+    const recargas: OrigenPartidas = {
+      alcance: "cargas",
+      cargas: 8,
+      archivoFilas: 1_584,
+      archivoRepetidas: 0,
+      archivoInvalidas: 0,
+      archivoExistentes: 282,
+      archivoInsertados: 1_302,
+      cargados: 236,
+      fueraPeriodo: 0,
+      yaCobrados: 0,
+      otraMoneda: 3,
+      internos: 233,
+    };
+    const r = resumenDiferencia(recargas, { internos: 233, conciliados: 221 })!;
+    expect(r.frase).toContain("1,066 se quitaron después de cargarlas");
+    expect(r.frase).toContain("282 ya estaban cargadas de antes");
+    expect(r.frase).not.toContain("no llegaron a cargarse");
+  });
+
+  it("nombra la base: con ocho cargas no es «tu archivo»", () => {
+    // El archivo tiene 236 filas; 1.584 es la suma de lo leído en ocho cargas,
+    // así que llamarlo «tu archivo» es falso — y es el número que se enseña.
+    const recargas: OrigenPartidas = {
+      alcance: "cargas", cargas: 8, archivoFilas: 1_584, archivoRepetidas: 0,
+      archivoInvalidas: 0, archivoExistentes: 282, archivoInsertados: 1_302,
+      cargados: 236, fueraPeriodo: 0, yaCobrados: 0, otraMoneda: 3, internos: 233,
+    };
+    expect(resumenDiferencia(recargas, { internos: 233, conciliados: 221 })!.base)
+      .toBe("de las 8 cargas de este período");
+  });
+
+  it("no enumera más de tres causas: la cuarta y siguientes se agrupan", () => {
+    const muchas: OrigenPartidas = {
+      ...WIN,
+      archivoRepetidas: 10,
+      archivoInvalidas: 20,
+      archivoExistentes: 30,
+      archivoInsertados: 452_545,
+      cargados: 452_500,
+      fueraPeriodo: 40,
+      otraMoneda: 5,
+      internos: 452_177,
+    };
+    const r = resumenDiferencia(muchas, MOTOR)!;
+    expect(r.frase).toMatch(/causas? más\.$/);
   });
 
   it("devuelve null cuando no hay nada que explicar", () => {
