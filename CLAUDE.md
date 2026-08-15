@@ -158,6 +158,8 @@ supabase/
                              entidad (WIN-S001-123 ≡ S001-123).
     0043_origen_partidas.sql         Ficha de cada carga + la cascada
                              archivo → comprobantes → internos, congelada.
+    0050_posicion_caja.sql           Saldo, entradas y salidas por cuenta desde
+                             las conciliaciones APROBADAS (pantalla `/caja`).
 tests/                     Vitest (unit).
 ```
 
@@ -2273,6 +2275,86 @@ cobrados*; al aprobar, 447.795 pasaban a `cobrado` y el total se desplomaba de
 452.177 a 4.382. El resumen **se degradaba solo**, y como la pantalla recalcula
 en cada carga, el número empeoraba cada vez que alguien lo miraba. Ahora se
 cuenta lo que la conciliación TOCÓ, que ya no cambia.
+
+## Posición de caja (`/caja`) — fase 1 de la plataforma financiera
+
+Primer módulo del salto de «sistema de conciliaciones» a plataforma financiera
+(ver `docs/diseno-posicion-caja.md`). Responde **«¿cuánta plata tengo?»**.
+
+Lo que lo hace distinto de cualquier dashboard es que **no suma movimientos: lee
+conciliaciones aprobadas**. Es la primera pantalla que puede afirmar algo sobre
+el dinero de la empresa porque está probado contra el extracto del banco.
+
+De ahí la regla que gobierna el módulo entero:
+
+> ⚠️⚠️ **Ninguna cifra de caja se muestra sin su fecha de corte.** El sistema
+> solo conoce el saldo al cierre del último período conciliado, así que a mitad
+> de agosto el saldo puede ser del 31 de julio. Eso no es un defecto —es la
+> naturaleza del dato— pero callarlo sí lo sería: es exactamente el número
+> plausible que nadie puede fechar.
+
+`frescuraDelCorte` clasifica en `al_dia` (≤40 días) / `retraso` (41–70) /
+`desfasado` (>70). Los umbrales suponen cierre **mensual**: el mes M se concilia
+en los primeros días de M+1, así que el corte más reciente posible ronda los 30-35
+días. **El aviso no bloquea nada** —las cifras siguen siendo verdad sobre su
+fecha— pero cambia cuál es el botón negro, mismo criterio que el diagnóstico
+previo del Paso 3.
+
+**El saldo y los movimientos NO salen del mismo sitio, y esa es la decisión
+central.** El sistema permite conciliar un mes por cortes (01–05, 06–17, 18–30):
+
+- El **saldo** es el del **último** corte. Un saldo no se suma: el del 30 ya
+  incluye lo anterior, y sumar los tres cortes triplicaría la caja.
+- Las **entradas y salidas** sí se **suman**, sobre todos los cortes del mes.
+  Enseñar solo las del último tramo diría «entraron 180.000» en un mes de
+  600.000, y nadie tendría cómo notarlo.
+
+Por eso `posicion_caja()` devuelve además `cortes`, `mov_desde` y `mov_hasta`:
+la pantalla **rotula exactamente lo que sumó** («01/07 al 30/07 · 3 cortes») en
+vez de decir «julio», que prometería un mes completo.
+
+- ⚠️⚠️ **Lo que hace posible sumar sin contar dos veces es el `exclude using
+  gist` de la `0012`**: no puede haber dos aprobadas con rangos solapados en la
+  misma cuenta. Sin esa garantía, dos corridas del mismo mes duplicarían el
+  saldo y el error sería **invisible**. Es la clase de cimiento que justifica
+  haber puesto la regla en Postgres y no en la aplicación.
+- ⚠️ **Un `saldo_final_banco` nulo NO cuenta como cero.** Cero significa «no hay
+  plata»; nulo, «no lo sé». Va a `sinSaldo` y la pantalla lo nombra. Igual con
+  las cuentas sin ninguna aprobada: salen con todo en `null` (LEFT JOIN a
+  propósito), porque omitirlas haría que el total pareciera completo.
+- ⚠️ **El total hereda el corte MÁS ANTIGUO** de las cuentas que lo componen. Un
+  total solo vale lo que valga su parte más vieja; quedarse con la fecha más
+  reciente sería maquillar y promediar fechas no significa nada.
+- ⚠️ **«Disponible» lleva SIEMPRE su fórmula al lado** («S/ 138.268 en bancos −
+  S/ 18.900 que ya debías»). Un número llamado así sin decir qué se le restó
+  invita a gastárselo. Y **no se recorta a cero** si sale negativo: deber más de
+  lo que hay es un hecho.
+- **Un bloque por moneda, sin sumar entre ellas** y sin filtrar a una sola
+  (misma regla que `agingPorMoneda`). Sin conversión: el tipo de cambio es otra
+  funcionalidad y hacerla a medias es peor que no hacerla (`0041`).
+- **Lo vencido se reutiliza de Por pagar** (`traerResumenSaldos`), no se
+  recalcula: si cada pantalla lo hiciera por su lado acabarían discrepando.
+- ⚠️ **`movs` mira DOS orígenes** porque hay dos modos de conciliar y los dos
+  siguen vivos: `movimientos_extracto` (modo tabla) y
+  `payload_entrada->movimientos_bancarios` (modo payload, los jobs anteriores a
+  la parte B). Mirar solo el primero dejaría las conciliaciones antiguas con
+  «Entradas 0» junto a un saldo real.
+- **Sin ninguna aprobada, estado vacío — no ceros.** «S/ 0,00» diría que no
+  tienes dinero, que es una afirmación que nadie hizo.
+- Si el reparto de cobros de una aprobada quedó a medias (`estadoCobros`), se
+  avisa: no afecta al saldo bancario —sale del extracto— pero sí a lo vencido,
+  así que el disponible se queda corto.
+
+Lógica pura en `src/lib/posicionCaja.ts` (con tests); la lectura, en
+`posicionCaja-servidor.ts`. **Cero cambios en tablas, cero cambios en el motor,
+ninguna pantalla existente cambia de comportamiento**: si la fase 1 se revierte,
+basta con quitar la ruta.
+
+**Lo que NO hace, a propósito:** no proyecta nada, no admite un saldo tecleado a
+mano (sería un dato sin respaldo que contamina la única cifra probada del
+producto) y usa el **extracto**, no las aplicaciones de cobro — que son solo la
+parte que encontró pareja, y darían una caja que ignora los cargos no
+registrados, justo las partidas que el cuadre existe para sacar a la luz.
 
 ## Aprendizaje IA: sección propia y de núcleo
 

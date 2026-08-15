@@ -145,6 +145,14 @@ export default async function ResumenPage({
           <Link href="/cobranzas" className="font-medium text-blue-700 hover:underline">
             Ver la antigüedad
           </Link>
+          .{" "}
+          {/* Gancho a Caja: esta sección dice lo que te deben y lo que debes,
+              pero no cuánto hay HOY en el banco — que es la otra mitad de la
+              misma pregunta y vive en su propia pantalla, con su fecha. */}
+          Y lo que hay ahora mismo en tus bancos, con la fecha de la que sale:{" "}
+          <Link href="/caja" className="font-medium text-blue-700 hover:underline">
+            posición de caja
+          </Link>
           .
         </p>
       </section>

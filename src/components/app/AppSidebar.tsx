@@ -61,6 +61,14 @@ const IconoResumen = (p: IconProps) => (
   </svg>
 );
 
+/** Billetera: lo que hay, no lo que se mide. */
+const IconoCaja = (p: IconProps) => (
+  <Ico
+    {...p}
+    d={["M3 7h15a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z", "M3 7l12-3v3", "M16 13h2"]}
+  />
+);
+
 const IconoReportes = (p: IconProps) => (
   <Ico {...p} d={["M4 19h16", "M7 16V9", "M12 16V5", "M17 16v-4"]} />
 );
@@ -130,6 +138,10 @@ const ENLACES: Enlace[] = [
   { href: "/cobranzas", label: "Por cobrar", Icono: IconoCobranzas, modulo: "cobranzas" },
   { href: "/pagos", label: "Por pagar", Icono: IconoPagar, modulo: "cobranzas" },
   { href: "/reportes", label: "Reportes", Icono: IconoReportes },
+  // «¿Cuánta plata tengo?» — la pregunta más frecuente y la única que esta app
+  // puede responder con cifras probadas contra el extracto. Va junto al resumen
+  // porque las dos las hace quien decide, y encima porque se mira más a menudo.
+  { href: "/caja", label: "Caja", Icono: IconoCaja },
   // Debajo de Reportes y no dentro: responden preguntas distintas y las hacen
   // personas distintas. Reportes es "cómo fue la conciliación"; esto es "cómo
   // está la empresa", y lo mira quien decide.
