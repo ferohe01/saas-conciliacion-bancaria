@@ -365,3 +365,38 @@ describe("el mismo método se llama igual en todas partes", () => {
     expect(ETIQUETA_METODO.ia).toBe("Sugerido IA");
   });
 });
+
+describe("los detalles del reporte leen los pares de donde estén", () => {
+  /**
+   * ⚠️ Pinchar en «Exacta» sobre una conciliación de 163 pares mostraba
+   * «0 registros · Nada en esta categoría». Las dos pantallas de detalle
+   * resolvían los pares desde `resultado.matches` contra `payload_entrada`, y en
+   * modo tabla esos dos sitios están vacíos para lo emparejado: los pares viven
+   * en `matches_conciliacion` desde la etapa 4 y el payload solo lleva el
+   * RESIDUO.
+   *
+   * Es el mismo hueco que la etapa 6 tapó en los reportes agregados y en el
+   * aprendizaje; estas dos pantallas se quedaron fuera y no se notó porque el
+   * cliente de medio millón de partidas no las abre.
+   */
+  const fs = require("node:fs") as typeof import("node:fs");
+  const PANTALLAS = [
+    "src/app/(app)/reportes/[metodo]/page.tsx",
+    "src/app/(app)/reportes/tipo/[categoria]/page.tsx",
+  ];
+
+  it.each(PANTALLAS)("%s contempla el modo tabla", (p) => {
+    const src = fs.readFileSync(p, "utf8");
+    expect(src).toContain("cargarParesDeTabla");
+    expect(src).toContain("loteExtractoId");
+  });
+
+  it.each(PANTALLAS)("%s avisa cuando recorta", (p) => {
+    // La regla de `lib/supabase/paginado.ts`: o paginas, o pones un límite
+    // explícito Y lo dices en pantalla. Un recorte callado hace que el usuario
+    // reste contra el gráfico del reporte y concluya que faltan pares.
+    const src = fs.readFileSync(p, "utf8");
+    expect(src).toContain("recortado");
+    expect(src).toMatch(/Se muestran los primeros/);
+  });
+});

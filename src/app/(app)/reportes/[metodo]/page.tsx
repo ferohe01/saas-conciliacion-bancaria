@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { cargarReporteDetalle } from "@/lib/reportesQuery";
+import { cargarReporteDetalle, cargarParesDeTabla } from "@/lib/reportesQuery";
 import {
   filtrarAnual,
   filtrarMes,
@@ -35,6 +35,15 @@ const META: Record<
 function detInterno(r: RegistroInterno | undefined, moneda: string): string {
   if (!r) return "—";
   return `${r.id_interno} · ${formatearFecha(r.fecha)} · ${formatearPEN(r.monto, moneda)}${r.contraparte ? " · " + r.contraparte : r.descripcion ? " · " + r.descripcion : ""}`;
+}
+/** Una partida ya hidratada desde su tabla (modo tabla). */
+function detParte(
+  p: { fecha: string; monto: number; texto: string } | undefined,
+  id: string,
+  moneda: string,
+): string {
+  if (!p) return "—";
+  return `${formatearFecha(p.fecha)} · ${formatearPEN(p.monto, moneda)}${p.texto ? " · " + p.texto : ""}`;
 }
 function detBanco(m: MovimientoBancario | undefined, moneda: string): string {
   if (!m) return "—";
@@ -71,6 +80,11 @@ export default async function DetalleMetodoPage({
     : ["Período", "Registro interno", "Movimiento bancario", "Categoría", "Diferencia", "Estado", "Observación"];
 
   const filas: Record<string, string>[] = [];
+  /** Cuántas hay de verdad, cuando la tabla no las trae todas. */
+  let totalReal = 0;
+  let recortado = false;
+  /** Tope de filas por pantalla. Ver la nota de `cargarParesDeTabla`. */
+  const TOPE = 1000;
 
   for (const job of jobsFiltrados) {
     const d = detalle.get(job.id);
@@ -97,9 +111,44 @@ export default async function DetalleMetodoPage({
           "Sugerencia / Observación": p.sugerencia ?? "",
         });
       }
+    } else if (d.loteExtractoId) {
+      // ⚠️ MODO TABLA: los pares están en `matches_conciliacion` y el payload
+      // solo lleva el residuo. Leerlos del resultado daba «0 registros» sobre
+      // una conciliación de 163 pares.
+      const { pares, total } = await cargarParesDeTabla(
+        job.id,
+        meta.key as "exacta" | "difusa" | "ia",
+        TOPE,
+      );
+      totalReal += total;
+      if (pares.length < total) recortado = true;
+      for (const p of pares) {
+        filas.push({
+          "Período": periodoLabel,
+          "Registro interno": p.ids_internos
+            .map((id) => detParte(p.internos.get(id), id, d.moneda))
+            .join("  |  "),
+          "Movimiento bancario": p.ids_movimientos
+            .map((id) => detParte(p.movimientos.get(id), id, d.moneda))
+            .join("  |  "),
+          "Categoría": etiquetaTipo(
+            categoriaDeMatch({
+              categoria_diferencia: p.categoria_diferencia,
+              diferencia_monto: p.diferencia_monto,
+            }),
+          ),
+          Diferencia:
+            p.diferencia_monto != null
+              ? formatearPEN(p.diferencia_monto, d.moneda)
+              : "—",
+          Estado: etiquetaEstadoRevision(p.estado_revision),
+          "Observación": p.justificacion ?? "",
+        });
+      }
     } else {
       for (const m of d.resultado.matches) {
         if (m.metodo !== meta.key) continue;
+        totalReal++;
         filas.push({
           "Período": periodoLabel,
           "Registro interno": m.ids_internos
@@ -146,8 +195,19 @@ export default async function DetalleMetodoPage({
             <span className="tabular-nums">
               {filas.length.toLocaleString("es-PE")}
             </span>{" "}
-            {filas.length === 1 ? "registro" : "registros"} ·{" "}
-            {mes === "todos" ? `Año ${anio}` : `${nombreMes(mes)} ${anio}`}
+            {filas.length === 1 ? "registro" : "registros"}
+            {/* ⚠️ Si la tabla no los trae todos, se dice. Un recorte silencioso
+                es peor que un recorte: el usuario resta contra el gráfico del
+                reporte y concluye que faltan pares. */}
+            {recortado && (
+              <>
+                {" "}de{" "}
+                <span className="tabular-nums">
+                  {totalReal.toLocaleString("es-PE")}
+                </span>
+              </>
+            )}{" "}
+            · {mes === "todos" ? `Año ${anio}` : `${nombreMes(mes)} ${anio}`}
             {banco !== "todos" ? ` · ${banco}` : ""}
           </p>
         </div>
@@ -159,6 +219,16 @@ export default async function DetalleMetodoPage({
           />
         )}
       </div>
+
+      {recortado && (
+        <p className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
+          Se muestran los primeros{" "}
+          <span className="tabular-nums">{TOPE.toLocaleString("es-PE")}</span> de{" "}
+          <span className="tabular-nums">{totalReal.toLocaleString("es-PE")}</span>.
+          Una tabla en el navegador no aguanta más; para el detalle completo,
+          expórtalo desde la conciliación.
+        </p>
+      )}
 
       {filas.length === 0 ? (
         <EstadoVacio

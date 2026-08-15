@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { cargarReporteDetalle } from "@/lib/reportesQuery";
+import { cargarReporteDetalle, cargarParesDeTabla } from "@/lib/reportesQuery";
 import {
   filtrarAnual,
   filtrarMes,
@@ -27,6 +27,14 @@ const METODO_LABEL: Record<string, string> = {
 function detInterno(r: RegistroInterno | undefined, moneda: string): string {
   if (!r) return "—";
   return `${r.id_interno} · ${formatearFecha(r.fecha)} · ${formatearPEN(r.monto, moneda)}${r.contraparte ? " · " + r.contraparte : r.descripcion ? " · " + r.descripcion : ""}`;
+}
+/** Una partida ya hidratada desde su tabla (modo tabla). */
+function detParte(
+  p: { fecha: string; monto: number; texto: string } | undefined,
+  moneda: string,
+): string {
+  if (!p) return "—";
+  return `${formatearFecha(p.fecha)} · ${formatearPEN(p.monto, moneda)}${p.texto ? " · " + p.texto : ""}`;
 }
 function detBanco(m: MovimientoBancario | undefined, moneda: string): string {
   if (!m) return "—";
@@ -67,6 +75,9 @@ export default async function DetalleTipoPage({
   ];
 
   const filas: Record<string, string>[] = [];
+  let recortado = false;
+  /** Mismo tope que el detalle por método, por el mismo motivo. */
+  const TOPE = 1000;
 
   for (const job of jobsFiltrados) {
     const d = detalle.get(job.id);
@@ -78,6 +89,41 @@ export default async function DetalleTipoPage({
     const movsMap = new Map(
       d.payload.movimientos_bancarios.map((m) => [m.id_movimiento, m]),
     );
+
+    // ⚠️ MODO TABLA: los pares viven en `matches_conciliacion`. Leerlos del
+    // resultado dejaba esta pantalla en cero, igual que el detalle por método.
+    if (d.loteExtractoId) {
+      const { pares, total } = await cargarParesDeTabla(job.id, null, TOPE);
+      if (pares.length < total) recortado = true;
+      for (const p of pares) {
+        if (p.estado_revision === "rechazado") continue;
+        if (
+          categoriaDeMatch({
+            categoria_diferencia: p.categoria_diferencia,
+            diferencia_monto: p.diferencia_monto,
+          }) !== categoria
+        ) {
+          continue;
+        }
+        filas.push({
+          "Período": periodoLabel,
+          "Método": METODO_LABEL[p.metodo] ?? p.metodo,
+          "Registro interno": p.ids_internos
+            .map((id) => detParte(p.internos.get(id), d.moneda))
+            .join("  |  "),
+          "Movimiento bancario": p.ids_movimientos
+            .map((id) => detParte(p.movimientos.get(id), d.moneda))
+            .join("  |  "),
+          Diferencia:
+            p.diferencia_monto != null
+              ? formatearPEN(p.diferencia_monto, d.moneda)
+              : "—",
+          Estado: etiquetaEstadoRevision(p.estado_revision),
+          "Observación": p.justificacion ?? "",
+        });
+      }
+      continue;
+    }
 
     for (const m of d.resultado.matches) {
       if (m.estado_revision === "rechazado") continue;
@@ -135,6 +181,15 @@ export default async function DetalleTipoPage({
           />
         )}
       </div>
+
+      {recortado && (
+        <p className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
+          Se muestran los primeros{" "}
+          <span className="tabular-nums">{TOPE.toLocaleString("es-PE")}</span>{" "}
+          pares de cada conciliación. Para el detalle completo, expórtalo desde
+          la conciliación.
+        </p>
+      )}
 
       {filas.length === 0 ? (
         <EstadoVacio

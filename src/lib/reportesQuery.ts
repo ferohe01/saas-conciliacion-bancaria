@@ -1,5 +1,6 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
+import { enLotes } from "@/lib/supabase/paginado";
 import {
   deduplicarUltimoPorPeriodo,
   type JobReporte,
@@ -16,6 +17,8 @@ import type { PayloadConciliacion } from "@/lib/contract/payload";
 
 export type DetalleJob = {
   periodoDesde: string;
+  /** Con lote, los pares viven en `matches_conciliacion`, no en el resultado. */
+  loteExtractoId: string | null;
   banco: string;
   numero: string | null;
   moneda: string;
@@ -80,6 +83,7 @@ export async function cargarReporteDetalle(): Promise<{
     });
     detalle.set(j.id, {
       periodoDesde: j.periodo_desde,
+      loteExtractoId: (j as { lote_extracto_id?: string | null }).lote_extracto_id ?? null,
       banco,
       numero,
       moneda: cuenta?.moneda ?? "PEN",
@@ -89,4 +93,130 @@ export async function cargarReporteDetalle(): Promise<{
   }
 
   return { jobsDef: deduplicarUltimoPorPeriodo(jobs), detalle };
+}
+
+/**
+ * Los pares de un job cuando viven en `matches_conciliacion` (modo tabla).
+ *
+ * ── Por qué hace falta ─────────────────────────────────────────────────────
+ *
+ * El detalle por método (`/reportes/[metodo]`) resolvía los pares desde
+ * `resultado.matches` contra `payload_entrada`. En modo tabla esos dos sitios
+ * están vacíos para lo emparejado: los pares se guardan en su tabla desde la
+ * etapa 4 de la parte B, y el payload solo lleva el RESIDUO. Resultado: pinchar
+ * en «Exacta» sobre una conciliación de 163 pares mostraba **«0 registros ·
+ * Nada en esta categoría»**.
+ *
+ * Es el mismo hueco que la etapa 6 tapó en los reportes agregados y en el
+ * aprendizaje (`conteo_matches`, `matches_revisados`); esta pantalla se quedó
+ * fuera y nadie lo notó porque el cliente grande no la usa.
+ *
+ * ⚠️ CON TOPE, y se dice en pantalla. Una tabla en el navegador no aguanta
+ * 447.795 filas, así que se traen las primeras `tope` y quien llama informa de
+ * cuántas hay en total. Es la regla de `lib/supabase/paginado.ts`: o paginas, o
+ * pones un límite explícito Y lo dices.
+ */
+export type ParDetalle = {
+  ids_internos: string[];
+  ids_movimientos: string[];
+  metodo: string;
+  estado_revision: string;
+  categoria_diferencia: string | null;
+  diferencia_monto: number | null;
+  justificacion: string | null;
+  internos: Map<string, { fecha: string; monto: number; texto: string }>;
+  movimientos: Map<string, { fecha: string; monto: number; texto: string }>;
+};
+
+export async function cargarParesDeTabla(
+  jobId: string,
+  /** `null` = todos los métodos: lo que necesita el detalle por tipo. */
+  metodo: "exacta" | "difusa" | "ia" | null,
+  tope: number,
+): Promise<{ pares: ParDetalle[]; total: number }> {
+  const supabase = await createClient(); // RLS: solo jobs de su empresa
+
+  const base = () => {
+    const q = supabase.from("matches_conciliacion").select(
+      "comprobante_ids, movimiento_ids, metodo, estado_revision, categoria_diferencia, diferencia_monto, justificacion",
+    ).eq("job_id", jobId);
+    return metodo ? q.eq("metodo", metodo) : q;
+  };
+
+  const conteo = supabase
+    .from("matches_conciliacion")
+    .select("id", { count: "exact", head: true })
+    .eq("job_id", jobId);
+  const { count } = await (metodo ? conteo.eq("metodo", metodo) : conteo);
+
+  const { data: filas } = await base()
+    // Desempate obligatorio: sin columna única el orden entre páginas baila.
+    .order("id", { ascending: true })
+    .limit(tope);
+
+  const pares = (filas ?? []) as {
+    comprobante_ids: string[];
+    movimiento_ids: string[];
+    metodo: string;
+    estado_revision: string;
+    categoria_diferencia: string | null;
+    diferencia_monto: number | string | null;
+    justificacion: string | null;
+  }[];
+  if (pares.length === 0) return { pares: [], total: count ?? 0 };
+
+  const idsComp = [...new Set(pares.flatMap((p) => p.comprobante_ids))];
+  const idsMov = [...new Set(pares.flatMap((p) => p.movimiento_ids))];
+
+  const internos = new Map<string, { fecha: string; monto: number; texto: string }>();
+  for (const lote of enLotes(idsComp)) {
+    const { data } = await supabase
+      .from("comprobantes")
+      .select("id, fecha, monto, tipo, serie_numero, referencia_externa, razon_social_contraparte, descripcion")
+      .in("id", lote);
+    for (const c of data ?? []) {
+      const monto = Math.abs(Number(c.monto ?? 0));
+      internos.set(c.id as string, {
+        fecha: String(c.fecha),
+        monto: c.tipo === "pago" ? -monto : monto,
+        texto:
+          (c.razon_social_contraparte as string | null) ??
+          (c.descripcion as string | null) ??
+          (c.referencia_externa as string | null) ??
+          (c.serie_numero as string | null) ??
+          "",
+      });
+    }
+  }
+  const movimientos = new Map<string, { fecha: string; monto: number; texto: string }>();
+  for (const lote of enLotes(idsMov)) {
+    const { data } = await supabase
+      .from("movimientos_extracto")
+      .select("id, fecha, monto, glosa, referencia_banco")
+      .in("id", lote);
+    for (const m of data ?? []) {
+      movimientos.set(m.id as string, {
+        fecha: String(m.fecha),
+        monto: Number(m.monto ?? 0),
+        texto:
+          (m.glosa as string | null) ?? (m.referencia_banco as string | null) ?? "",
+      });
+    }
+  }
+
+  return {
+    total: count ?? pares.length,
+    pares: pares.map((p) => ({
+      ids_internos: p.comprobante_ids,
+      ids_movimientos: p.movimiento_ids,
+      metodo: p.metodo,
+      estado_revision: p.estado_revision,
+      categoria_diferencia: p.categoria_diferencia,
+      diferencia_monto:
+        p.diferencia_monto == null ? null : Number(p.diferencia_monto),
+      justificacion: p.justificacion,
+      internos,
+      movimientos,
+    })),
+  };
 }
