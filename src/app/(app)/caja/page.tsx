@@ -8,6 +8,8 @@ import {
   type CuentaCaja,
   type Frescura,
 } from "@/lib/posicionCaja";
+import { consolidarVivo, etiquetaVivo, type SaldoVivo } from "@/lib/saldoVivo";
+import { SubirExtracto } from "@/components/caja/SubirExtracto";
 import { formatearPEN, formatearFecha } from "@/lib/parsing/resumen";
 
 /**
@@ -89,8 +91,139 @@ function nombreCuenta(c: CuentaCaja): string {
   return c.numero ? `${c.banco} ${c.numero}` : c.banco;
 }
 
-function Bloque({ b }: { b: BloqueMoneda }) {
+/**
+ * El saldo de hoy según el banco, sin conciliar (fase 2).
+ *
+ * ⚠️⚠️ Va en su propio recuadro, con su propia fecha y su propio tono, y NUNCA
+ * se suma con el saldo probado. En el momento en que las dos cifras se funden
+ * en un total, el producto pierde lo único que lo distingue de cualquier
+ * dashboard: poder decir «esto está probado contra el extracto».
+ *
+ * ⚠️ Tampoco alimenta el «disponible». Restar deuda vencida a un saldo no
+ * conciliado produce el número con el que alguien decide si paga, y esa es
+ * justamente la decisión que no puede apoyarse en algo sin probar.
+ */
+function BloqueVivoVista({
+  b,
+  moneda,
+  cuentas,
+}: {
+  b: ReturnType<typeof consolidarVivo>;
+  moneda: string;
+  cuentas: CuentaCaja[];
+}) {
+  const m = (n: number) => formatearPEN(n, moneda);
+  const nombre = (id: string) => cuentas.find((c) => c.cuentaId === id) ?? null;
+  const conVivo = new Set(b.detalle.map((v) => v.cuentaId));
+  const faltan = cuentas.filter((c) => c.saldoFinal != null && !conVivo.has(c.cuentaId));
+
+  return (
+    <div className="rounded-2xl border border-dashed border-neutral-300 bg-white p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm font-semibold text-neutral-700">
+          ~ Según el banco, sin conciliar
+        </p>
+        {b.fecha && (
+          <p className={`text-sm ${b.vigente ? "text-neutral-600" : "text-amber-800"}`}>
+            {etiquetaVivo({ fecha: b.fecha, dias: b.detalle[0]?.dias ?? 0, vigente: b.vigente })}
+          </p>
+        )}
+      </div>
+
+      {b.saldo != null ? (
+        <div className="mt-3 flex flex-wrap items-end gap-x-8 gap-y-2">
+          <div>
+            <p className="text-xs text-neutral-600">Saldo declarado</p>
+            <p className="text-xl font-bold tabular-nums text-neutral-900">{m(b.saldo)}</p>
+          </div>
+          {b.diferencia != null && (
+            <div>
+              <p className="text-xs text-neutral-600">Diferencia con lo conciliado</p>
+              {/* ⚠️ En DINERO, no en porcentaje: «S/ 14.671,90 sin explicar»
+                  mueve a conciliar; «96 % de acuerdo» invita a no hacerlo. */}
+              <p className="text-xl font-bold tabular-nums text-neutral-900">
+                {m(b.diferencia)}
+              </p>
+            </div>
+          )}
+          <p className="text-sm text-neutral-600">
+            {b.porConciliar.toLocaleString("es-PE")}{" "}
+            {b.porConciliar === 1 ? "movimiento" : "movimientos"} por conciliar
+          </p>
+        </div>
+      ) : (
+        // ⚠️ Un total al que le falta una cuenta saldría MÁS BAJO que el probado
+        // y parecería que el dinero desapareció, sin nada que lo delatara.
+        <p className="mt-2 text-sm text-neutral-600">
+          Solo {b.cubiertas} de {b.cuentas} cuentas tienen extracto subido, así
+          que no se muestra un total: le faltaría una cuenta entera y parecería
+          que hay menos dinero del que hay. Abajo, lo de cada una.
+        </p>
+      )}
+
+      {b.detalle.length > 0 && (
+        <ul className="mt-3 space-y-1 text-sm text-neutral-700">
+          {b.detalle.map((v) => {
+            const c = nombre(v.cuentaId);
+            return (
+              <li key={v.cuentaId} className="flex flex-wrap justify-between gap-2">
+                <span>
+                  {c ? nombreCuenta(c) : "Cuenta"} ·{" "}
+                  <span className="text-neutral-600">
+                    {v.fuente === "banco"
+                      ? "saldo declarado por el banco"
+                      : "calculado sobre tu última conciliación"}
+                  </span>
+                  {v.solapa && (
+                    <span className="text-neutral-600">
+                      {" "}
+                      · el archivo incluye días ya conciliados, que no se vuelven
+                      a contar
+                    </span>
+                  )}
+                </span>
+                <span className="tabular-nums">{m(v.saldo)}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {/* Las que faltan por cubrir llevan su propio botón aquí mismo: sin esto,
+          un bloque a medias no tendría desde dónde completarse. */}
+      {faltan.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-3">
+          {faltan.map((c) => (
+            <SubirExtracto
+              key={c.cuentaId}
+              cuentaId={c.cuentaId}
+              etiqueta={`Subir el de ${nombreCuenta(c)}`}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Explicar la diferencia ES conciliar, y eso ya existe. Insinuar aquí una
+          explicación sería un segundo motor que se separa del primero en
+          silencio. */}
+      <p className="mt-3 text-sm text-neutral-600">
+        Esta cifra no está conciliada: es lo que dice el banco. Para saber a qué
+        corresponde la diferencia,{" "}
+        <Link href="/wizard" className="font-medium text-blue-700 hover:underline">
+          concilia el período
+        </Link>
+        .
+      </p>
+    </div>
+  );
+}
+
+function Bloque({ b, vivos }: { b: BloqueMoneda; vivos: SaldoVivo[] }) {
   const m = (n: number) => formatearPEN(n, b.moneda);
+  // Solo las cuentas que aportan saldo probado tienen que estar cubiertas para
+  // que un total provisional signifique algo.
+  const conSaldo = b.cuentas.filter((c) => c.saldoFinal != null).map((c) => c.cuentaId);
+  const vivo = consolidarVivo(conSaldo, vivos);
 
   return (
     <section
@@ -101,10 +234,13 @@ function Bloque({ b }: { b: BloqueMoneda }) {
         <h2 id={`h-${b.moneda}`} className="font-semibold text-neutral-900">
           {b.moneda === "USD" ? "Dólares" : b.moneda === "PEN" ? "Soles" : b.moneda}
         </h2>
+        {/* La etiqueta «probado» solo tiene sentido desde que existe algo que
+            no lo está. Es la que sostiene la diferencia entre los dos bloques. */}
         <p className="text-sm text-neutral-600">
+          ✓ Probado contra el banco ·{" "}
           {b.corteMasAntiguo
-            ? `Corte al ${formatearFecha(b.corteMasAntiguo)}`
-            : "Sin corte aprobado"}
+            ? `corte al ${formatearFecha(b.corteMasAntiguo)}`
+            : "sin corte aprobado"}
         </p>
       </div>
 
@@ -140,6 +276,36 @@ function Bloque({ b }: { b: BloqueMoneda }) {
         </Link>
         .
       </p>
+
+      {vivo.detalle.length > 0 ? (
+        <BloqueVivoVista b={vivo} moneda={b.moneda} cuentas={b.cuentas} />
+      ) : (
+        // Sin extracto reciente NO se pinta un cero ni un «—»: se ofrece la
+        // acción, que es de dos clics y usa el formato que la cuenta ya
+        // aprendió conciliando.
+        <div className="rounded-2xl border border-dashed border-neutral-300 bg-white p-4">
+          <p className="text-sm text-neutral-700">
+            <strong>¿Cuánto hay hoy?</strong> Sube el extracto de este mes y te
+            decimos el saldo que declara el banco, con su fecha. No se concilia
+            nada: es solo para ver.
+          </p>
+          {/* Una por cuenta: el extracto lo emite cada banco por separado, así
+              que no hay un solo archivo que valga para todas. */}
+          <div className="mt-3 flex flex-wrap gap-3">
+            {b.cuentas.map((c) => (
+              <SubirExtracto
+                key={c.cuentaId}
+                cuentaId={c.cuentaId}
+                etiqueta={
+                  b.cuentas.length === 1
+                    ? "Subir el extracto de este mes"
+                    : `Subir el de ${nombreCuenta(c)}`
+                }
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="overflow-x-auto rounded-2xl border border-neutral-200 bg-white">
         <table className="w-full min-w-[34rem] text-sm">
@@ -203,7 +369,7 @@ function Bloque({ b }: { b: BloqueMoneda }) {
 }
 
 export default async function CajaPage() {
-  const { bloques, cobrosIncompletos } = await getPosicionCaja();
+  const { bloques, cobrosIncompletos, vivos } = await getPosicionCaja();
 
   if (!hayPosicion(bloques)) {
     return (
@@ -266,7 +432,7 @@ export default async function CajaPage() {
           sola: un total que mezcla soles y dólares no responde a ninguna
           pregunta, y esconder el resto tampoco. */}
       {bloques.map((b) => (
-        <Bloque key={b.moneda} b={b} />
+        <Bloque key={b.moneda} b={b} vivos={vivos} />
       ))}
 
       <p className="rounded-2xl border border-neutral-200 bg-white px-5 py-4 text-sm text-neutral-600">

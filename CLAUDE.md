@@ -160,6 +160,9 @@ supabase/
                              archivo → comprobantes → internos, congelada.
     0050_posicion_caja.sql           Saldo, entradas y salidas por cuenta desde
                              las conciliaciones APROBADAS (pantalla `/caja`).
+    0051_extractos_cargados.sql      Ficha de cada carga de extracto; `origen`
+                             separa lo subido para conciliar de lo subido para
+                             ver el saldo de hoy.
 tests/                     Vitest (unit).
 ```
 
@@ -2355,6 +2358,74 @@ mano (sería un dato sin respaldo que contamina la única cifra probada del
 producto) y usa el **extracto**, no las aplicaciones de cobro — que son solo la
 parte que encontró pareja, y darían una caja que ignora los cargos no
 registrados, justo las partidas que el cuadre existe para sacar a la luz.
+
+### El saldo de hoy, sin fingir que está conciliado (fase 2)
+
+La fase 1 dice cuánto había al cierre del último período conciliado. A mitad de
+mes eso es verdad y es viejo, y el desfase es **estructural**: aunque el cliente
+cierre el día 3, del 4 al 31 la cifra vuelve a envejecer. No se arregla
+conciliando más rápido — hay que traer otro dato.
+
+La salida es **subir el extracto del mes en curso y NO conciliarlo**
+(`docs/diseno-saldo-vivo.md`).
+
+> ⚠️⚠️ **Lo provisional nunca se suma con lo probado, y nunca hereda su
+> aspecto.** Dos recuadros, dos fechas, dos tonos. En cuanto se funden en un
+> total, el producto pierde lo único que lo distingue de cualquier dashboard:
+> poder decir «esto está probado contra el extracto».
+
+**De dónde sale el número**, en este orden: (a) el `saldo` de la última fila del
+extracto —**lo declara el banco**, así que no puede tener un error nuestro—; y
+si el archivo no trae esa columna, (b) el último saldo aprobado + los
+movimientos posteriores. **Sin ninguno de los dos se devuelve `null`**: sumar
+movimientos sin saber de qué saldo se parte da un flujo, no un saldo.
+
+- ⚠️ **La guarda de solape no es opcional.** (b) solo suma movimientos con
+  `fecha > periodo_hasta` del último aprobado. Un extracto que empieza el 01/08
+  sobre un aprobado que llega al 31/07 va bien; uno que empieza el 25/07 —lo
+  normal al descargar «los últimos 30 días»— contaría cinco días dos veces y
+  daría un saldo alto y perfectamente plausible.
+- ⚠️⚠️ **`origen` es lo que hace posible el módulo.** `lote_id` es un uuid suelto
+  y **los lotes huérfanos se acumulan**: el Paso 2 del wizard crea el lote antes
+  de que el Paso 3 dispare nada, así que todo intento abandonado deja uno, y no
+  hay ni un `delete` de `movimientos_extracto` en la aplicación. «El último lote
+  sin job» dejaría que un intento a medias mandara sobre la caja. Solo cuenta lo
+  subido **desde `/caja` a propósito** (`extractos_cargados`, `0051`).
+- ⚠️ **`movimientos_extracto.saldo` existía desde la `0022` y nunca se
+  escribía**: la ingesta calculaba el saldo de la última fila en memoria, lo
+  devolvía al wizard y ahí moría si nadie llegaba a iniciar la conciliación. La
+  fase 2 es en buena parte empezar a guardar un dato que ya se leía — y el saldo
+  por día es la materia prima de la proyección.
+- ⚠️ **El provisional NO alimenta el «disponible».** Restar deuda vencida a un
+  saldo sin conciliar produce el número con el que alguien decide si paga, que
+  es justo la decisión que no puede apoyarse en algo sin probar.
+- ⚠️ **Caduca a los 10 días** (`DIAS_VIGENCIA`). Un saldo vivo rancio es peor que
+  no tenerlo: ocupa el sitio de arriba y hereda la confianza de estar ahí sin
+  merecerla. No se esconde —sigue siendo cierto sobre su fecha— pero deja de
+  anunciarse como el saldo de hoy.
+- ⚠️ **No hay total si falta una cuenta.** Un provisional al que le falta una
+  cuenta entera saldría MÁS BAJO que el probado y parecería que el dinero
+  desapareció, sin nada que lo delatara. Se enseña el detalle por cuenta y se
+  dice cuántas faltan.
+- **La diferencia se muestra en DINERO, no en porcentaje**: «S/ 14.671,90 sin
+  explicar» mueve a conciliar; «96 % de acuerdo» invita a no hacerlo. Y se
+  muestra, no se explica — explicarla *es* conciliar, y el botón está al lado.
+- **No hay segunda pantalla de mapeo**: la carga desde `/caja` usa el formato
+  que la cuenta aprendió conciliando. Sin formato guardado no se adivina, se
+  manda al wizard — elegir columnas es la decisión que más se equivoca y su
+  error no se ve (sale un 0 %).
+- ⚠️ Si la `0051` no está aplicada, la RPC falla y `/caja` sigue funcionando sin
+  el bloque. Un añadido no puede tumbar lo que ya servía.
+
+**El riesgo a vigilar, escrito por delante:** que el saldo vivo canibalice la
+conciliación. Si el número de hoy está a la vista sin conciliar nada, ¿para qué
+conciliar? Es el modo de fallo natural de esta función, y las cinco reglas de
+arriba existen para acotarlo.
+
+Lógica pura en `src/lib/saldoVivo.ts` (con tests). **El extracto subido aquí no
+se concilia solo**: conciliar exige elegir período y revisar, y hacerlo por
+detrás produciría conciliaciones que nadie pidió y que además pelearían por el
+`exclude using gist` de la `0012` con las que sí.
 
 ## Aprendizaje IA: sección propia y de núcleo
 

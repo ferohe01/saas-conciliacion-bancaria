@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getEmpresaActual } from "@/lib/auth";
+import { getEmpresaActual, getUsuarioActual } from "@/lib/auth";
 import { enLotes } from "@/lib/supabase/paginado";
 import { LectorCsv, type FilaCsv } from "@/lib/parsing/csv";
 import { normalizarMovimiento } from "@/lib/normalizacion/canonico";
@@ -63,6 +63,13 @@ const Cuerpo = z.object({
     tipo: z.string().optional(),
     saldo: z.string().optional(),
   }),
+  /**
+   * Para qué se sube. `wizard` es conciliar; `caja` es ver el saldo de hoy sin
+   * conciliar (fase 2). Solo lo segundo cuenta como saldo vivo, y por eso la
+   * distinción se guarda en vez de inferirse: «el último lote sin job» dejaría
+   * que un wizard abandonado mandara sobre la caja.
+   */
+  origen: z.enum(["wizard", "caja"]).default("wizard"),
 });
 
 type Fila = {
@@ -73,6 +80,8 @@ type Fila = {
   monto: number;
   referencia_banco: string | null;
   glosa: string | null;
+  /** El saldo corriente que declara el banco en esa fila, si la trae. */
+  saldo: number | null;
   orden: number;
 };
 
@@ -93,6 +102,7 @@ export async function POST(request: Request) {
     mapeo: JSON.parse(String(form?.get("mapeo") ?? "{}")),
     desde: form?.get("desde") ?? undefined,
     hasta: form?.get("hasta") ?? undefined,
+    origen: form?.get("origen") ?? undefined,
   });
   if (!parsed.success) {
     return NextResponse.json(
@@ -100,17 +110,43 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  const { cuenta_id, mapeo, desde, hasta } = parsed.data;
+  const { cuenta_id, desde, hasta, origen } = parsed.data;
 
   // La cuenta debe ser de su empresa. RLS lo garantiza en esta lectura.
   const supabase = await createClient();
   const { data: cuenta } = await supabase
     .from("cuentas_bancarias")
-    .select("id")
+    .select("id, mapeo_columnas")
     .eq("id", cuenta_id)
     .maybeSingle();
   if (!cuenta) {
     return NextResponse.json({ error: "Cuenta no encontrada." }, { status: 404 });
+  }
+
+  /**
+   * Desde la caja no hay Paso 2 donde mapear columnas, así que se usa el
+   * formato que la cuenta ya aprendió conciliando.
+   *
+   * ⚠️ NO se abre aquí una segunda pantalla de mapeo. Elegir columnas es la
+   * decisión que más se equivoca —y el error no se ve: sale un 0 %—, así que
+   * se hace UNA vez, mirando la previsualización del wizard, y aquí se
+   * reutiliza. Si la cuenta no tiene formato guardado, esto no adivina: manda
+   * a conciliar una vez, que es donde se enseña lo que se está interpretando.
+   */
+  const guardado = (cuenta.mapeo_columnas as { extracto?: Record<string, string> } | null)
+    ?.extracto;
+  const mapeo =
+    parsed.data.mapeo.fecha && parsed.data.mapeo.monto
+      ? parsed.data.mapeo
+      : ((guardado ?? {}) as typeof parsed.data.mapeo);
+  if (!mapeo.fecha || !mapeo.monto) {
+    return NextResponse.json(
+      {
+        error:
+          "Esta cuenta todavía no tiene un formato de extracto guardado. Concilia una vez con el asistente: ahí eliges qué columna es la fecha y cuál el importe, y a partir de entonces se recuerda.",
+      },
+      { status: 400 },
+    );
   }
 
   const admin = createAdminClient();
@@ -151,9 +187,15 @@ export async function POST(request: Request) {
       invalidas++;
       return;
     }
+    // ⚠️ El saldo corriente se GUARDA, no solo se acumula en memoria. La
+    // columna existe desde la 0022 y hasta ahora nunca se escribía: el saldo
+    // de la última fila se calculaba aquí, viajaba al wizard y moría si nadie
+    // llegaba a iniciar la conciliación. Es el dato que hace posible el saldo
+    // vivo (fase 2), y el saldo por día que necesitará la proyección.
+    let saldoFila: number | null = null;
     if (mapeo.saldo) {
-      const s = normalizarMonto(cruda[mapeo.saldo]);
-      if (s != null) saldoFinal = s;
+      saldoFila = normalizarMonto(cruda[mapeo.saldo]);
+      if (saldoFila != null) saldoFinal = saldoFila;
     }
     sumaMontos += m.monto;
     if (fechaMin === null || m.fecha < fechaMin) fechaMin = m.fecha;
@@ -167,6 +209,7 @@ export async function POST(request: Request) {
       monto: m.monto,
       referencia_banco: m.referencia_banco ?? null,
       glosa: m.glosa ?? null,
+      saldo: saldoFila,
       orden,
     });
     orden++;
@@ -251,6 +294,29 @@ export async function POST(request: Request) {
   const { error: errAnalisis } = await admin.rpc("analizar_tablas_conciliacion");
   if (errAnalisis) {
     console.error("[extracto] no se pudieron refrescar las estadísticas:", errAnalisis);
+  }
+
+  // La ficha de la carga (0051). Sin ella no hay forma de saber cuál es el
+  // extracto vigente de una cuenta: `lote_id` es un uuid suelto y los lotes de
+  // wizards abandonados se acumulan sin que nadie los borre.
+  //
+  // Si falla no se interrumpe nada: los movimientos están cargados y sirven
+  // para conciliar, que es el camino principal. Lo que se pierde es el saldo
+  // vivo, y decir «no se pudo importar» sobre 450.000 filas ya escritas sería
+  // mentir sobre el estado.
+  const { error: errFicha } = await admin.from("extractos_cargados").insert({
+    lote_id,
+    empresa_id: empresa.empresa_id,
+    cuenta_id,
+    fecha_min: fechaMin,
+    fecha_max: fechaMax,
+    filas: insertados,
+    saldo_declarado: saldoFinal,
+    origen,
+    subido_por: (await getUsuarioActual())?.id ?? null,
+  });
+  if (errFicha) {
+    console.error(`[extracto] no se pudo registrar la carga ${lote_id}:`, errFicha);
   }
 
   return NextResponse.json({

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { traerResumenSaldos } from "@/lib/comprobantesSaldo";
 import { FILTRO_SALDO_VACIO } from "@/lib/filtrosSaldo";
 import { consolidarCaja, type BloqueMoneda, type CuentaCaja } from "@/lib/posicionCaja";
+import { saldoVivo, type ExtractoVigente, type SaldoVivo } from "@/lib/saldoVivo";
 import { estadoCobros } from "@/app/(app)/conciliacion/[jobId]/actions";
 
 /**
@@ -26,17 +27,24 @@ export type PosicionCaja = {
    * «disponible» puede quedarse corto y hay que decirlo.
    */
   cobrosIncompletos: { jobId: string; esperados: number; aplicados: number }[];
+  /**
+   * El saldo que declara el banco hoy, por cuenta, sin conciliar (fase 2).
+   * ⚠️ Va aparte de `bloques` a propósito: lo provisional no se mezcla con lo
+   * probado en ninguna estructura, ni siquiera en memoria.
+   */
+  vivos: SaldoVivo[];
 };
 
 export async function getPosicionCaja(hoy: Date = new Date()): Promise<PosicionCaja> {
   const supabase = await createClient(); // la función acota por auth.uid()
 
-  const [caja, vencidos] = await Promise.all([
+  const [caja, vencidos, vigentes] = await Promise.all([
     supabase.rpc("posicion_caja"),
     // ⚠️ Se reutiliza el mismo cálculo que Por pagar en vez de escribir otro:
     // si cada pantalla lo hiciera por su lado acabarían discrepando y el
     // usuario no sabría cuál creerse.
     traerResumenSaldos(supabase, "pago", FILTRO_SALDO_VACIO, hoy),
+    supabase.rpc("extracto_vigente"),
   ]);
 
   if (caja.error) {
@@ -74,8 +82,40 @@ export async function getPosicionCaja(hoy: Date = new Date()): Promise<PosicionC
     .map((jobId, i) => ({ jobId, ...estados[i]! }))
     .filter((e) => e.esperados > e.aplicados);
 
+  /**
+   * El saldo vivo (fase 2). Si la migración `0051` todavía no está aplicada,
+   * la RPC falla y el resto de la pantalla tiene que seguir funcionando: es un
+   * añadido, no puede tumbar lo que ya servía. Mismo criterio que el reintento
+   * sin `origen_partidas` del panel.
+   */
+  const aprobadoPorCuenta = new Map(cuentas.map((c) => [c.cuentaId, c.saldoFinal]));
+  const vivos = vigentes.error
+    ? []
+    : (((vigentes.data ?? []) as Fila[])
+        .map((f) => {
+          const e: ExtractoVigente = {
+            cuentaId: String(f.cuenta_id),
+            loteId: String(f.lote_id),
+            fechaMin: f.fecha_min == null ? null : String(f.fecha_min),
+            fechaMax: f.fecha_max == null ? null : String(f.fecha_max),
+            filas: num(f.filas),
+            saldoDeclarado: numOnull(f.saldo_declarado),
+            subidoEn: String(f.subido_en ?? ""),
+            corteAprobado: f.corte_aprobado == null ? null : String(f.corte_aprobado),
+            sumaPosterior: num(f.suma_posterior),
+            movsPosteriores: num(f.movs_posteriores),
+          };
+          return saldoVivo(e, aprobadoPorCuenta.get(e.cuentaId) ?? null, hoy);
+        })
+        .filter((v): v is SaldoVivo => v != null));
+
+  if (vigentes.error) {
+    console.error("[caja] no se pudo leer el extracto vigente:", vigentes.error);
+  }
+
   return {
     bloques: consolidarCaja(cuentas, vencidoPorMoneda, hoy),
     cobrosIncompletos,
+    vivos,
   };
 }

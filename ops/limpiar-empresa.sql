@@ -109,6 +109,15 @@ begin
   get diagnostics v_borrados = row_count;
   raise notice '  movimientos de extracto borrados: %', v_borrados;
 
+  -- ⚠️ La FICHA de cada carga de extracto (0051). Igual que las fichas de
+  -- importación de comprobantes, no es dato transaccional y por eso es fácil
+  -- olvidarla — pero si sobrevive, `/caja` de una empresa recién vaciada
+  -- anunciaría un «saldo según el banco» sacado de un lote cuyos movimientos ya
+  -- no existen. Un número plausible sin nada detrás, que es la peor clase.
+  delete from public.extractos_cargados where empresa_id = v_empresa;
+  get diagnostics v_borrados = row_count;
+  raise notice '  fichas de extracto borradas: %', v_borrados;
+
   delete from public.comprobantes where empresa_id = v_empresa;
   get diagnostics v_borrados = row_count;
   raise notice '  comprobantes borrados: %', v_borrados;
@@ -153,6 +162,7 @@ select
   (select count(*) from public.movimientos_extracto m  where m.empresa_id = e.id) as movimientos,
   (select count(*) from public.jobs_conciliacion    j  where j.empresa_id = e.id) as conciliaciones,
   (select count(*) from public.matches_conciliacion mc where mc.empresa_id = e.id) as pares,
+  (select count(*) from public.extractos_cargados   ec where ec.empresa_id = e.id) as fichas_extracto,
   (select count(*) from public.cuentas_bancarias    cb where cb.empresa_id = e.id) as cuentas,
   e.modo_carga,
   (e.mapeo_comprobantes is not null) as tiene_formato_guardado
