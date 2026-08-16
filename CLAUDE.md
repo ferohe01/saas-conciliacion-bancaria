@@ -2396,6 +2396,25 @@ movimientos sin saber de qué saldo se parte da un flujo, no un saldo.
   devolvía al wizard y ahí moría si nadie llegaba a iniciar la conciliación. La
   fase 2 es en buena parte empezar a guardar un dato que ya se leía — y el saldo
   por día es la materia prima de la proyección.
+- ⚠️⚠️ **Un extracto que NO pasa del último corte aprobado no dice nada de hoy,
+  y por eso no produce saldo vivo.** Sin esa guarda el módulo daba su peor
+  salida: al resubir julio sobre julio ya conciliado no queda ni un movimiento
+  posterior, así que el saldo derivado era el aprobado **tal cual** y la
+  pantalla enseñaba *«Saldo declarado 1.271.478,87 · Diferencia 0,00»* — que se
+  lee como «el banco confirma tu conciliación» cuando la cifra se había copiado
+  de la propia conciliación. Una comprobación **circular disfrazada de
+  corroboración independiente**. Con columna de saldo el número sí sería del
+  banco, pero seguiría siendo la verificación de un corte pasado —otra
+  pregunta—, así que el corte se aplica igual y la pantalla pide el extracto del
+  período siguiente.
+- ⚠️ **El rótulo sigue a la FUENTE.** La primera versión titulaba siempre
+  «Según el banco · Saldo declarado» y debajo, en letra pequeña, «calculado
+  sobre tu última conciliación»: el titular afirmaba una cosa y el detalle otra,
+  y quien lee el titular se queda con que lo dijo el banco. Con cualquier cifra
+  derivada pasa a «Estimado a hoy · Saldo estimado» (`rotulos`).
+- ⚠️ **Un extracto subido que no produce saldo vivo se EXPLICA**
+  (`SinSaldoVivo` + `frasePorLaQueNoHay`), no vuelve a enseñar el botón de
+  subir: repetir el botón invita a repetir exactamente lo que no funcionó.
 - ⚠️ **El provisional NO alimenta el «disponible».** Restar deuda vencida a un
   saldo sin conciliar produce el número con el que alguien decide si paga, que
   es justo la decisión que no puede apoyarse en algo sin probar.

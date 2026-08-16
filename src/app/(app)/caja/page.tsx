@@ -8,7 +8,14 @@ import {
   type CuentaCaja,
   type Frescura,
 } from "@/lib/posicionCaja";
-import { consolidarVivo, etiquetaVivo, type SaldoVivo } from "@/lib/saldoVivo";
+import {
+  consolidarVivo,
+  etiquetaVivo,
+  rotulos,
+  frasePorLaQueNoHay,
+  type SaldoVivo,
+  type SinSaldoVivo,
+} from "@/lib/saldoVivo";
 import { SubirExtracto } from "@/components/caja/SubirExtracto";
 import { formatearPEN, formatearFecha } from "@/lib/parsing/resumen";
 
@@ -116,13 +123,14 @@ function BloqueVivoVista({
   const nombre = (id: string) => cuentas.find((c) => c.cuentaId === id) ?? null;
   const conVivo = new Set(b.detalle.map((v) => v.cuentaId));
   const faltan = cuentas.filter((c) => c.saldoFinal != null && !conVivo.has(c.cuentaId));
+  // ⚠️ El titular sigue a la FUENTE: si algo se calculó, no puede decir «según
+  // el banco» con el detalle diciendo lo contrario en letra pequeña.
+  const rot = rotulos(b.detalle);
 
   return (
     <div className="rounded-2xl border border-dashed border-neutral-300 bg-white p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="text-sm font-semibold text-neutral-700">
-          ~ Según el banco, sin conciliar
-        </p>
+        <p className="text-sm font-semibold text-neutral-700">{rot.titulo}</p>
         {b.fecha && (
           <p className={`text-sm ${b.vigente ? "text-neutral-600" : "text-amber-800"}`}>
             {etiquetaVivo({ fecha: b.fecha, dias: b.detalle[0]?.dias ?? 0, vigente: b.vigente })}
@@ -133,7 +141,7 @@ function BloqueVivoVista({
       {b.saldo != null ? (
         <div className="mt-3 flex flex-wrap items-end gap-x-8 gap-y-2">
           <div>
-            <p className="text-xs text-neutral-600">Saldo declarado</p>
+            <p className="text-xs text-neutral-600">{rot.cifra}</p>
             <p className="text-xl font-bold tabular-nums text-neutral-900">{m(b.saldo)}</p>
           </div>
           {b.diferencia != null && (
@@ -218,12 +226,23 @@ function BloqueVivoVista({
   );
 }
 
-function Bloque({ b, vivos }: { b: BloqueMoneda; vivos: SaldoVivo[] }) {
+function Bloque({
+  b,
+  vivos,
+  sinVivos,
+}: {
+  b: BloqueMoneda;
+  vivos: SaldoVivo[];
+  sinVivos: SinSaldoVivo[];
+}) {
   const m = (n: number) => formatearPEN(n, b.moneda);
   // Solo las cuentas que aportan saldo probado tienen que estar cubiertas para
   // que un total provisional signifique algo.
   const conSaldo = b.cuentas.filter((c) => c.saldoFinal != null).map((c) => c.cuentaId);
   const vivo = consolidarVivo(conSaldo, vivos);
+  const suyosSinVivo = sinVivos.filter((s) =>
+    b.cuentas.some((c) => c.cuentaId === s.cuentaId),
+  );
 
   return (
     <section
@@ -284,11 +303,28 @@ function Bloque({ b, vivos }: { b: BloqueMoneda; vivos: SaldoVivo[] }) {
         // acción, que es de dos clics y usa el formato que la cuenta ya
         // aprendió conciliando.
         <div className="rounded-2xl border border-dashed border-neutral-300 bg-white p-4">
-          <p className="text-sm text-neutral-700">
-            <strong>¿Cuánto hay hoy?</strong> Sube el extracto de este mes y te
-            decimos el saldo que declara el banco, con su fecha. No se concilia
-            nada: es solo para ver.
-          </p>
+          {/* ⚠️ Si YA subió un extracto y aun así no hay saldo vivo, lo que
+              necesita es el motivo — no el mismo botón otra vez, que le haría
+              repetir exactamente lo que no funcionó. */}
+          {suyosSinVivo.length > 0 ? (
+            <div className="space-y-1.5">
+              {suyosSinVivo.map((s) => {
+                const c = b.cuentas.find((x) => x.cuentaId === s.cuentaId);
+                return (
+                  <p key={s.cuentaId} className="text-sm text-neutral-700">
+                    {c && <strong>{nombreCuenta(c)}: </strong>}
+                    {frasePorLaQueNoHay(s)}
+                  </p>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-neutral-700">
+              <strong>¿Cuánto hay hoy?</strong> Sube el extracto de este mes y te
+              decimos el saldo que declara el banco, con su fecha. No se concilia
+              nada: es solo para ver.
+            </p>
+          )}
           {/* Una por cuenta: el extracto lo emite cada banco por separado, así
               que no hay un solo archivo que valga para todas. */}
           <div className="mt-3 flex flex-wrap gap-3">
@@ -369,7 +405,7 @@ function Bloque({ b, vivos }: { b: BloqueMoneda; vivos: SaldoVivo[] }) {
 }
 
 export default async function CajaPage() {
-  const { bloques, cobrosIncompletos, vivos } = await getPosicionCaja();
+  const { bloques, cobrosIncompletos, vivos, sinVivos } = await getPosicionCaja();
 
   if (!hayPosicion(bloques)) {
     return (
@@ -432,7 +468,7 @@ export default async function CajaPage() {
           sola: un total que mezcla soles y dólares no responde a ninguna
           pregunta, y esconder el resto tampoco. */}
       {bloques.map((b) => (
-        <Bloque key={b.moneda} b={b} vivos={vivos} />
+        <Bloque key={b.moneda} b={b} vivos={vivos} sinVivos={sinVivos} />
       ))}
 
       <p className="rounded-2xl border border-neutral-200 bg-white px-5 py-4 text-sm text-neutral-600">

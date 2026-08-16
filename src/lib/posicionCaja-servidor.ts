@@ -3,7 +3,13 @@ import { createClient } from "@/lib/supabase/server";
 import { traerResumenSaldos } from "@/lib/comprobantesSaldo";
 import { FILTRO_SALDO_VACIO } from "@/lib/filtrosSaldo";
 import { consolidarCaja, type BloqueMoneda, type CuentaCaja } from "@/lib/posicionCaja";
-import { saldoVivo, type ExtractoVigente, type SaldoVivo } from "@/lib/saldoVivo";
+import {
+  saldoVivo,
+  esSaldoVivo,
+  type ExtractoVigente,
+  type SaldoVivo,
+  type SinSaldoVivo,
+} from "@/lib/saldoVivo";
 import { estadoCobros } from "@/app/(app)/conciliacion/[jobId]/actions";
 
 /**
@@ -33,6 +39,12 @@ export type PosicionCaja = {
    * probado en ninguna estructura, ni siquiera en memoria.
    */
   vivos: SaldoVivo[];
+  /**
+   * Cuentas con extracto subido que NO producen saldo vivo, con el motivo.
+   * Callarlo dejaría al usuario mirando el botón de subir después de haber
+   * subido: lo que hay que decirle es qué le faltó.
+   */
+  sinVivos: SinSaldoVivo[];
 };
 
 export async function getPosicionCaja(hoy: Date = new Date()): Promise<PosicionCaja> {
@@ -89,10 +101,9 @@ export async function getPosicionCaja(hoy: Date = new Date()): Promise<PosicionC
    * sin `origen_partidas` del panel.
    */
   const aprobadoPorCuenta = new Map(cuentas.map((c) => [c.cuentaId, c.saldoFinal]));
-  const vivos = vigentes.error
+  const evaluados = vigentes.error
     ? []
-    : (((vigentes.data ?? []) as Fila[])
-        .map((f) => {
+    : ((vigentes.data ?? []) as Fila[]).map((f) => {
           const e: ExtractoVigente = {
             cuentaId: String(f.cuenta_id),
             loteId: String(f.lote_id),
@@ -106,8 +117,7 @@ export async function getPosicionCaja(hoy: Date = new Date()): Promise<PosicionC
             movsPosteriores: num(f.movs_posteriores),
           };
           return saldoVivo(e, aprobadoPorCuenta.get(e.cuentaId) ?? null, hoy);
-        })
-        .filter((v): v is SaldoVivo => v != null));
+        });
 
   if (vigentes.error) {
     console.error("[caja] no se pudo leer el extracto vigente:", vigentes.error);
@@ -116,6 +126,7 @@ export async function getPosicionCaja(hoy: Date = new Date()): Promise<PosicionC
   return {
     bloques: consolidarCaja(cuentas, vencidoPorMoneda, hoy),
     cobrosIncompletos,
-    vivos,
+    vivos: evaluados.filter(esSaldoVivo),
+    sinVivos: evaluados.filter((v): v is SinSaldoVivo => !esSaldoVivo(v)),
   };
 }

@@ -78,7 +78,22 @@ function diasEntre(iso: string, hoy: Date): number | null {
 }
 
 /**
- * El saldo vivo de una cuenta, o `null` si no se puede afirmar ninguno.
+ * Por qué una cuenta con extracto subido no produce saldo vivo. Se devuelve en
+ * vez de un `null` mudo porque cada motivo lleva a una acción distinta, y la
+ * pantalla tiene que poder decir cuál.
+ */
+export type SinSaldoVivo = {
+  cuentaId: string;
+  motivo: "no_supera_el_corte" | "sin_base" | "sin_fechas";
+  fechaMax: string | null;
+  corteAprobado: string | null;
+};
+
+export const esSaldoVivo = (x: SaldoVivo | SinSaldoVivo): x is SaldoVivo =>
+  !("motivo" in x);
+
+/**
+ * El saldo vivo de una cuenta, o el motivo por el que no lo hay.
  *
  * Dos candidatos, y el orden no es arbitrario:
  *
@@ -88,7 +103,7 @@ function diasEntre(iso: string, hoy: Date): number | null {
  *   (b) el último saldo aprobado + los movimientos posteriores. Derivado, y
  *       correcto solo gracias a la guarda de solape de `extracto_vigente()`.
  *
- * ⚠️ Sin ninguno de los dos se devuelve `null`, NO la suma del extracto: sumar
+ * ⚠️ Sin ninguno de los dos NO se devuelve la suma del extracto: sumar
  * movimientos sin saber de qué saldo se parte da un flujo, no un saldo, y
  * enseñarlo como «lo que tienes» sería exactamente el número plausible y falso
  * que este producto existe para evitar.
@@ -97,10 +112,37 @@ export function saldoVivo(
   e: ExtractoVigente,
   saldoAprobado: number | null,
   hoy: Date,
-): SaldoVivo | null {
-  if (!e.fechaMax) return null;
+): SaldoVivo | SinSaldoVivo {
+  const no = (motivo: SinSaldoVivo["motivo"]): SinSaldoVivo => ({
+    cuentaId: e.cuentaId,
+    motivo,
+    fechaMax: e.fechaMax,
+    corteAprobado: e.corteAprobado,
+  });
+
+  if (!e.fechaMax) return no("sin_fechas");
   const dias = diasEntre(e.fechaMax, hoy);
-  if (dias == null) return null;
+  if (dias == null) return no("sin_fechas");
+
+  /**
+   * ⚠️⚠️ UN EXTRACTO QUE NO PASA DEL ÚLTIMO CORTE APROBADO NO DICE NADA DE HOY.
+   *
+   * Y no es una sutileza: sin esta guarda el módulo produce su peor salida
+   * posible. Al resubir el extracto de julio sobre julio ya conciliado no queda
+   * ni un movimiento posterior, así que (b) devuelve el saldo aprobado **tal
+   * cual** y la pantalla enseña «Saldo declarado 1.271.478,87 · Diferencia
+   * 0,00» — que se lee como *«el banco confirma tu conciliación»* cuando la
+   * cifra se copió de la propia conciliación. Una comprobación circular
+   * disfrazada de corroboración independiente: exactamente el número plausible
+   * y falso contra el que existe todo lo demás de este archivo.
+   *
+   * Con columna de saldo el número sí sería del banco, pero seguiría sin ser el
+   * de hoy —es una verificación de un corte pasado, otra pregunta— así que el
+   * corte se aplica igual y la pantalla pide el extracto del período siguiente.
+   */
+  if (e.corteAprobado != null && e.fechaMax <= e.corteAprobado) {
+    return no("no_supera_el_corte");
+  }
 
   let saldo: number;
   let fuente: FuenteSaldo;
@@ -111,7 +153,7 @@ export function saldoVivo(
     saldo = r2(saldoAprobado + e.sumaPosterior);
     fuente = "calculado";
   } else {
-    return null;
+    return no("sin_base");
   }
 
   return {
@@ -179,6 +221,37 @@ export function consolidarVivo(
     vigente: suyos.length > 0 && suyos.every((v) => v.vigente),
   detalle: suyos,
   };
+}
+
+/**
+ * Cómo se titula el bloque y su cifra.
+ *
+ * ⚠️ **El rótulo tiene que seguir a la FUENTE.** La primera versión decía
+ * siempre «Según el banco · Saldo declarado» y debajo, en letra pequeña,
+ * «calculado sobre tu última conciliación»: el titular afirmaba una cosa y el
+ * detalle otra. Quien lee el titular se queda con que el banco lo dijo — y no
+ * lo dijo.
+ */
+export function rotulos(detalle: readonly SaldoVivo[]): {
+  titulo: string;
+  cifra: string;
+} {
+  const todosDelBanco = detalle.length > 0 && detalle.every((v) => v.fuente === "banco");
+  return todosDelBanco
+    ? { titulo: "~ Según el banco, sin conciliar", cifra: "Saldo declarado por el banco" }
+    : { titulo: "~ Estimado a hoy, sin conciliar", cifra: "Saldo estimado" };
+}
+
+/** Qué se dice cuando hay extracto subido pero no produce saldo vivo. */
+export function frasePorLaQueNoHay(s: SinSaldoVivo): string {
+  switch (s.motivo) {
+    case "no_supera_el_corte":
+      return `El extracto que subiste llega al ${formatearFecha(s.fechaMax ?? "")}, que es justo hasta donde alcanza tu última conciliación aprobada. No añade nada sobre hoy: sube el del período siguiente.`;
+    case "sin_base":
+      return "Este extracto no trae columna de saldo y la cuenta no tiene ninguna conciliación aprobada de la que partir, así que no se puede afirmar un saldo. Concilia un período primero.";
+    case "sin_fechas":
+      return "No se pudieron leer las fechas del extracto subido.";
+  }
 }
 
 /** Cómo se rotula la fecha de un saldo vivo. Nunca «hoy» a secas. */
