@@ -162,6 +162,14 @@ describe("rotulos", () => {
     expect(rotulos([v("banco"), v("calculado")]).titulo).toContain("Estimado");
     expect(rotulos([v("calculado")]).cifra).toBe("Saldo estimado");
   });
+
+  it("⚠️ y la NOTA de abajo tampoco: decía «es lo que dice el banco» siempre", () => {
+    // Quedaba dos líneas debajo de «calculado sobre tu última conciliación»:
+    // una frase atribuyendo al banco un número que el banco no dio, justo al
+    // lado del detalle que decía lo contrario.
+    expect(rotulos([v("calculado")]).nota).toContain("el banco no la declara");
+    expect(rotulos([v("banco")]).nota).toContain("declara tu extracto");
+  });
 });
 
 describe("saldoVivo · la guarda de solape", () => {

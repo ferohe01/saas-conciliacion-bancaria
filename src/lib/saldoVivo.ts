@@ -235,11 +235,27 @@ export function consolidarVivo(
 export function rotulos(detalle: readonly SaldoVivo[]): {
   titulo: string;
   cifra: string;
+  /** La frase de abajo. También tiene que seguir a la fuente — ver ⚠️ abajo. */
+  nota: string;
 } {
   const todosDelBanco = detalle.length > 0 && detalle.every((v) => v.fuente === "banco");
   return todosDelBanco
-    ? { titulo: "~ Según el banco, sin conciliar", cifra: "Saldo declarado por el banco" }
-    : { titulo: "~ Estimado a hoy, sin conciliar", cifra: "Saldo estimado" };
+    ? {
+        titulo: "~ Según el banco, sin conciliar",
+        cifra: "Saldo declarado por el banco",
+        nota: "Esta cifra no está conciliada: es el saldo que declara tu extracto.",
+      }
+    : {
+        titulo: "~ Estimado a hoy, sin conciliar",
+        cifra: "Saldo estimado",
+        // ⚠️ La primera versión decía «es lo que dice el banco» SIEMPRE, dos
+        // líneas debajo de «calculado sobre tu última conciliación». Es el mismo
+        // fallo que el titular tenía y se corrigió: una frase que atribuye al
+        // banco un número que el banco no dio, contradiciendo al detalle que
+        // tiene al lado.
+        nota:
+          "Esta cifra no está conciliada y el banco no la declara: se estima sumando los movimientos del extracto sobre tu última conciliación aprobada.",
+      };
 }
 
 /** Qué se dice cuando hay extracto subido pero no produce saldo vivo. */

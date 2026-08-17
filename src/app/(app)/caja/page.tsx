@@ -122,7 +122,6 @@ function BloqueVivoVista({
   const m = (n: number) => formatearPEN(n, moneda);
   const nombre = (id: string) => cuentas.find((c) => c.cuentaId === id) ?? null;
   const conVivo = new Set(b.detalle.map((v) => v.cuentaId));
-  const faltan = cuentas.filter((c) => c.saldoFinal != null && !conVivo.has(c.cuentaId));
   // ⚠️ El titular sigue a la FUENTE: si algo se calculó, no puede decir «según
   // el banco» con el detalle diciendo lo contrario en letra pequeña.
   const rot = rotulos(b.detalle);
@@ -197,26 +196,34 @@ function BloqueVivoVista({
         </ul>
       )}
 
-      {/* Las que faltan por cubrir llevan su propio botón aquí mismo: sin esto,
-          un bloque a medias no tendría desde dónde completarse. */}
-      {faltan.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-3">
-          {faltan.map((c) => (
-            <SubirExtracto
-              key={c.cuentaId}
-              cuentaId={c.cuentaId}
-              etiqueta={`Subir el de ${nombreCuenta(c)}`}
-            />
-          ))}
-        </div>
-      )}
+      {/* ⚠️ EL BOTÓN DE SUBIR NO DESAPARECE CUANDO YA HAY SALDO VIVO.
+          La primera versión solo lo ofrecía a las cuentas que aún no tenían
+          ninguno, así que en cuanto aparecía un saldo vivo no había forma de
+          reemplazarlo por uno más nuevo — y eso convertía la caducidad en un
+          callejón sin salida: el bloque avisa de que la cifra ya no es de hoy y
+          no había desde dónde arreglarlo. Un extracto vive días; el control
+          tiene que estar siempre. */}
+      <div className="mt-3 flex flex-wrap items-start gap-3">
+        {cuentas.map((c) => (
+          <SubirExtracto
+            key={c.cuentaId}
+            cuentaId={c.cuentaId}
+            etiqueta={
+              conVivo.has(c.cuentaId)
+                ? cuentas.length === 1
+                  ? "Subir un extracto más nuevo"
+                  : `Actualizar el de ${nombreCuenta(c)}`
+                : `Subir el de ${nombreCuenta(c)}`
+            }
+          />
+        ))}
+      </div>
 
       {/* Explicar la diferencia ES conciliar, y eso ya existe. Insinuar aquí una
           explicación sería un segundo motor que se separa del primero en
           silencio. */}
       <p className="mt-3 text-sm text-neutral-600">
-        Esta cifra no está conciliada: es lo que dice el banco. Para saber a qué
-        corresponde la diferencia,{" "}
+        {rot.nota} Para saber a qué corresponde la diferencia,{" "}
         <Link href="/wizard" className="font-medium text-blue-700 hover:underline">
           concilia el período
         </Link>

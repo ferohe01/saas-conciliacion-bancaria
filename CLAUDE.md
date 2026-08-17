@@ -2416,11 +2416,20 @@ movimientos sin saber de qué saldo se parte da un flujo, no un saldo.
   banco, pero seguiría siendo la verificación de un corte pasado —otra
   pregunta—, así que el corte se aplica igual y la pantalla pide el extracto del
   período siguiente.
-- ⚠️ **El rótulo sigue a la FUENTE.** La primera versión titulaba siempre
-  «Según el banco · Saldo declarado» y debajo, en letra pequeña, «calculado
-  sobre tu última conciliación»: el titular afirmaba una cosa y el detalle otra,
-  y quien lee el titular se queda con que lo dijo el banco. Con cualquier cifra
-  derivada pasa a «Estimado a hoy · Saldo estimado» (`rotulos`).
+- ⚠️ **El rótulo sigue a la FUENTE — el titular, la cifra Y la nota de abajo.**
+  La primera versión titulaba siempre «Según el banco · Saldo declarado» y
+  debajo, en letra pequeña, «calculado sobre tu última conciliación»: el titular
+  afirmaba una cosa y el detalle otra, y quien lee el titular se queda con que
+  lo dijo el banco. Corregido el titular quedaba **la misma contradicción en el
+  pie** («esta cifra no está conciliada: es lo que dice el banco», dos líneas
+  bajo «calculado»), así que las tres frases salen de `rotulos()` y no hay dónde
+  se puedan separar.
+- ⚠️ **El botón de subir extracto NO desaparece cuando ya hay saldo vivo.** Solo
+  se ofrecía a las cuentas que aún no tenían ninguno, así que en cuanto aparecía
+  un saldo vivo no había forma de reemplazarlo por uno más nuevo — y eso
+  convertía la caducidad en un **callejón sin salida**: el bloque avisaba de que
+  la cifra ya no era de hoy y no había desde dónde arreglarlo. Un extracto vive
+  días; el control tiene que estar siempre.
 - ⚠️ **Un extracto subido que no produce saldo vivo se EXPLICA**
   (`SinSaldoVivo` + `frasePorLaQueNoHay`), no vuelve a enseñar el botón de
   subir: repetir el botón invita a repetir exactamente lo que no funcionó.
