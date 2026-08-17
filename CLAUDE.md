@@ -163,6 +163,8 @@ supabase/
     0051_extractos_cargados.sql      Ficha de cada carga de extracto; `origen`
                              separa lo subido para conciliar de lo subido para
                              ver el saldo de hoy.
+    0052_dias_pago_contraparte.sql   Cuántos días tarda de verdad cada
+                             contraparte en pagar, medido contra el extracto.
 tests/                     Vitest (unit).
 ```
 
@@ -2472,6 +2474,60 @@ Lógica pura en `src/lib/saldoVivo.ts` (con tests). **El extracto subido aquí n
 se concilia solo**: conciliar exige elegir período y revisar, y hacerlo por
 detrás produciría conciliaciones que nadie pidió y que además pelearían por el
 `exclude using gist` de la `0012` con las que sí.
+
+## Cuándo te pagan (`/cuando-pagan`) — fase 3a del flujo proyectado
+
+Primera pieza del tercer módulo (`docs/diseno-flujo-proyectado.md`), y la única
+que **no proyecta nada**: mide lo que ya pasó, así que no puede equivocarse
+sobre el futuro.
+
+Una hoja de cálculo asume que la factura a 30 días se cobra el día 30. Aquí no
+hace falta suponerlo, porque el dato es un **hecho consultable** que llevaba en
+la base desde la `0023` sin que nadie lo mirara:
+
+```
+comprobantes ──► matches_conciliacion ──► movimientos_extracto
+  (vencimiento)     (par conciliado)         (fecha real del abono)
+```
+
+`matches_conciliacion` guarda `comprobante_ids` y `movimiento_ids` como claves
+reales, así que se sabe qué día entró el dinero de cada factura. **Esto es lo
+que hará creíble la curva de la fase 3b**, y de paso cambia el argumento del
+producto: conciliar deja de ser «cuadrar» y pasa a ser «saber cuándo te pagan».
+
+- ⚠️ **Mediana, no media.** Un cliente que una vez pagó a 180 días desplazaría
+  toda su previsión; la mediana describe lo que suele pasar, que es lo que se va
+  a proyectar.
+- ⚠️ **Solo comprobantes LIQUIDADOS** (`saldo ≈ 0`). Uno cobrado a medias no ha
+  terminado de pagarse: apuntar la fecha de su último abono parcial como si
+  fuera la del pago completo **sesga la mediana a la baja**, justo hacia el lado
+  optimista que una proyección de caja no se puede permitir.
+- **Solo conciliaciones `aprobada` y pares en `ESTADOS_CONFIRMADOS`.** Misma
+  regla que el resto del sistema.
+- ⚠️⚠️ **«Paga puntual» y «no lo sabemos» dan los dos 0 días y NO son lo mismo.**
+  Uno es un hecho medido y el otro la ausencia de datos, y llevan a decisiones
+  opuestas: al primero le das crédito, al segundo lo vigilas. Por eso la frase
+  nunca es solo el número, y el valor heredado **no se pinta como dato** (sale
+  «—»): con el mismo aspecto haría creer que se sabe algo que no se sabe.
+- **Cadena de respaldo explícita**: mediana de la contraparte (≥3 documentos) →
+  mediana de la empresa → el vencimiento tal cual. `fuente` dice cuál se aplicó y
+  la pantalla lo enseña; no se salta un escalón en silencio.
+- ⚠️ **El rango min–max no se hereda.** Pegarle el de toda la empresa a un
+  cliente del que no se sabe nada sería atribuirle un comportamiento ajeno.
+- **Clientes y proveedores se calibran por separado**, y el respaldo respeta la
+  moneda: lo que tarda un cliente en pagarte no dice nada de lo que tardas tú en
+  pagar a un proveedor.
+- ⚠️ **Guardia de volumen ANTES del trabajo caro** (100.000 pares), con el mismo
+  criterio que `pares_estimados` en `diagnostico_previo` (`0037`): por encima no
+  se calcula y **se dice**, porque devolver cero filas se leería como «no hay
+  historial» sobre medio millón de pares conciliados. El guardia es un `count`
+  por índice y va como subselect escalar para que el planificador lo resuelva
+  como *One-Time Filter* y se salte el resto del plan.
+- Ventana de 12 meses: cómo pagaba un cliente hace tres años no describe cómo
+  paga hoy, y además acota el trabajo.
+
+Lógica pura en `src/lib/diasPago.ts` (con tests); la lectura, en
+`diasPago-servidor.ts`. **Cero cambios en tablas, cero en el motor.**
 
 ## Aprendizaje IA: sección propia y de núcleo
 

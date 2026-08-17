@@ -61,6 +61,11 @@ const IconoResumen = (p: IconProps) => (
   </svg>
 );
 
+/** Reloj: la pregunta no es cuánto, es cuándo. */
+const IconoCuandoPagan = (p: IconProps) => (
+  <Ico {...p} d={["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z", "M12 7v5l3 2"]} />
+);
+
 /** Billetera: lo que hay, no lo que se mide. */
 const IconoCaja = (p: IconProps) => (
   <Ico
@@ -137,6 +142,10 @@ const ENLACES: Enlace[] = [
   { href: "/comprobantes", label: "Comprobantes", Icono: IconoDocumento },
   { href: "/cobranzas", label: "Por cobrar", Icono: IconoCobranzas, modulo: "cobranzas" },
   { href: "/pagos", label: "Por pagar", Icono: IconoPagar, modulo: "cobranzas" },
+  // Junto a las dos anteriores porque responde la otra mitad de la misma
+  // pregunta: allí, cuánto te deben; aquí, cuándo lo vas a ver. Y es lo que
+  // convierte la conciliación en algo más que cuadrar.
+  { href: "/cuando-pagan", label: "Cuándo te pagan", Icono: IconoCuandoPagan },
   { href: "/reportes", label: "Reportes", Icono: IconoReportes },
   // «¿Cuánta plata tengo?» — la pregunta más frecuente y la única que esta app
   // puede responder con cifras probadas contra el extracto. Va junto al resumen
