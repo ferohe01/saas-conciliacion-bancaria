@@ -8,6 +8,7 @@ import { enLotes } from "@/lib/supabase/paginado";
 import { LectorCsv, type FilaCsv } from "@/lib/parsing/csv";
 import { normalizarMovimiento } from "@/lib/normalizacion/canonico";
 import { normalizarMonto } from "@/lib/normalizacion/monto";
+import { columnaSaldo } from "@/lib/parsing/saldo";
 import type { MapeoColumnas } from "@/lib/parsing/deteccion";
 
 /**
@@ -158,6 +159,8 @@ export async function POST(request: Request) {
   // —solo ve las primeras filas— y adivinarlo mal corrompe el cuadre en
   // silencio, así que lo devuelve quien ve el archivo entero.
   let saldoFinal: number | null = null;
+  // `undefined` = todavía no se ha mirado; `null` = mirado y no hay columna.
+  let colSaldo: string | null | undefined = undefined;
   let sumaMontos = 0;
   let fueraDePeriodo = 0;
   let fechaMin: string | null = null;
@@ -192,9 +195,18 @@ export async function POST(request: Request) {
     // de la última fila se calculaba aquí, viajaba al wizard y moría si nadie
     // llegaba a iniciar la conciliación. Es el dato que hace posible el saldo
     // vivo (fase 2), y el saldo por día que necesitará la proyección.
+    //
+    // ⚠️⚠️ Y se DETECTA aquí, no se espera del mapeo: el saldo no es uno de los
+    // seis campos que el Paso 2 pregunta, así que `mapeo.saldo` no llega nunca
+    // relleno. Fiarse de él dejaba el camino principal del saldo vivo —«lo
+    // declara el banco»— como código inalcanzable, y la caja decía «calculado»
+    // sobre extractos que traían su columna `Saldo` perfectamente.
+    if (colSaldo === undefined) {
+      colSaldo = mapeo.saldo ?? columnaSaldo(Object.keys(cruda));
+    }
     let saldoFila: number | null = null;
-    if (mapeo.saldo) {
-      saldoFila = normalizarMonto(cruda[mapeo.saldo]);
+    if (colSaldo) {
+      saldoFila = normalizarMonto(cruda[colSaldo]);
       if (saldoFila != null) saldoFinal = saldoFila;
     }
     sumaMontos += m.monto;

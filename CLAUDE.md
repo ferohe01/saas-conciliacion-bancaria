@@ -2396,6 +2396,15 @@ movimientos sin saber de qué saldo se parte da un flujo, no un saldo.
   devolvía al wizard y ahí moría si nadie llegaba a iniciar la conciliación. La
   fase 2 es en buena parte empezar a guardar un dato que ya se leía — y el saldo
   por día es la materia prima de la proyección.
+- ⚠️⚠️ **Y el saldo NO viene del mapeo: la ingesta lo detecta.** `CAMPOS` de
+  `deteccion.ts` tiene seis campos y ninguno es el saldo, así que el Paso 2
+  nunca lo pregunta y `mapeo.saldo` **no llega nunca relleno**. La primera
+  versión se fiaba de él (`if (mapeo.saldo)`), así que `saldo` y
+  `saldo_declarado` salían siempre nulos y el camino principal —«lo declara el
+  banco»— era **código inalcanzable**: la caja rotulaba «calculado» sobre
+  extractos del BCP que traen su columna `Saldo` perfectamente. Ahora la ruta
+  llama a `columnaSaldo(headers)`, que es la misma regla que ya usaba el wizard.
+  Hay test de que `saldo` sigue fuera de `CAMPOS`.
 - ⚠️⚠️ **Un extracto que NO pasa del último corte aprobado no dice nada de hoy,
   y por eso no produce saldo vivo.** Sin esa guarda el módulo daba su peor
   salida: al resubir julio sobre julio ya conciliado no queda ni un movimiento

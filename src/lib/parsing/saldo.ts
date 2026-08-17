@@ -22,11 +22,26 @@ function esColumnaSaldo(header: string): boolean {
   );
 }
 
+/**
+ * Qué columna es el saldo corriente, si alguna.
+ *
+ * ⚠️ Se expone aparte porque el saldo **NO es un campo del mapeo**: `CAMPOS` de
+ * `deteccion.ts` tiene seis y ninguno es el saldo, así que el Paso 2 nunca lo
+ * pregunta y `mapeo.saldo` no llega nunca relleno. La ingesta en servidor tiene
+ * que detectarlo por su cuenta o el saldo declarado por el banco se pierde —
+ * que es justo lo que pasaba: el extracto traía su columna `Saldo`, la caja lo
+ * decía todo «calculado», y el camino principal del saldo vivo era código
+ * inalcanzable.
+ */
+export function columnaSaldo(headers: string[]): string | null {
+  return headers.find(esColumnaSaldo) ?? null;
+}
+
 export function detectarSaldoFinal(
   headers: string[],
   filas: Record<string, unknown>[],
 ): number | null {
-  const col = headers.find(esColumnaSaldo);
+  const col = columnaSaldo(headers);
   if (!col || filas.length === 0) return null;
 
   // Último valor no vacío de la columna de saldo.
