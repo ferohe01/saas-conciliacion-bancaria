@@ -2385,6 +2385,15 @@ movimientos sin saber de qué saldo se parte da un flujo, no un saldo.
   sobre un aprobado que llega al 31/07 va bien; uno que empieza el 25/07 —lo
   normal al descargar «los últimos 30 días»— contaría cinco días dos veces y
   daría un saldo alto y perfectamente plausible.
+- ⚠️ **Y su simétrica, el HUECO** (`DIAS_HUECO`, 5). El solape evita contar días
+  dos veces; esto evita **saltárselos**: con el corte al 30/06 y un extracto que
+  arranca el 01/08, julio no está en ninguno de los dos, así que (b) se deja
+  fuera un mes entero y devuelve una cifra baja y creíble. Entonces no se estima
+  nada y se dice qué subir. **No afecta a (a)**: el saldo que declara el banco es
+  absoluto y ni el hueco ni el solape lo tocan — por eso ese camino va primero.
+  No se puede distinguir «faltan días» de «no hubo movimientos», así que el
+  umbral es corto a propósito: negarse cuesta un mensaje, estimar mal cuesta una
+  cifra falsa con la que alguien decide.
 - ⚠️⚠️ **`origen` es lo que hace posible el módulo.** `lote_id` es un uuid suelto
   y **los lotes huérfanos se acumulan**: el Paso 2 del wizard crea el lote antes
   de que el Paso 3 dispare nada, así que todo intento abandonado deja uno, y no

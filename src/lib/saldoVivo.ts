@@ -44,6 +44,23 @@ export type ExtractoVigente = {
  */
 export const DIAS_VIGENCIA = 10;
 
+/**
+ * Cuántos días puede haber entre el último corte aprobado y el comienzo del
+ * extracto antes de dar por hecho que **falta un período entero**.
+ *
+ * ⚠️ Es la guarda SIMÉTRICA a la del solape, y hacía falta igual. El solape
+ * evita contar días dos veces; esto evita **saltárselos**. Si el corte llega al
+ * 30/06 y el extracto empieza el 01/08, julio no está en ninguno de los dos, así
+ * que «saldo aprobado + movimientos del extracto» se deja fuera todo un mes y
+ * devuelve un número bajo y perfectamente creíble.
+ *
+ * No se puede distinguir «faltan días» de «no hubo movimientos», así que hay que
+ * elegir un umbral — y el coste es asimétrico: negarse cuesta un mensaje que
+ * explica qué subir, mientras que estimar mal cuesta una cifra falsa con la que
+ * alguien decide. De ahí un número corto.
+ */
+export const DIAS_HUECO = 5;
+
 export type FuenteSaldo = "banco" | "calculado";
 
 export type SaldoVivo = {
@@ -84,9 +101,11 @@ function diasEntre(iso: string, hoy: Date): number | null {
  */
 export type SinSaldoVivo = {
   cuentaId: string;
-  motivo: "no_supera_el_corte" | "sin_base" | "sin_fechas";
+  motivo: "no_supera_el_corte" | "sin_base" | "hueco" | "sin_fechas";
   fechaMax: string | null;
   corteAprobado: string | null;
+  /** Solo en `hueco`: desde dónde empieza el extracto. */
+  fechaMin?: string | null;
 };
 
 export const esSaldoVivo = (x: SaldoVivo | SinSaldoVivo): x is SaldoVivo =>
@@ -147,9 +166,21 @@ export function saldoVivo(
   let saldo: number;
   let fuente: FuenteSaldo;
   if (e.saldoDeclarado != null) {
+    // Lo declara el banco: es absoluto, así que ni el hueco ni el solape le
+    // afectan. Por eso este camino va primero.
     saldo = e.saldoDeclarado;
     fuente = "banco";
   } else if (saldoAprobado != null) {
+    // ⚠️ Derivar exige que el extracto CONTINÚE donde acabó la conciliación. Con
+    // un hueco por medio la suma se deja fuera todo lo que pasó ahí, y el
+    // resultado es bajo y creíble — ver `DIAS_HUECO`.
+    const hueco =
+      e.corteAprobado != null && e.fechaMin != null
+        ? (diasEntre(e.corteAprobado, new Date(`${e.fechaMin}T00:00:00Z`)) ?? 0) - 1
+        : 0;
+    if (hueco > DIAS_HUECO) {
+      return { ...no("hueco"), fechaMin: e.fechaMin };
+    }
     saldo = r2(saldoAprobado + e.sumaPosterior);
     fuente = "calculado";
   } else {
@@ -265,6 +296,8 @@ export function frasePorLaQueNoHay(s: SinSaldoVivo): string {
       return `El extracto que subiste llega al ${formatearFecha(s.fechaMax ?? "")}, que es justo hasta donde alcanza tu última conciliación aprobada. No añade nada sobre hoy: sube el del período siguiente.`;
     case "sin_base":
       return "Este extracto no trae columna de saldo y la cuenta no tiene ninguna conciliación aprobada de la que partir, así que no se puede afirmar un saldo. Concilia un período primero.";
+    case "hueco":
+      return `Este extracto empieza el ${formatearFecha(s.fechaMin ?? "")} y tu última conciliación aprobada llega al ${formatearFecha(s.corteAprobado ?? "")}: falta lo de por medio. Como el archivo tampoco trae columna de saldo, estimarlo daría una cifra a la que le falta un período entero. Sube un extracto que arranque donde acabó la conciliación, o concilia ese período.`;
     case "sin_fechas":
       return "No se pudieron leer las fechas del extracto subido.";
   }

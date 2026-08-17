@@ -136,6 +136,57 @@ describe("saldoVivo · un extracto que no pasa del corte no dice nada de hoy", (
   });
 });
 
+describe("saldoVivo · el hueco, guarda simétrica al solape", () => {
+  /**
+   * ⚠️ El solape evita contar días dos veces; esto evita SALTÁRSELOS. Con el
+   * corte al 30/06 y un extracto que empieza el 01/08, julio no está en ninguno
+   * de los dos: «aprobado + movimientos» se deja fuera un mes entero y devuelve
+   * un número bajo y perfectamente creíble.
+   */
+  const agostoSuelto = ext({
+    fechaMin: "2026-08-01",
+    fechaMax: "2026-08-15",
+    corteAprobado: "2026-06-30",
+    saldoDeclarado: null,
+    sumaPosterior: 339916.93,
+    movsPosteriores: 109,
+  });
+
+  it("no estima el saldo cuando falta un período por medio", () => {
+    const r = sin_(agostoSuelto, 666171.72);
+    expect(r.motivo).toBe("hueco");
+    // Sin la guarda saldría 1.006.088,65: le faltarían los 605.307,15 de julio.
+    expect(frasePorLaQueNoHay(r)).toContain("falta lo de por medio");
+    expect(frasePorLaQueNoHay(r)).toContain("01/08/2026");
+    expect(frasePorLaQueNoHay(r)).toContain("30/06/2026");
+  });
+
+  it("⚠️ pero SÍ vale si el banco declara el saldo: ese es absoluto", () => {
+    // El número no se deriva de nada nuestro, así que el hueco no lo afecta.
+    const v = vivo_({ ...agostoSuelto, saldoDeclarado: 1611395.8 }, 666171.72);
+    expect(v.fuente).toBe("banco");
+    expect(v.saldo).toBe(1611395.8);
+    // Y la diferencia con lo conciliado incluye julio, que es lo correcto.
+    expect(v.diferencia).toBe(945224.08);
+  });
+
+  it("unos pocos días sin movimientos no son un hueco", () => {
+    // Un puente o una semana floja no puede bloquear la estimación.
+    const v = vivo_({ ...agostoSuelto, fechaMin: "2026-07-04", corteAprobado: "2026-06-30" }, 1000);
+    expect(v.fuente).toBe("calculado");
+  });
+
+  it("continuar al día siguiente del corte es el caso normal", () => {
+    const v = vivo_({ ...agostoSuelto, fechaMin: "2026-07-01", corteAprobado: "2026-06-30" }, 1000);
+    expect(v.saldo).toBe(340916.93);
+  });
+
+  it("sin ninguna conciliación aprobada no hay hueco posible", () => {
+    const v = vivo_({ ...agostoSuelto, corteAprobado: null, saldoDeclarado: 500 }, null);
+    expect(v.saldo).toBe(500);
+  });
+});
+
 describe("rotulos", () => {
   const v = (fuente: "banco" | "calculado"): SaldoVivo => ({
     cuentaId: "a",
