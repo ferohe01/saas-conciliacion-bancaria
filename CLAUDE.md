@@ -2485,6 +2485,12 @@ movimientos sin saber de qué saldo se parte da un flujo, no un saldo.
   que la cuenta aprendió conciliando. Sin formato guardado no se adivina, se
   manda al wizard — elegir columnas es la decisión que más se equivoca y su
   error no se ve (sale un 0 %).
+- ⚠️ **Y por eso el botón solo se ofrece a las cuentas que tienen ese formato.**
+  A una cuenta recién creada, subir un extracto desde aquí **solo puede fallar**:
+  ofrecerle el botón igualmente es el «botón roto» que el producto evita en todas
+  partes (cf. el asistente sin `OPENAI_API_KEY`). Se dice qué falta y se enlaza
+  al wizard, en vez de esconderlo: quitar el botón sin más dejaría al usuario
+  preguntándose por qué una cuenta sí y otra no.
 - ⚠️ Si la `0051` no está aplicada, la RPC falla y `/caja` sigue funcionando sin
   el bloque. Un añadido no puede tumbar lo que ya servía.
 

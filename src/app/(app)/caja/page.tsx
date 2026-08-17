@@ -99,6 +99,53 @@ function nombreCuenta(c: CuentaCaja): string {
 }
 
 /**
+ * Los controles para subir extracto, uno por cuenta.
+ *
+ * ⚠️ Solo se ofrece a las cuentas que ya tienen el formato de su extracto
+ * guardado, porque la carga desde aquí NO pregunta columnas: usa el que la
+ * cuenta aprendió conciliando. A las demás, subir un archivo solo puede fallar,
+ * y un botón que únicamente sabe fallar es el «botón roto» que este producto
+ * evita en todas partes.
+ *
+ * Se dice qué falta en vez de esconderlo: quitar el botón sin más dejaría al
+ * usuario preguntándose por qué una cuenta sí y otra no.
+ */
+function Cargas({
+  cuentas,
+  etiqueta,
+}: {
+  cuentas: CuentaCaja[];
+  etiqueta: (c: CuentaCaja) => string;
+}) {
+  const listas = cuentas.filter((c) => c.tieneFormato);
+  const sinFormato = cuentas.filter((c) => !c.tieneFormato);
+
+  return (
+    <>
+      {listas.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-start gap-3">
+          {listas.map((c) => (
+            <SubirExtracto key={c.cuentaId} cuentaId={c.cuentaId} etiqueta={etiqueta(c)} />
+          ))}
+        </div>
+      )}
+      {sinFormato.length > 0 && (
+        <p className="mt-3 text-sm text-neutral-600">
+          {sinFormato.map(nombreCuenta).join(", ")}{" "}
+          {sinFormato.length === 1 ? "todavía no tiene" : "todavía no tienen"}{" "}
+          guardado el formato de su extracto.{" "}
+          <Link href="/wizard" className="font-medium text-blue-700 hover:underline">
+            Concilia un período
+          </Link>{" "}
+          con {sinFormato.length === 1 ? "esa cuenta" : "esas cuentas"} —ahí se
+          eligen las columnas una vez— y podrás subirlo desde aquí.
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
  * El saldo de hoy según el banco, sin conciliar (fase 2).
  *
  * ⚠️⚠️ Va en su propio recuadro, con su propia fecha y su propio tono, y NUNCA
@@ -203,21 +250,16 @@ function BloqueVivoVista({
           callejón sin salida: el bloque avisa de que la cifra ya no es de hoy y
           no había desde dónde arreglarlo. Un extracto vive días; el control
           tiene que estar siempre. */}
-      <div className="mt-3 flex flex-wrap items-start gap-3">
-        {cuentas.map((c) => (
-          <SubirExtracto
-            key={c.cuentaId}
-            cuentaId={c.cuentaId}
-            etiqueta={
-              conVivo.has(c.cuentaId)
-                ? cuentas.length === 1
-                  ? "Subir un extracto más nuevo"
-                  : `Actualizar el de ${nombreCuenta(c)}`
-                : `Subir el de ${nombreCuenta(c)}`
-            }
-          />
-        ))}
-      </div>
+      <Cargas
+        cuentas={cuentas}
+        etiqueta={(c) =>
+          conVivo.has(c.cuentaId)
+            ? cuentas.length === 1
+              ? "Subir un extracto más nuevo"
+              : `Actualizar el de ${nombreCuenta(c)}`
+            : `Subir el de ${nombreCuenta(c)}`
+        }
+      />
 
       {/* Explicar la diferencia ES conciliar, y eso ya existe. Insinuar aquí una
           explicación sería un segundo motor que se separa del primero en
@@ -334,19 +376,14 @@ function Bloque({
           )}
           {/* Una por cuenta: el extracto lo emite cada banco por separado, así
               que no hay un solo archivo que valga para todas. */}
-          <div className="mt-3 flex flex-wrap gap-3">
-            {b.cuentas.map((c) => (
-              <SubirExtracto
-                key={c.cuentaId}
-                cuentaId={c.cuentaId}
-                etiqueta={
-                  b.cuentas.length === 1
-                    ? "Subir el extracto de este mes"
-                    : `Subir el de ${nombreCuenta(c)}`
-                }
-              />
-            ))}
-          </div>
+          <Cargas
+            cuentas={b.cuentas}
+            etiqueta={(c) =>
+              b.cuentas.length === 1
+                ? "Subir el extracto de este mes"
+                : `Subir el de ${nombreCuenta(c)}`
+            }
+          />
         </div>
       )}
 

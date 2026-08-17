@@ -50,14 +50,26 @@ export type PosicionCaja = {
 export async function getPosicionCaja(hoy: Date = new Date()): Promise<PosicionCaja> {
   const supabase = await createClient(); // la función acota por auth.uid()
 
-  const [caja, vencidos, vigentes] = await Promise.all([
+  const [caja, vencidos, vigentes, cuentasBanco] = await Promise.all([
     supabase.rpc("posicion_caja"),
     // ⚠️ Se reutiliza el mismo cálculo que Por pagar en vez de escribir otro:
     // si cada pantalla lo hiciera por su lado acabarían discrepando y el
     // usuario no sabría cuál creerse.
     traerResumenSaldos(supabase, "pago", FILTRO_SALDO_VACIO, hoy),
     supabase.rpc("extracto_vigente"),
+    // Qué cuentas tienen ya el formato de su extracto. Son dos o tres filas;
+    // no merece una columna nueva en la RPC. RLS acota por empresa.
+    supabase.from("cuentas_bancarias").select("id, mapeo_columnas"),
   ]);
+
+  const conFormato = new Set(
+    ((cuentasBanco.data ?? []) as { id: string; mapeo_columnas: unknown }[])
+      .filter((c) => {
+        const m = c.mapeo_columnas as { extracto?: Record<string, string> } | null;
+        return Boolean(m?.extracto?.fecha && m?.extracto?.monto);
+      })
+      .map((c) => c.id),
+  );
 
   if (caja.error) {
     // Ceros aquí se leerían como «no tienes plata», que es una afirmación que
@@ -80,6 +92,7 @@ export async function getPosicionCaja(hoy: Date = new Date()): Promise<PosicionC
     cortes: num(f.cortes),
     movDesde: f.mov_desde == null ? null : String(f.mov_desde),
     movHasta: f.mov_hasta == null ? null : String(f.mov_hasta),
+    tieneFormato: conFormato.has(String(f.cuenta_id)),
   }));
 
   const vencidoPorMoneda = new Map<string, number>(

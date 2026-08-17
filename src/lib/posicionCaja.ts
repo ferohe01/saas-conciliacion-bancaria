@@ -32,6 +32,15 @@ export type CuentaCaja = {
   cortes: number;
   movDesde: string | null;
   movHasta: string | null;
+  /**
+   * Si la cuenta tiene guardado el formato de su extracto.
+   *
+   * ⚠️ La carga desde `/caja` NO pregunta columnas: usa el formato que la
+   * cuenta aprendió conciliando. Sin él, subir un archivo solo puede fallar, y
+   * ofrecer el botón igualmente es el «botón roto» que este producto evita en
+   * todas partes. Se explica qué falta en vez de esconderlo.
+   */
+  tieneFormato: boolean;
 };
 
 export type EstadoFrescura = "al_dia" | "retraso" | "desfasado" | "sin_datos";

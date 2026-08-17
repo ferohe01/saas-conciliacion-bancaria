@@ -32,6 +32,7 @@ function cuenta(p: Partial<CuentaCaja> = {}): CuentaCaja {
     cortes: 1,
     movDesde: "2026-07-01",
     movHasta: "2026-07-31",
+    tieneFormato: true,
     ...p,
   };
 }
