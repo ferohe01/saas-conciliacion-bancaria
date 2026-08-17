@@ -166,7 +166,10 @@ function resumenParaZona(p: ArchivoProcesado, moneda: string): ArchivoResumen {
   return {
     nombre: p.nombre,
     registros: r.registros,
-    total: formatearPEN(r.sumaTotal, moneda),
+    // ⚠️ El NETO, no la suma de valores absolutos: es lo único comparable con
+    // la tarjeta gemela de comprobantes, que suma `cobranzas − pagos`. Ver el
+    // comentario de `ResumenArchivo.neto`.
+    total: formatearPEN(r.neto, moneda),
     rangoFechas:
       r.fechaMin && r.fechaMax
         ? `${formatearFecha(r.fechaMin)} – ${formatearFecha(r.fechaMax)}`

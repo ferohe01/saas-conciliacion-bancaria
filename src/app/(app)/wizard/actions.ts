@@ -456,6 +456,14 @@ export type ResumenComprobantes = {
    * comprobantes de los que cargó y pensara que se perdieron.
    */
   otrasMonedas: number;
+  /**
+   * Del período… no: FUERA de él. Se cuenta desde la 0053; antes la tarjeta lo
+   * daba por supuesto sin haberlo contado nunca, y lo afirmaba de filas que
+   * estaban dentro del período y salían por otra causa.
+   */
+  fueraPeriodo: number;
+  /** Del período pero anulados. No entraban en ningún contador. */
+  anulados: number;
 };
 
 /**
@@ -479,6 +487,8 @@ export async function resumenComprobantesPeriodo(
     totalCargados: 0,
     yaCobrados: 0,
     otrasMonedas: 0,
+    fueraPeriodo: 0,
+    anulados: 0,
   };
   const supabase = await createClient(); // la función acota por auth.uid()
   const { data, error } = await supabase.rpc("resumen_comprobantes_periodo", {
@@ -503,11 +513,18 @@ export async function resumenComprobantesPeriodo(
     totalCargados: Number(f.total_cargados ?? 0),
     yaCobrados: Number(f.ya_cobrados ?? 0),
     otrasMonedas: Number(f.otras_monedas ?? 0),
+    fueraPeriodo: Number(f.fuera_periodo ?? 0),
+    anulados: Number(f.anulados ?? 0),
   };
 }
 
 type ResumenFila = {
   otras_monedas?: number | string | null;
+  // Opcionales: si el despliegue va por delante de la 0053, la tarjeta enseña
+  // «sin explicar» en vez de inventar una causa. Un detalle nuevo no puede
+  // tumbar lo que ya funcionaba.
+  fuera_periodo?: number | string | null;
+  anulados?: number | string | null;
   registros: number | string;
   suma: number | string;
   total_cargados: number | string;

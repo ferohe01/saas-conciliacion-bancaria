@@ -48,6 +48,28 @@ describe("calcularResumen", () => {
     expect(r.fechaMin).toBe("2026-06-15");
     expect(r.fechaMax).toBe("2026-06-16");
   });
+
+  /**
+   * ⚠️ El Paso 1 enfrenta dos tarjetas gemelas —comprobantes contra extracto— y
+   * la de comprobantes suma `cobranzas − pagos`. Con la suma de valores
+   * absolutos las dos mostraban cosas distintas con el mismo aspecto: en el
+   * juego de junio, «S/ 640.150,95» de libros al lado de «S/ 1.629.605,72» del
+   * banco. La lectura natural es que falta un millón, y es falsa.
+   */
+  it("el NETO compensa cargos y abonos; `sumaTotal` no", () => {
+    const filas = [
+      { F: "01/06/2026", M: "1000.00" },
+      { F: "02/06/2026", M: "-400.00" },
+    ];
+    const r = calcularResumen(filas, { fecha: "F", monto: "M" });
+    expect(r.sumaTotal).toBeCloseTo(1400); // cuánto se movió
+    expect(r.neto).toBeCloseTo(600); // qué dejó en la cuenta
+  });
+
+  it("un mes que sale en negativo se dice en negativo", () => {
+    const filas = [{ F: "01/06/2026", M: "100" }, { F: "02/06/2026", M: "-900" }];
+    expect(calcularResumen(filas, { fecha: "F", monto: "M" }).neto).toBeCloseTo(-800);
+  });
 });
 
 describe("validarCoherencia", () => {

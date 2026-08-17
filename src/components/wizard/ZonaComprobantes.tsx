@@ -8,6 +8,7 @@ import {
   guardarMapeoComprobantes,
 } from "@/app/(app)/wizard/actions";
 import { formatearPEN } from "@/lib/parsing/resumen";
+import { exclusionesDelPeriodo, fraseTotal } from "@/lib/exclusionesPeriodo";
 import { descargarPlantilla } from "@/lib/plantilla";
 import { leerCabecera } from "@/lib/parsing/leerArchivo";
 import {
@@ -426,34 +427,25 @@ export function ZonaComprobantes({
                 {formatearPEN(resumen.suma, moneda)}
               </p>
 
-              {/* Decir cuántos quedan fuera evita la alarma de "se perdieron
-                  mis datos" y avisa de que quizá el mes no es el que el
-                  usuario tenía en mente. */}
-              {resumen.totalCargados > resumen.registros && (
-                <p className="mt-1 text-xs text-emerald-700">
-                  Tienes {resumen.totalCargados.toLocaleString("es-PE")} en
-                  total; el resto es de otros períodos.
-                </p>
-              )}
-
-              {/* Lo ya cobrado se queda fuera a propósito. Callarlo haría
-                  pensar que faltan facturas. */}
-              {resumen.yaCobrados > 0 && (
-                <p className="mt-1 text-xs text-emerald-700">
-                  {resumen.yaCobrados.toLocaleString("es-PE")} ya están cobrados
-                  y no entran: se conciliaron antes.
-                </p>
-              )}
-
-              {/* ⚠️ Los de otra moneda tampoco entran, y hay que decirlo: un
-                  comprobante en dólares no se concilia contra una cuenta en
-                  soles porque no hay conversión. Callarlo haría que el usuario
-                  viera menos de los que cargó y pensara que se perdieron. */}
-              {resumen.otrasMonedas > 0 && (
-                <p className="mt-1 text-xs text-emerald-700">
-                  {resumen.otrasMonedas.toLocaleString("es-PE")} están en otra
-                  moneda y no entran: esta cuenta es en {moneda}.
-                </p>
+              {/* ⚠️ Cada exclusión por su CAUSA REAL, y la cuenta cierra.
+                  Antes había una frase fija —«el resto es de otros períodos»—
+                  que se pintaba siempre que sobrara alguno, sin haberlo
+                  contado: con 236 cargados y 233 dentro, decía eso de tres
+                  facturas en dólares fechadas en pleno junio, y a la vez la
+                  línea de abajo decía que eran de otra moneda. Dos
+                  explicaciones para las mismas tres filas.
+                  Ver `exclusionesDelPeriodo`. */}
+              {fraseTotal(resumen) && (
+                <>
+                  <p className="mt-1 text-xs text-emerald-700">
+                    {fraseTotal(resumen)}
+                  </p>
+                  <ul className="mt-0.5 space-y-0.5 text-xs text-emerald-700">
+                    {exclusionesDelPeriodo(resumen, moneda).map((e) => (
+                      <li key={e.clave}>· {e.texto}</li>
+                    ))}
+                  </ul>
+                </>
               )}
             </div>
           </div>

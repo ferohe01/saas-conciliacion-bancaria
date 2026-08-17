@@ -2088,6 +2088,29 @@ tarjeta acaba de contar (lo que el usuario ve), mientras que "Quitar esta carga"
 en `/comprobantes` opera por `lote_importacion`. Confundirlas haría que cancelar
 en el wizard se llevara filas de otros meses.
 
+⚠️⚠️ **Las dos tarjetas del Paso 1 son gemelas, así que tienen que sumar lo
+mismo.** La de comprobantes suma `cobranzas − pagos`; la del extracto sumaba
+**valores absolutos**. Con el juego real de junio eso ponía «S/ 640.150,95» de
+libros al lado de «S/ 1.629.605,72» del banco, con el mismo aspecto y en la misma
+fila: la lectura natural es *falta un millón*, y es falsa. `ResumenArchivo.neto`
+(con signo) es lo que se enseña — y entonces la diferencia entre las dos tarjetas
+es justo lo que la conciliación tiene que explicar (12.479,23 en ese juego).
+`sumaTotal` se conserva porque «cuánto se movió» es otra pregunta legítima.
+
+⚠️⚠️ **Y las exclusiones se nombran por su causa REAL: la cuenta cierra.** La
+tarjeta llevaba una frase fija —«el resto es de otros períodos»— que se pintaba
+siempre que sobrara alguno, **sin haberlo contado**. Con 236 cargados y 233
+dentro, se la aplicaba a tres facturas en dólares fechadas el 03, el 15 y el 24
+de junio, mientras la línea de debajo decía —bien— que eran de otra moneda: dos
+explicaciones para las mismas tres filas, y la primera inventada. La `0053` añade
+los contadores que faltaban (`fuera_periodo`, `anulados`) y
+`exclusionesDelPeriodo` reparte cada causa; si aun así sobra algo aparece **«sin
+explicar»** en vez de atribuirlo a la primera causa a mano. Es el mismo criterio
+que la cascada de `origenPartidas` (`0043`), y por el mismo motivo: una
+explicación que no cuadra convierte una duda concreta en desconfianza general.
+⚠️ Con la `0053` sin aplicar los dos contadores llegan vacíos y todo cae en «sin
+explicar» — un despliegue por delante de la migración no puede inventar causas.
+
 **Origen de los registros internos: dos opciones, no tres.** "Subir archivo"
 existió como prueba de concepto y **se retiró**. Conciliaba igual y se veía
 idéntico en pantalla, pero los registros no tenían `comprobante_id`, así que
