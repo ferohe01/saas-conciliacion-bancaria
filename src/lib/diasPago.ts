@@ -147,6 +147,29 @@ export function calibrar(filas: readonly ObservacionPago[]): Calibrado[] {
  * otro es la ausencia de datos, y llevan a decisiones opuestas —al primero le
  * das crédito, al segundo lo vigilas—. Por eso la frase nunca es solo el número.
  */
+/**
+ * El rango, dicho en el mismo idioma que la frase principal.
+ *
+ * ⚠️ Antes se pintaban los extremos crudos: «paga 30 días antes de vencer
+ * (entre -30 y 0)». La oración convierte el signo a palabras y el paréntesis lo
+ * deja en bruto, así que la misma frase usa dos convenciones y obliga a
+ * traducir mentalmente un menos. Y el signo es justo lo que aquí no se puede
+ * leer mal.
+ */
+export function rangoTexto(min: number, max: number): string {
+  if (min <= 0 && max <= 0) {
+    return max === 0
+      ? `entre ${Math.abs(min)} días antes y el mismo día`
+      : `entre ${Math.abs(min)} y ${Math.abs(max)} días antes`;
+  }
+  if (min >= 0 && max >= 0) {
+    return min === 0
+      ? `entre el mismo día y ${max} días después`
+      : `entre ${min} y ${max} días después`;
+  }
+  return `entre ${Math.abs(min)} días antes y ${max} después`;
+}
+
 export function frase(c: Calibrado): string {
   const doc = (n: number) => `${n} ${n === 1 ? "documento" : "documentos"}`;
 
@@ -159,7 +182,7 @@ export function frase(c: Calibrado): string {
           : `paga a ${c.dias} días de su vencimiento`;
     const rango =
       c.diasMin != null && c.diasMax != null && c.diasMin !== c.diasMax
-        ? ` (entre ${c.diasMin} y ${c.diasMax})`
+        ? ` (${rangoTexto(c.diasMin, c.diasMax)})`
         : "";
     return `${cuando}${rango} · medido en ${doc(c.observaciones)}`;
   }

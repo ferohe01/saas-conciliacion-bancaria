@@ -4,6 +4,7 @@ import {
   frase,
   puntualidad,
   ordenarPorRetraso,
+  rangoTexto,
   medianaEmpresa,
   noCalculado,
   MIN_OBSERVACIONES,
@@ -139,7 +140,16 @@ describe("frase · «puntual» y «no lo sabemos» no son lo mismo", () => {
   it("dice el rango cuando lo hay, porque una mediana sola esconde la varianza", () => {
     const [c] = calibrar([obs()]);
     expect(frase(c!)).toContain("a 12 días");
-    expect(frase(c!)).toContain("entre 4 y 31");
+    expect(frase(c!)).toContain("entre 4 y 31 días después");
+  });
+
+  it("⚠️ el rango habla el mismo idioma que la frase, sin signos crudos", () => {
+    // Decía «paga 30 días antes de vencer (entre -30 y 0)»: la oración convierte
+    // el signo a palabras y el paréntesis lo dejaba en bruto. Dos convenciones
+    // en la misma frase, y el signo es justo lo que aquí no se puede leer mal.
+    const [c] = calibrar([obs({ diasMediana: -30, diasMin: -30, diasMax: 0 })]);
+    expect(frase(c!)).toContain("entre 30 días antes y el mismo día");
+    expect(frase(c!)).not.toContain("-30");
   });
 
   it("no inventa un rango cuando todos los pagos fueron iguales", () => {
@@ -161,6 +171,22 @@ describe("frase · «puntual» y «no lo sabemos» no son lo mismo", () => {
   it("y si no tiene ni uno, lo dice distinto", () => {
     const [c] = calibrar([obs({ observaciones: 0, diasMediana: null }), global()]);
     expect(frase(c!)).toContain("sin historial propio");
+  });
+});
+
+describe("rangoTexto", () => {
+  it("todo antes de vencer", () => {
+    expect(rangoTexto(-30, -5)).toBe("entre 30 y 5 días antes");
+  });
+  it("todo después", () => {
+    expect(rangoTexto(4, 31)).toBe("entre 4 y 31 días después");
+  });
+  it("de un lado a otro del vencimiento", () => {
+    expect(rangoTexto(-12, 23)).toBe("entre 12 días antes y 23 después");
+  });
+  it("el cero se nombra, no se escribe «0 días antes»", () => {
+    expect(rangoTexto(-30, 0)).toBe("entre 30 días antes y el mismo día");
+    expect(rangoTexto(0, 15)).toBe("entre el mismo día y 15 días después");
   });
 });
 
