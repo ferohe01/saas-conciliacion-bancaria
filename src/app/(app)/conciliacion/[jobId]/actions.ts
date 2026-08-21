@@ -196,9 +196,15 @@ async function guardar(jobId: string, resultado: ResultadoConciliacion) {
  * muy buena para no hacerlo.
  */
 const LOTE_COBROS = 5000;
-/** Techo de seguridad: 450.000 pares son 90 vueltas. Si se pasa de esto, algo
- *  va mal y es mejor parar que girar para siempre. */
-const MAX_VUELTAS_COBROS = 500;
+/**
+ * Suelo del lote adaptativo. Si ni 250 filas caben en 8 s, el problema no es el
+ * tamaño y seguir dividiendo solo alarga la agonía: se devuelve el error.
+ */
+const LOTE_COBROS_MIN = 250;
+/** Techo de seguridad contra un bucle que no avanza. Con el lote en su mínimo,
+ *  medio millón de pares son ~1.800 vueltas; no se llega ahí en una petición,
+ *  pero cada reintento continúa donde se quedó. */
+const MAX_VUELTAS_COBROS = 2000;
 
 async function aplicarCobrosModoTabla(
   jobId: string,
@@ -216,29 +222,56 @@ async function aplicarCobrosModoTabla(
   }
 
   const TIMEOUT_PG = "57014";
-  const analizar = () => admin.rpc("analizar_tablas_conciliacion");
+
+  /**
+   * ⚠️ Refresca SOLO las dos tablas que cambian aquí (migración 0055).
+   *
+   * Antes llamaba a `analizar_tablas_conciliacion()`, que analiza cuatro —entre
+   * ellas `comprobantes` (452.309 filas) y `movimientos_extracto` (450.999)—
+   * **por esta misma vía, que tiene 8 s de presupuesto**. A ese volumen la
+   * recuperación se pasaba del tope ella sola, así que el reintento corría en
+   * las mismas condiciones que el intento que acababa de fallar.
+   *
+   * ⚠️ Y su error se descartaba. Un mecanismo de recuperación que falla en
+   * silencio es peor que no tenerlo: parece que se intentó algo.
+   */
+  const analizar = async () => {
+    const { error } = await admin.rpc("analizar_cobros");
+    if (error) {
+      console.error(`[cobranzas] no se pudieron refrescar estadísticas:`, error);
+    }
+  };
 
   let aplicadas = 0;
+  let lote = LOTE_COBROS;
+
   for (let vuelta = 0; vuelta < MAX_VUELTAS_COBROS; vuelta++) {
     let { data, error } = await admin.rpc("aplicar_cobros_exactos", {
       p_job_id: jobId,
-      p_limite: LOTE_COBROS,
+      p_limite: lote,
     });
 
-    // ⚠️ Un lote cancelado por tiempo NO tumba la aprobación: se refrescan las
-    // estadísticas y se reintenta una vez.
+    // ⚠️⚠️ Un lote cancelado por tiempo NO tumba la aprobación: se refrescan las
+    // estadísticas, **se parte el lote por la mitad** y se reintenta.
     //
-    // `aplicaciones_cobro` pasa de 0 a 447.795 filas durante esta misma
-    // función, y el anti-join que decide qué queda por aplicar la consulta
-    // mientras crece. Con las estadísticas de cuando estaba vacía, el
-    // planificador elige un plan para cero filas y se pasa de los 8 s. Pasó:
-    // la aprobación escribió 10.000 cobros y el tercer lote se canceló;
-    // minutos después el mismo lote tardaba 3,2 s.
-    if (error?.code === TIMEOUT_PG) {
+    // Repetir el MISMO tamaño es lo único que no puede ayudar cuando el tamaño
+    // es el problema, y así se llegó al peor resultado posible: una aprobación
+    // de 448.070 pares con «0 de 448.070 cobros» y un botón de reintentar que
+    // devolvía cero otra vez. Escribir menos es progreso; escribir cero no.
+    // Mismo criterio que la capa de IA: la degradación correcta es hacer menos,
+    // no romper.
+    //
+    // El lote no vuelve a subir dentro de la misma corrida: si 5.000 no cupo,
+    // volver a probarlo cada vuelta es pagar un timeout de 8 s por vuelta.
+    while (error?.code === TIMEOUT_PG && lote > LOTE_COBROS_MIN) {
       await analizar();
+      lote = Math.max(LOTE_COBROS_MIN, Math.floor(lote / 2));
+      console.warn(
+        `[cobranzas] ${jobId}: lote reducido a ${lote} tras un timeout`,
+      );
       ({ data, error } = await admin.rpc("aplicar_cobros_exactos", {
         p_job_id: jobId,
-        p_limite: LOTE_COBROS,
+        p_limite: lote,
       }));
     }
 
