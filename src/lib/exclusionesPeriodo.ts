@@ -25,6 +25,13 @@ export type ConteosPeriodo = {
   /** Puede faltar si la migración 0053 no está aplicada todavía. */
   fueraPeriodo?: number;
   anulados?: number;
+  /**
+   * De los `registros`, cuántos vienen de meses anteriores por seguir
+   * pendientes (0054). NO es una exclusión —está dentro de `registros`— así que
+   * no entra en la cuenta que tiene que cerrar. Puede faltar si el despliegue
+   * va por delante de la migración, y entonces es que no hay arrastre.
+   */
+  arrastrados?: number;
 };
 
 export type Exclusion = {
@@ -110,4 +117,32 @@ export function exclusionesDelPeriodo(
 export function fraseTotal(c: ConteosPeriodo): string | null {
   if (c.totalCargados <= c.registros) return null;
   return `Tienes ${c.totalCargados.toLocaleString("es-PE")} cargados en total:`;
+}
+
+/**
+ * El desglose de los que SÍ entran: cuántos son de este período y cuántos
+ * vienen arrastrados de meses anteriores.
+ *
+ * ⚠️ Existe porque el arrastre (0054) cambia un número que el usuario ya sabía
+ * reconocer. Su archivo de julio tiene 233 facturas y la tarjeta pasa a decir
+ * 281: sin esta línea, lo primero que piensa es que el sistema duplicó algo, y
+ * la reacción natural —volver a cargar, o «empezar de cero»— es la peor
+ * posible. Mismo criterio que las exclusiones: cada partida nombrada por lo que
+ * es.
+ *
+ * Devuelve `null` cuando no se arrastró nada, que es el caso de una empresa que
+ * cobra al contado y el de la primera conciliación de cualquiera. Un desglose
+ * de «233 de este período · 0 arrastrados» es ruido.
+ */
+export function desgloseDeRegistros(c: ConteosPeriodo): string | null {
+  const arrastrados = c.arrastrados ?? 0;
+  if (arrastrados <= 0) return null;
+
+  const propios = Math.max(0, c.registros - arrastrados);
+  return (
+    `${propios.toLocaleString("es-PE")} emitidos en este período · ` +
+    `${arrastrados.toLocaleString("es-PE")} ${
+      arrastrados === 1 ? "pendiente" : "pendientes"
+    } de meses anteriores`
+  );
 }

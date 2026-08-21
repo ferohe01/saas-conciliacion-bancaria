@@ -29,6 +29,12 @@ export const ConfigConciliacion = z.object({
   // Tamaño máximo de agrupación (1:N / N:1). Ej: 3 permite que un depósito
   // agrupe hasta 3 pagos. Más grande = más combinaciones y más riesgo.
   max_combinacion: z.number().int().min(2).max(5).default(3),
+  // Cuántos meses hacia atrás se arrastran los comprobantes que siguen
+  // pendientes. Una factura emitida el 25/06 con crédito a 30 días se cobra el
+  // 28/07: en junio el abono no existe todavía y en julio la factura no entra
+  // por su fecha de emisión, así que el par NO SE CONCILIA NUNCA. El arrastre
+  // es lo que lo hace posible. Cero devuelve el comportamiento anterior.
+  arrastre_meses: z.number().int().min(0).max(120).default(12),
 });
 export type ConfigConciliacion = z.infer<typeof ConfigConciliacion>;
 
@@ -41,4 +47,5 @@ export const CONFIG_CONCILIACION_DEFAULT: ConfigConciliacion = {
   top_k_candidatos: 3,
   ventana_ia_dias: 30,
   max_combinacion: 3,
+  arrastre_meses: 12,
 };

@@ -28,6 +28,7 @@ export async function guardarConfiguracion(
     top_k_candidatos: num(formData.get("top_k_candidatos")),
     ventana_ia_dias: num(formData.get("ventana_ia_dias")),
     max_combinacion: num(formData.get("max_combinacion")),
+    arrastre_meses: num(formData.get("arrastre_meses")),
     umbral_confianza_auto: num(formData.get("umbral_confianza_pct")) / 100,
   };
 

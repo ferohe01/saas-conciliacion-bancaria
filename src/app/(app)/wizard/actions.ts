@@ -18,6 +18,8 @@ import {
 import { FechaISO } from "@/lib/contract/primitives";
 import { maxFilasConciliacion } from "@/lib/limites";
 import { evaluarDiagnostico } from "@/lib/diagnosticoPrevio";
+import { getConfigEmpresa } from "@/lib/config";
+import { restarMeses } from "@/lib/periodo";
 import { asistenteDisponible, preguntarAlModelo } from "@/lib/ia/cliente";
 import {
   promptRevisionPrevia,
@@ -389,12 +391,21 @@ export async function guardarMapeoCuenta(
  * segunda vez desde otra cuenta bancaria del mismo período —algo que el sistema
  * permite a propósito, porque son extractos distintos— y a descontar su importe
  * dos veces. Lo que ya se cobró no vuelve a la mesa.
+ *
+ * ⚠️ ARRASTRA los pendientes de meses anteriores igual que `residuo_internos`
+ * (0054). Hoy este camino no lo recorre nadie —el wizard manda `lote_extracto_id`
+ * y el backend arma el residuo desde las tablas—, pero un filtro que se queda
+ * atrás en una copia dormida es exactamente cómo vuelve un bug: el día que
+ * alguien reactive el modo payload, conciliaría un conjunto distinto del que
+ * cuenta la pantalla y nada lo diría.
  */
 export async function getComprobantesCanonicos(
   desde: string,
   hasta: string,
 ): Promise<RegistroInterno[]> {
   const supabase = await createClient();
+  const { arrastre_meses } = await getConfigEmpresa();
+  const desdeArrastre = restarMeses(desde, arrastre_meses);
   // ⚠️ PAGINADO OBLIGATORIO. Sin esto PostgREST devolvía 1.000 filas y un 200
   // OK: con 20.000 comprobantes en el período, el motor recibía el 5% del mes
   // y nadie se enteraba. Ver `lib/supabase/paginado.ts`.
@@ -409,7 +420,9 @@ export async function getComprobantesCanonicos(
       .select(
         "id, fecha, monto, saldo, tipo, estado, serie_numero, referencia_externa, ruc_contraparte, razon_social_contraparte, descripcion",
       )
-      .gte("fecha", desde)
+      .gte("fecha", desdeArrastre)
+      // ⚠️ El límite superior NO se mueve: un comprobante posterior al período
+      // no puede haberse cobrado antes de existir.
       .lte("fecha", hasta)
       .not("estado", "in", "(cobrado,anulado)")
       .order("fecha", { ascending: true })
@@ -419,7 +432,10 @@ export async function getComprobantesCanonicos(
   );
   return filas.map((c, i) => {
     const tipo = c.tipo === "pago" ? "pago" : "cobranza";
-    const monto = Math.abs(Number(c.monto ?? 0));
+    // Lo que queda por cobrar, no el importe original: un arrastrado con cobro
+    // parcial ofrecido por su importe entero produciría un match que dice que
+    // se cobró todo. Mientras no se haya cobrado nada, saldo === monto.
+    const monto = Math.abs(Number(c.saldo ?? c.monto ?? 0));
     return {
       // Se conserva el id legible para la pantalla de revisión —un UUID en una
       // tabla de dos mil filas no hay quien lo lea— y el vínculo real al
@@ -464,6 +480,13 @@ export type ResumenComprobantes = {
   fueraPeriodo: number;
   /** Del período pero anulados. No entraban en ningún contador. */
   anulados: number;
+  /**
+   * De los `registros`, cuántos son pendientes de meses ANTERIORES que se
+   * arrastran (0054). No es una exclusión: es un subconjunto de `registros`, y
+   * está aquí para poder decirlo. Sin nombrarlo, el usuario ve 281 donde su
+   * archivo tiene 233 y lo primero que piensa es que algo se duplicó.
+   */
+  arrastrados: number;
 };
 
 /**
@@ -489,6 +512,7 @@ export async function resumenComprobantesPeriodo(
     otrasMonedas: 0,
     fueraPeriodo: 0,
     anulados: 0,
+    arrastrados: 0,
   };
   const supabase = await createClient(); // la función acota por auth.uid()
   const { data, error } = await supabase.rpc("resumen_comprobantes_periodo", {
@@ -515,6 +539,7 @@ export async function resumenComprobantesPeriodo(
     otrasMonedas: Number(f.otras_monedas ?? 0),
     fueraPeriodo: Number(f.fuera_periodo ?? 0),
     anulados: Number(f.anulados ?? 0),
+    arrastrados: Number(f.arrastrados ?? 0),
   };
 }
 
@@ -525,6 +550,8 @@ type ResumenFila = {
   // tumbar lo que ya funcionaba.
   fuera_periodo?: number | string | null;
   anulados?: number | string | null;
+  /** Opcional por lo mismo: sin la 0054 no viene, y entonces no hay arrastre. */
+  arrastrados?: number | string | null;
   registros: number | string;
   suma: number | string;
   total_cargados: number | string;

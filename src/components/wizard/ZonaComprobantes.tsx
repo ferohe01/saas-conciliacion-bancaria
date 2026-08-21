@@ -8,7 +8,11 @@ import {
   guardarMapeoComprobantes,
 } from "@/app/(app)/wizard/actions";
 import { formatearPEN } from "@/lib/parsing/resumen";
-import { exclusionesDelPeriodo, fraseTotal } from "@/lib/exclusionesPeriodo";
+import {
+  desgloseDeRegistros,
+  exclusionesDelPeriodo,
+  fraseTotal,
+} from "@/lib/exclusionesPeriodo";
 import { descargarPlantilla } from "@/lib/plantilla";
 import { leerCabecera } from "@/lib/parsing/leerArchivo";
 import {
@@ -426,6 +430,17 @@ export function ZonaComprobantes({
                 {resumen.sumaParcial && "desde "}
                 {formatearPEN(resumen.suma, moneda)}
               </p>
+
+              {/* ⚠️ El arrastre (0054) cambia un número que el usuario ya sabía
+                  reconocer: su archivo de julio trae 233 facturas y aquí pone
+                  281. Sin decir de dónde salen los otros 48, lo primero que
+                  piensa es que el sistema duplicó algo — y la reacción natural
+                  es volver a cargar o «empezar de cero». */}
+              {desgloseDeRegistros(resumen) && (
+                <p className="mt-0.5 text-xs text-emerald-700">
+                  {desgloseDeRegistros(resumen)}
+                </p>
+              )}
 
               {/* ⚠️ Cada exclusión por su CAUSA REAL, y la cuenta cierra.
                   Antes había una frase fija —«el resto es de otros períodos»—

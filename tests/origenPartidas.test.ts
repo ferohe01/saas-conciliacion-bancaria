@@ -31,6 +31,7 @@ const WIN: OrigenPartidas = {
   yaCobrados: 0,
   otraMoneda: 0,
   internos: 452_177,
+  arrastrados: 0,
 };
 const MOTOR = { internos: 452_177, conciliados: 447_795 };
 
@@ -157,6 +158,7 @@ describe("resumenDiferencia", () => {
       yaCobrados: 0,
       otraMoneda: 3,
       internos: 233,
+      arrastrados: 0,
     };
     const r = resumenDiferencia(recargas, { internos: 233, conciliados: 221 })!;
     expect(r.frase).toContain("1,066 se quitaron después de cargarlas");
@@ -171,6 +173,7 @@ describe("resumenDiferencia", () => {
       alcance: "cargas", cargas: 8, archivoFilas: 1_584, archivoRepetidas: 0,
       archivoInvalidas: 0, archivoExistentes: 282, archivoInsertados: 1_302,
       cargados: 236, fueraPeriodo: 0, yaCobrados: 0, otraMoneda: 3, internos: 233,
+      arrastrados: 0,
     };
     expect(resumenDiferencia(recargas, { internos: 233, conciliados: 221 })!.base)
       .toBe("de las 8 cargas de este período");

@@ -33,7 +33,7 @@ export function ConfiguracionForm({ config }: { config: ConfigConciliacion }) {
     ESTADO_INICIAL,
   );
 
-  // Ocho campos numéricos en una lista plana son difíciles de situar. Agrupados
+  // Nueve campos numéricos en una lista plana son difíciles de situar. Agrupados
   // por la etapa del motor a la que afectan, cada ajuste se lee en su contexto.
   const grupos: Grupo[] = [
     {
@@ -121,6 +121,32 @@ export function ConfiguracionForm({ config }: { config: ConfigConciliacion }) {
           step: "1",
           min: "0",
           max: "100",
+        },
+      ],
+    },
+    {
+      titulo: "Cobros de meses anteriores",
+      intro:
+        "Una factura de junio con crédito a 30 días se cobra en julio. Si al " +
+        "conciliar julio solo entraran las facturas de julio, ese par no se " +
+        "conciliaría nunca: en junio el abono todavía no existía. Esto es " +
+        "cuántos meses hacia atrás se siguen ofreciendo tus comprobantes " +
+        "pendientes.",
+      campos: [
+        {
+          name: "arrastre_meses",
+          label: "Meses que se arrastran",
+          descripcion:
+            "Cuánta antigüedad se admite. Con 12 entra todo lo que sigue vivo. " +
+            "Un número corto acota el riesgo de que un abono case con una " +
+            "factura vieja del mismo importe, pero deja fuera deuda antigua " +
+            "real. Cero desactiva el arrastre: solo se concilia lo emitido " +
+            "dentro del período.",
+          sufijo: "meses",
+          defaultValue: config.arrastre_meses,
+          step: "1",
+          min: "0",
+          max: "120",
         },
       ],
     },

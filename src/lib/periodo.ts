@@ -129,3 +129,36 @@ export function periodoDeRango(
     hasta,
   };
 }
+
+/**
+ * `iso` menos N meses, como lo hace Postgres.
+ *
+ * Es la réplica en TypeScript de `arrastre_desde` (migración 0054): desde qué
+ * fecha entran los comprobantes que siguen pendientes de meses anteriores. La
+ * regla vive en SQL —ahí la usan las siete funciones del motor y de las
+ * pantallas— y esta copia existe solo para el camino de payload, que no puede
+ * llamarla.
+ *
+ * ⚠️ Tiene que dar EXACTAMENTE lo mismo que `date - interval 'N months'`, y el
+ * caso que se separa solo es el día que no existe: Postgres topa 31/03 − 1 mes
+ * en 28/02, mientras que `Date.UTC(a, m, 31)` desborda al mes siguiente. Si las
+ * dos se separaran, el conjunto que el motor concilia y el que la pantalla
+ * cuenta dejarían de ser el mismo — y no habría cómo notarlo.
+ *
+ * Con `meses <= 0` devuelve la fecha tal cual: arrastre desactivado, que es el
+ * comportamiento anterior a la 0054.
+ */
+export function restarMeses(iso: string, meses: number): string {
+  if (!Number.isFinite(meses) || meses <= 0) return iso;
+  const [a, m, d] = iso.split("-").map(Number);
+  if (!a || !m || !d) return iso;
+
+  const total = a * 12 + (m - 1) - Math.trunc(meses);
+  const anio = Math.floor(total / 12);
+  const mes = ((total % 12) + 12) % 12;
+  // Día 0 del mes siguiente = último día de este.
+  const ultimo = new Date(Date.UTC(anio, mes + 1, 0)).getUTCDate();
+  const dia = Math.min(d, ultimo);
+
+  return `${String(anio).padStart(4, "0")}-${pad(mes + 1)}-${pad(dia)}`;
+}

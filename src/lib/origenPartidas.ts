@@ -38,6 +38,13 @@ export type OrigenPartidas = {
   yaCobrados: number;
   otraMoneda: number;
   internos: number;
+  /**
+   * De los `internos`, cuántos son pendientes de meses ANTERIORES que se
+   * arrastran (0054). No es una resta de la cascada —está dentro de
+   * `internos`—, pero sin nombrarlo el bloque enseñaría un total mayor que los
+   * comprobantes del período y parecería que no cuadra.
+   */
+  arrastrados: number;
 };
 
 /** Lo que dijo el motor, del `resumen` del job. */
@@ -85,6 +92,7 @@ export function leerOrigen(fila: Record<string, unknown> | null | undefined): Or
     yaCobrados: n(fila.ya_cobrados ?? fila.yaCobrados),
     otraMoneda: n(fila.otra_moneda ?? fila.otraMoneda),
     internos: n(fila.internos),
+    arrastrados: n(fila.arrastrados),
   };
 }
 
@@ -247,8 +255,14 @@ export function cascadaPartidas(
           etiqueta: "De fechas fuera del período",
           cantidad: origen.fueraPeriodo,
           explicacion:
-            "Están cargados y siguen ahí, pero su fecha cae fuera del rango que " +
-            "elegiste. Entran en cuanto concilies el período al que pertenecen.",
+            origen.arrastrados > 0
+              ? "Están cargados y siguen ahí, pero su fecha cae fuera del rango " +
+                "que elegiste y también fuera de los meses anteriores que se " +
+                "arrastran. Entran en cuanto concilies el período al que " +
+                "pertenecen."
+              : "Están cargados y siguen ahí, pero su fecha cae fuera del rango " +
+                "que elegiste. Entran en cuanto concilies el período al que " +
+                "pertenecen.",
         },
         {
           clave: "cobrados",
@@ -277,7 +291,17 @@ export function cascadaPartidas(
       etiqueta: "Registros internos a conciliar",
       cantidad: origen.internos,
       tipo: "total",
-      explicacion: "Lo que el motor recibió de tu lado.",
+      // ⚠️ El arrastre se nombra aquí y no como una resta: no se va nada por el
+      // camino, al contrario — entran comprobantes de meses anteriores que
+      // siguen pendientes, porque su cobro pudo llegar en este período. Sin
+      // decirlo, este total puede superar a los comprobantes del período y la
+      // cascada parecería no cuadrar.
+      explicacion:
+        origen.arrastrados > 0
+          ? `Lo que el motor recibió de tu lado. Incluye ${fmt(origen.arrastrados)} ` +
+            "de meses anteriores que seguían pendientes: una factura de junio se " +
+            "cobra en julio, y si no entrara aquí su par no se conciliaría nunca."
+          : "Lo que el motor recibió de tu lado.",
     });
     bloques.push({
       clave: "seleccion",
