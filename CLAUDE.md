@@ -165,6 +165,10 @@ supabase/
                              ver el saldo de hoy.
     0052_dias_pago_contraparte.sql   Cuántos días tarda de verdad cada
                              contraparte en pagar, medido contra el extracto.
+    0054_arrastre_pendientes.sql     Los comprobantes que siguen pendientes de
+                             meses anteriores entran a la conciliación.
+    0055_analizar_cobros.sql         Refrescar solo lo que cambia durante el
+                             reparto: el remedio no puede costar más que el mal.
 tests/                     Vitest (unit).
 ```
 
@@ -511,6 +515,114 @@ humano en cada match exacto vaciaría de sentido el producto. Una sugerencia
 ⚠️ Esta lista se lee del enum `EstadoRevision` y de los nodos de n8n, nunca se
 deduce de los nombres: la primera versión omitió `auto` y dejó 29 de 33 pares
 conciliados sin descontar saldo. `manual` es un **método**, no un estado.
+
+## Un cobro que llega el mes siguiente también se concilia (arrastre, 0054)
+
+Los comprobantes entraban a una conciliación por **fecha de emisión** dentro del
+período. Con crédito a 30 días —lo normal— eso deja pares que **no se pueden
+conciliar en NINGÚN período**:
+
+```
+Factura emitida el 25/06, cobrada el 28/07.
+  · junio  el abono todavía no existe   → la factura queda suelta ✔ (depósito
+    en tránsito al 30/06: contabilidad correcta)
+  · julio  su fecha de emisión es de junio → NO entra al conjunto, y el abono
+    del 28/07 no tiene con qué casar ✘
+```
+
+Y no se queda quieto: el comprobante conserva `saldo > 0` para siempre, el
+movimiento queda «sin conciliar» para siempre, el cuadre arrastra la diferencia
+y **crece cada mes**. Se descubrió por `/cuando-pagan`, donde los 271 documentos
+medidos daban todos exactamente −30 días — el juego de pruebas cobraba cada
+factura el mismo día que se emitía, así que el filtro nunca estorbaba.
+
+⚠️ **El rango libre no es la salida.** `jobs_una_aprobada_por_rango` (`0012`)
+impide dos aprobadas solapadas, así que conciliar 01/06–31/07 con junio ya
+aprobado degrada junio a `reemplazada` y **borra sus cobros**.
+
+El conjunto pasa a ser «los que siguen pendientes y no son más viejos que N
+meses», con `arrastre_meses` en el `config_conciliacion` que ya existía (por
+defecto **12**; **cero devuelve exactamente el comportamiento anterior**, y es la
+salida de emergencia sin desplegar).
+
+- ⚠️⚠️ **El límite SUPERIOR no se mueve.** Solo baja el inferior: un comprobante
+  posterior al período no puede haberse cobrado antes de existir.
+- ⚠️ **El filtro estaba en SIETE sitios** y los siete tienen que decir lo mismo,
+  o la pantalla deja de contar lo que el motor concilia. Una sola definición de
+  la ventana (`arrastre_desde`) y un test que recorre las migraciones y falla si
+  la última definición de cualquiera de los siete no la llama.
+- **Se empareja por SALDO, no por importe.** Lo que el banco paga de una factura
+  a medio cobrar es lo que queda. Con `saldo = monto` la expresión es idéntica,
+  así que **solo puede añadir pares, nunca quitar uno que hoy casa** (mismo
+  argumento que la `0042`). Sin esto, un arrastrado con cobro parcial se
+  ofrecería por su importe entero y produciría un match que dice que se cobró
+  todo: el dinero estaba protegido por el tope de `aplicar_cobros_exactos`, el
+  **match** no.
+- ⚠️ **El tope acota dos cosas que crecen con la ventana**: el volumen (4.382 de
+  residuo al mes son 52.000 al año) y los falsos positivos —`referencia_externa`
+  **se repite a propósito**, así que un abono podría casar con un comprobante
+  viejo de igual importe y misma referencia—.
+- **El arrastre se ve y se cuenta.** El Paso 1 dice «233 emitidos en este período
+  · 48 pendientes de meses anteriores»: sin esa línea el usuario ve 281 donde su
+  archivo tiene 233 y lo primero que piensa es que el sistema duplicó algo.
+  `arrastrados` es un SUBCONJUNTO de `registros`, no una exclusión, así que la
+  cuenta de la `0053` sigue cerrando igual.
+- ⚠️ `origen_partidas` amplía también **las cargas que mira**. Sin eso contaría
+  los comprobantes arrastrados como internos pero no la carga que los trajo, y
+  la cascada cerraría con un «sin explicar» del tamaño del arrastre.
+- El % de automatización **baja** en las corridas nuevas: el denominador crece.
+  Es más honesto y hay que decirlo antes de que alguien lo note.
+- Juego de pruebas en `ops/generar-pruebas-arrastre.mjs`: julio pasa de **66
+  movimientos sueltos a 4**. Análisis completo en
+  `docs/analisis-periodo-comprobantes.md`.
+
+## Una recuperación que se pasa del mismo tope no recupera nada (0055)
+
+Aprobar 448.070 pares devolvió **«0 de 448.070 cobros»**, y el botón
+«Reintentar» devolvía cero otra vez. En el log, `57014` — tiempo agotado. El
+código ya preveía el timeout; lo que no preveía es que **su remedio costara más
+que el problema**.
+
+- `analizar_tablas_conciliacion()` analiza **cuatro** tablas —`comprobantes`
+  (452.309), `movimientos_extracto` (450.999), `matches_conciliacion` y
+  `aplicaciones_cobro`— y se llamaba **por la misma vía de 8 s**. A este volumen
+  la propia recuperación no cabe. `analizar_cobros()` (`0055`) refresca solo las
+  dos que cambian dentro de ese bucle.
+- ⚠️ **Y su error se descartaba** (`await analizar()` a secas). Un mecanismo de
+  recuperación que falla en silencio es peor que no tenerlo: parece que se
+  intentó algo. Mismo patrón que la `0021` documenta tres veces.
+- ⚠️⚠️ **El reintento repetía el MISMO tamaño de lote**, que es lo único que no
+  puede ayudar cuando el tamaño es el problema. Ahora, ante un timeout, el lote
+  **se parte por la mitad** hasta un suelo de 250, y no vuelve a subir dentro de
+  la misma corrida (reintentar 5.000 cada vuelta es pagar 8 s por vuelta). Así
+  «0 de 448.070» pasa a ser «N de 448.070» y cada pulsación avanza. **La
+  degradación correcta es hacer menos, no romper** — el mismo criterio que ya
+  regía para la capa de IA.
+
+**Regla general: un camino de recuperación que corre bajo la misma restricción
+que acaba de fallar no es un camino de recuperación.**
+
+### Operaciones masivas: el trigger de saldo se apaga, no se sufre
+
+`ops/borrar-conciliaciones.sql` (quitar las conciliaciones conservando datos) y
+`ops/aplicar-cobros.sql` (terminar un reparto a medias) comparten técnica:
+`trg_saldo_comprobante` recalcula el saldo **una vez por fila**, así que medio
+millón de filas son medio millón de UPDATE con dos subconsultas. Se apaga el
+trigger, se hace la escritura de una sentencia, y **el saldo se rehace después
+en UNA pasada con la misma fórmula**. Idéntico resultado, tres órdenes de
+magnitud menos de trabajo.
+
+- ⚠️⚠️ Entre las dos mitades el saldo está mal a propósito. Los scripts lo dicen
+  a gritos: dejarlo a medias hace que «Por cobrar» mienta, o —peor— que
+  `pares_exactos` deje fuera comprobantes marcados `cobrado` sin un cobro
+  detrás.
+- ⚠️ **Studio no sirve para esto.** No tiene el tope de 8 s de PostgREST, pero sí
+  un gateway HTTP que corta las peticiones largas — y al cortar devuelve un
+  error de validación **suyo** (`code` y `formattedError` en `undefined`) que
+  **no dice si el trabajo se hizo**. Por eso todos estos scripts empiezan con un
+  bloque de diagnóstico que vuelve al instante. Lo correcto es psql (la terminal
+  web de Dokploy vale); si no hay más remedio, los scripts traen una variante «a
+  bocados» que devuelve una fila por pulsación.
 
 ## Cargar la plantilla dos veces
 
@@ -2244,7 +2356,9 @@ razonable. El motor aguantaba lo que la pantalla no dejaba pedir.
   `tolerancia_ia_monto` (banda de monto para candidatos IA), `ventana_ia_dias`
   (ventana de fecha amplia para IA/agrupación), `top_k_candidatos` (cuántos
   candidatos ve la IA por registro), `max_combinacion` (tamaño máx. de un grupo
-  1:N), `umbral_confianza_auto`. **Requiere** la columna
+  1:N), `umbral_confianza_auto`, `arrastre_meses` (cuántos meses hacia atrás
+  entran los comprobantes que siguen pendientes; 0 lo desactiva — ver el
+  arrastre, `0054`). **Requiere** la columna
   `empresas.config_conciliacion` (migración `0004`).
 
 - **Reportes** (`/reportes`): panel para clientes con KPIs (conciliaciones,
