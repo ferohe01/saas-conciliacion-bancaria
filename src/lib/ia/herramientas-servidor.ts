@@ -129,7 +129,15 @@ export async function ejecutarHerramienta(
           auto === null
             ? "No hubo partidas, así que no hay porcentaje automatizado."
             : `Automatizado: ${auto} %.`,
-          `Sin explicar en los cuadres: ${importe(r.periodo.diferenciaCuadre, "PEN")}.`,
+          // ⚠️ Se dice qué NO es. Puesto al lado del recuento de partidas, un
+          // modelo concluye solo que una cifra es la suma de las otras — que es
+          // justo la confusión que hubo que corregir en /resumen. La diferencia
+          // sale de los saldos declarados; las partidas sueltas son un sumando.
+          `Sin explicar en los cuadres: ${importe(r.periodo.diferenciaCuadre, "PEN")}. ` +
+            "Es la diferencia entre los saldos finales declarados y el extracto " +
+            "ajustado; NO es la suma de las partidas sin conciliar, que son solo " +
+            "una parte de ella (también entran las diferencias de importe dentro " +
+            "de pares ya emparejados).",
           "",
           "Foto de hoy (no del período):",
           `Por cobrar ${importe(r.hoy.porCobrar, "PEN")} (vencido ${importe(r.hoy.porCobrarVencido, "PEN")}) · ` +

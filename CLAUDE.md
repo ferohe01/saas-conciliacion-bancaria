@@ -2497,6 +2497,38 @@ proceso hace que el gerente cierre la pestaña.
 - Todo se agrega en la base (`resumen_ejecutivo`, migración `0032`): con 452.309
   comprobantes, traerlos para sumarlos en Node es lo que la parte B eliminó.
 
+⚠️⚠️ **La diferencia del cuadre NO es la suma de las partidas sueltas, y la
+pantalla decía que sí.** El recuadro rezaba «queda S/ 18.852,00 sin explicar
+[…] **repartido en** 9 partidas sin conciliar», y eso afirma una composición
+que no se calcula en ninguna parte. Es falsa por construcción:
+
+    diferencia = saldo extracto declarado
+               + pendientes de libros − pendientes del banco
+               + diferencias dentro de los pares emparejados
+               − saldo de libros declarado
+
+Las partidas son **un sumando de cuatro**. Un cliente sumó las suyas a mano
+—S/ 15.085,50— y no había forma de reconciliarlo con los S/ 18.852,00 del
+recuadro desde la pantalla: el resto era el saldo del extracto que había
+tecleado y S/ 445 de diferencia dentro de un pago parcial ya emparejado.
+
+Es el mismo fallo que la `0043` corrigió en la cascada de `origenPartidas`, y
+por el mismo motivo: **una explicación que no cuadra convierte una duda
+concreta en desconfianza general** — aquí sobre la única cifra que el gerente
+le enseña a su contador. Se enseñan ahora las dos cosas diciendo qué relación
+tienen; la suma de las partidas no está en `resumen_ejecutivo` (solo el
+recuento), así que no se insinúa: se nombra dónde mirar. El mismo aviso va al
+contexto del asistente, porque un modelo que ve «partidas: 9» junto a una cifra
+en soles concluye solo que una es la suma de la otra.
+
+⚠️ **Pendiente relacionado:** `04_ensamblar.js` hace
+`Number(saldos.saldo_extracto_final ?? 0)`, así que **un saldo que el usuario
+no declaró se trata como CERO** y el cuadre sale plausible y sin sentido. Es el
+mismo criterio que la posición de caja ya tiene bien («un `saldo_final_banco`
+nulo NO cuenta como cero: cero es no hay plata, nulo es no lo sé»). Cambiarlo
+obliga a que `cuadre.diferencia` pueda ser `null`, que hoy se consume como
+número en el SQL de la `0032` y en los reportes.
+
 ⚠️ **`0033` existe por un efecto de segundo orden que casi pasa desapercibido.**
 El total de partidas de una conciliación salía de contar comprobantes *no
 cobrados*; al aprobar, 447.795 pasaban a `cobrado` y el total se desplomaba de

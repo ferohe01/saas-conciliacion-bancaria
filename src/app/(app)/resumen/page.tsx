@@ -213,14 +213,45 @@ export default async function ResumenPage({
           </p>
         )}
 
+        {/*
+          ⚠️⚠️ Dos cifras distintas, y la frase decía que eran la misma.
+          «Repartido en N partidas sin conciliar» afirma que la diferencia del
+          cuadre ESTÁ COMPUESTA por esas partidas, y eso no se calcula en
+          ninguna parte — de hecho es falso por construcción:
+
+              diferencia = saldo extracto declarado
+                         + pendientes de libros − pendientes del banco
+                         + diferencias dentro de los pares emparejados
+                         − saldo de libros declarado
+
+          Las partidas son UN sumando de cuatro. Un cliente sumó las 9 suyas a
+          mano —S/ 15.085,50— contra los S/ 18.852,00 del recuadro y no había
+          forma de reconciliar los dos números desde la pantalla; el resto era
+          el saldo del extracto que había tecleado y una diferencia de S/ 445
+          dentro de un pago parcial ya emparejado.
+
+          Es exactamente el fallo que `origenPartidas` (0043) tuvo que corregir
+          en la cascada: **una explicación que no cuadra convierte una duda
+          concreta en desconfianza general**. Aquí además la duda cae sobre la
+          cifra que el gerente le enseña a su contador.
+
+          Se enseñan las dos cosas y se dice qué relación tienen. La suma de las
+          partidas no está disponible en `resumen_ejecutivo` (solo el recuento),
+          así que NO se insinúa: se nombra dónde mirar.
+        */}
         {Math.abs(r.periodo.diferenciaCuadre) > 0.005 ? (
           <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             Queda <strong>{montoPEN(Math.abs(r.periodo.diferenciaCuadre))}</strong> sin
-            explicar entre tus libros y el banco, repartido en{" "}
-            {sinConciliar.toLocaleString("es-PE")} partidas sin conciliar. No es
-            un error necesariamente —suele ser cobros por otro canal o
-            movimientos de otro mes— pero hasta aclararlo, tus saldos tienen ese
-            margen.
+            explicar entre tus libros y el banco, y hay{" "}
+            <strong>{sinConciliar.toLocaleString("es-PE")} partidas</strong> sin
+            conciliar. Las dos cifras están relacionadas pero{" "}
+            <strong>no son la misma</strong>: la diferencia sale de los saldos
+            finales que declaraste al conciliar, y las partidas sueltas son solo
+            una parte de ella —también cuentan las diferencias de importe dentro
+            de pares ya emparejados—. Si no te cuadran entre sí, revisa primero
+            esos dos saldos. No es un error necesariamente —suele ser cobros por
+            otro canal o movimientos de otro mes— pero hasta aclararlo, tus
+            saldos tienen ese margen.
           </p>
         ) : r.periodo.conciliaciones > 0 ? (
           <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
