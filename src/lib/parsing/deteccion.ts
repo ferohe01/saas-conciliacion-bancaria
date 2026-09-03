@@ -45,51 +45,48 @@ function normalizarTexto(s: string): string {
     .trim();
 }
 
-// Palabras clave por campo (ya sin acentos).
-const KEYWORDS: Record<CampoCanonico, string[]> = {
-  fecha: ["fecha", "date", "dia", "f. emision", "f emision", "periodo"],
-  monto: [
-    "monto",
-    "importe",
-    "total",
-    "amount",
-    "valor",
-    "cargo",
-    "abono",
-    "debe",
-    "haber",
-    "soles",
-    "dolares",
-  ],
-  tipo: ["tipo", "type", "operacion", "movimiento", "clase"],
-  referencia: [
-    "referencia",
-    "ref",
-    "nro operacion",
-    "n operacion",
-    "numero",
-    "nro",
-    "serie",
-    "documento",
-    "comprobante",
-    "id",
-    // Una recaudadora llama "recibo" a lo que el banco trae como referencia, y
-    // es LA columna por la que se concilia: sin detectarla, el usuario tiene
-    // que acertar a mano cuál es, y si no lo hace la conciliación da 0%.
-    "recibo",
-    "recibos",
-    // ⚠️ "operacion" a secas va en DEBILES, no aquí: ver la nota de esa lista.
-  ],
-  contraparte: [
-    "contraparte",
-    "cliente",
-    "proveedor",
-    "razon social",
-    "razon",
-    "nombre",
-    "beneficiario",
-    "ruc",
-  ],
+/**
+ * ── Vocabulario del EXTRACTO, por fuerza de la señal ────────────────────────
+ *
+ * Una palabra puede nombrar un campo sin ambigüedad («referencia») o solo
+ * sugerirlo («nro», «documento»). Antes eso no se distinguía: el peso salía de
+ * si el encabezado *coincidía entero* con la palabra (3) o solo la *contenía*
+ * (2), que mide una casualidad tipográfica en vez del significado.
+ *
+ * ⚠️⚠️ El caso que lo destapó. Un extracto trae DOS columnas candidatas:
+ *
+ *     Nro Operacion   OP-500001 …   ← el código interno del banco
+ *     Nro Referencia  REF-1001  …   ← lo que casa con los comprobantes
+ *
+ * `nro operacion` estaba en la lista y coincidía ENTERA con su encabezado (3),
+ * mientras que `Nro Referencia` solo contenía `referencia` (2). Ganaba la
+ * columna equivocada, y encima el desempate por unicidad la reforzaba: los
+ * códigos del banco no se repiten nunca y las referencias sí (un cliente paga
+ * dos recibos con la misma). Resultado medido con datos reales: la capa exacta
+ * comparó `REF-1002` contra `OP-500002`, el pass 2 por monto+fecha lo bloqueó
+ * la guarda de contradicción de referencias —haciendo bien su trabajo— y la
+ * conciliación terminó en **0 pares de 25 partidas**, con los dos archivos
+ * perfectamente emparejables.
+ *
+ * Ahora el peso lo da la PALABRA, no la forma del encabezado.
+ */
+const FUERTE = 4;
+const MEDIO = 2.5;
+const DEBIL = 1;
+
+/**
+ * La palabra nombra el campo y no se la disputa nadie. Si aparece, es esa
+ * columna.
+ */
+const FUERTES: Record<CampoCanonico, string[]> = {
+  fecha: ["fecha", "fec", "date", "f emision", "f. emision", "f operacion"],
+  monto: ["monto", "importe", "amount"],
+  tipo: ["tipo", "type", "clase", "naturaleza"],
+  // ⚠️ `referencia`, `ref` y `recibo` mandan sobre CUALQUIER forma de
+  // «operación»: es la columna que el banco comparte con el cliente, y es la
+  // única con la que la capa exacta puede emparejar.
+  referencia: ["referencia", "ref", "recibo", "recibos", "voucher", "constancia"],
+  contraparte: ["contraparte", "razon social", "beneficiario", "ruc"],
   descripcion: [
     "descripcion",
     "glosa",
@@ -101,23 +98,135 @@ const KEYWORDS: Record<CampoCanonico, string[]> = {
 };
 
 /**
- * Señales DÉBILES: valen si nadie mejor las reclama, y pierden contra una
- * palabra específica.
+ * Nombre habitual del campo, pero compartido con otros. Gana a no mapear nada
+ * y pierde contra una palabra fuerte.
+ */
+const MEDIOS: Record<CampoCanonico, string[]> = {
+  fecha: ["dia", "periodo", "valuta", "proceso"],
+  monto: [
+    "cargo",
+    "abono",
+    "abonado",
+    "debe",
+    "haber",
+    "debito",
+    "credito",
+    "deposito",
+    "depositado",
+    "pagado",
+    "total",
+    "valor",
+    "neto",
+    "soles",
+    "dolares",
+  ],
+  tipo: ["movimiento"],
+  referencia: [
+    "nro operacion",
+    "n operacion",
+    "num operacion",
+    "numero operacion",
+    "cod operacion",
+    "codigo operacion",
+    "operacion",
+    "codigo",
+    "cod",
+    "correlativo",
+    "transaccion",
+    "numero",
+    "num",
+    "nro",
+    "serie",
+    "documento",
+    "comprobante",
+    "id",
+  ],
+  contraparte: [
+    "cliente",
+    "proveedor",
+    "razon",
+    "nombre",
+    "titular",
+    "ordenante",
+    "girador",
+  ],
+  descripcion: ["motivo", "asunto", "leyenda", "referencia adicional"],
+};
+
+/**
+ * Señales DÉBILES: valen si nadie mejor las reclama.
  *
- * ⚠️ `operacion` estaba EXCLUIDA de `referencia` para que no compitiera con la
- * columna buena («nro operación», «recibos»). El remedio salió peor que la
- * enfermedad: `operacion` seguía en las palabras de `tipo`, así que un extracto
- * con una columna llamada «Operación» —lo más normal del mundo en un banco
- * peruano— se la asignaba a *tipo*, donde sus valores no significan nada, y
- * dejaba **referencia sin mapear**: justo la columna de la que depende todo el
- * emparejamiento.
- *
- * Lo que se quería decir no era «esta palabra no vale», sino «vale menos». Eso
- * es un peso, no una exclusión.
+ * ⚠️ `operacion` vivía aquí para que no compitiera con «nro operación». El
+ * remedio salió peor que la enfermedad: seguía en las palabras de `tipo`, así
+ * que un extracto con una columna llamada «Operación» —lo más normal del mundo
+ * en un banco peruano— se la asignaba a *tipo*, donde sus valores no significan
+ * nada, y dejaba **referencia sin mapear**. Hoy `operacion` es MEDIA para
+ * `referencia` y DÉBIL para `tipo`, que es lo que de verdad se quería decir:
+ * no «no vale», sino «vale menos».
  */
 const DEBILES: Partial<Record<CampoCanonico, string[]>> = {
-  referencia: ["operacion", "operación", "codigo", "numero operacion"],
+  tipo: ["operacion"],
 };
+
+/**
+ * Palabras cortas que solo cuentan como TOKEN COMPLETO.
+ *
+ * `id` dentro de «Ciudad», «Salida» o «Unidad» no significa nada, y con
+ * coincidencia por subcadena esas columnas puntuaban como referencia. La
+ * flexibilidad de reconocer más nombres solo sirve si no arrastra falsos: se
+ * gana amplitud con la separación en palabras, no bajando el listón.
+ */
+const LONGITUD_TOKEN_EXACTO = 3;
+
+/**
+ * Normalización FLEXIBLE del encabezado: sin acentos, sin puntuación y con las
+ * palabras separadas.
+ *
+ * Es lo que hace que `Nro. Referencia`, `REFERENCIA_BANCO`, `N° Operación` y
+ * `Referencia/Operación` se reconozcan igual. Antes solo se bajaba a
+ * minúsculas, así que un punto o un guion bajo en medio bastaba para que una
+ * palabra clave de dos términos no coincidiera.
+ */
+function palabrasDeHeader(header: string): { texto: string; tokens: string[] } {
+  const texto = normalizarTexto(header)
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return { texto, tokens: texto.split(" ").filter(Boolean) };
+}
+
+/** ¿El encabezado contiene esta palabra clave? */
+function contiene(
+  kw: string,
+  texto: string,
+  tokens: string[],
+): boolean {
+  const k = kw
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!k) return false;
+  // Palabra corta: solo como token completo (ver LONGITUD_TOKEN_EXACTO).
+  if (!k.includes(" ") && k.length <= LONGITUD_TOKEN_EXACTO) {
+    return tokens.includes(k);
+  }
+  return texto.includes(k);
+}
+
+/**
+ * Puntaje por NOMBRE del encabezado para el extracto: se queda con el peso del
+ * nivel más alto que coincida.
+ */
+function puntajeNombreExtracto(campo: CampoCanonico, header: string): number {
+  const { texto, tokens } = palabrasDeHeader(header);
+  if (!texto) return 0;
+  const hay = (lista: string[] | undefined) =>
+    (lista ?? []).some((kw) => contiene(kw, texto, tokens));
+  if (hay(FUERTES[campo])) return FUERTE;
+  if (hay(MEDIOS[campo])) return MEDIO;
+  if (hay(DEBILES[campo])) return DEBIL;
+  return 0;
+}
 
 const VALORES_TIPO = new Set([
   "cobranza",
@@ -219,6 +328,15 @@ function puntajeContenido(
  * esto estaba pegado a los campos del extracto, y al mapear comprobantes habría
  * salido un segundo detector que se separa del primero con el tiempo.
  */
+/**
+ * Cómo se puntúa un encabezado por su nombre, para un campo dado.
+ *
+ * Existe para que el extracto pueda pesar por SIGNIFICADO (ver `FUERTES` /
+ * `MEDIOS` / `DEBILES`) sin cambiarle el criterio a la detección de
+ * comprobantes, que comparte esta misma maquinaria.
+ */
+export type PuntajeNombre<C extends string> = (campo: C, header: string) => number;
+
 export function detectarCon<C extends string>(
   campos: readonly C[],
   keywords: Record<C, string[]>,
@@ -226,8 +344,17 @@ export function detectarCon<C extends string>(
   headers: string[],
   muestras: Record<string, unknown>[],
   debiles?: Partial<Record<C, string[]>>,
+  porNombre?: PuntajeNombre<C>,
 ): Partial<Record<C, string>> {
-  return detectarConDetalle(campos, keywords, contenido, headers, muestras, debiles).mapeo;
+  return detectarConDetalle(
+    campos,
+    keywords,
+    contenido,
+    headers,
+    muestras,
+    debiles,
+    porNombre,
+  ).mapeo;
 }
 
 /**
@@ -267,6 +394,13 @@ export function detectarConDetalle<C extends string>(
   muestras: Record<string, unknown>[],
   /** Palabras que valen si nadie mejor las reclama. Ver `DEBILES`. */
   debiles?: Partial<Record<C, string[]>>,
+  /**
+   * Puntaje por nombre a medida. Sin esto se usa el de siempre —coincidencia
+   * exacta 3, parcial 2, débil 1—, que es lo que sigue usando la detección de
+   * comprobantes: su vocabulario está calibrado contra un mayor contable real y
+   * no tiene por qué moverse porque el extracto necesite otra cosa.
+   */
+  porNombre?: PuntajeNombre<C>,
 ): DeteccionDetallada<C> {
   type Celda = { campo: C; header: string; score: number };
   const celdas: Celda[] = [];
@@ -288,11 +422,13 @@ export function detectarConDetalle<C extends string>(
       const valores = muestras.map((f) => f[header]);
       // Una señal débil vale 1: pierde contra cualquier palabra específica
       // (que valen 2 o 3) pero gana a no mapear nada.
-      const porNombre = Math.max(
-        puntajeConLista(keywords[campo], header),
-        puntajeConLista(debiles?.[campo] ?? [], header) > 0 ? 1 : 0,
-      );
-      const score = porNombre + contenido(campo, valores);
+      const nombre = porNombre
+        ? porNombre(campo, header)
+        : Math.max(
+            puntajeConLista(keywords[campo], header),
+            puntajeConLista(debiles?.[campo] ?? [], header) > 0 ? 1 : 0,
+          );
+      const score = nombre + contenido(campo, valores);
       // Un score no positivo incluye el VETO por contenido (`-Infinity`): una
       // columna cuyos valores contradicen al campo no se propone ni aunque se
       // llame como él.
@@ -334,9 +470,62 @@ export function detectarConDetalle<C extends string>(
   return { mapeo, alternativas };
 }
 
+/**
+ * Los campos que un extracto bancario SÍ usa.
+ *
+ * ⚠️⚠️ Que `contraparte` no esté no es un detalle de pantalla: la asignación es
+ * greedy y **consume el encabezado**, así que un campo que el extracto no
+ * emplea puede quitarle su columna a uno que sí. Pasó con datos reales: la
+ * columna «Concepto / Cliente» se la llevaba `contraparte` —que
+ * `MovimientoBancario` ni siquiera tiene— y `descripcion` se quedaba sin
+ * mapear. Como `normalizarMovimiento` construye la `glosa` SOLO desde
+ * `mapeo.descripcion`, los movimientos llegaban al motor sin glosa, y la capa
+ * difusa —que exige una palabra en común entre la contraparte del comprobante y
+ * la glosa del banco— no podía emparejar nada. En pantalla se veía como filas
+ * «BCO-0001» sin nombre, que no parece un error de mapeo.
+ *
+ * Esta lista es la MISMA que pinta el Paso 2 (`MapeoDataset`), y por eso vive
+ * aquí: con dos copias, la pantalla ofrecería un campo que la detección no
+ * reserva, o al revés.
+ */
+export const CAMPOS_EXTRACTO: CampoCanonico[] = [
+  "fecha",
+  "monto",
+  "tipo",
+  "referencia",
+  "descripcion",
+];
+
+/**
+ * Detección para el extracto bancario, con las alternativas que casi empataron.
+ *
+ * ⚠️ El aviso no es cosmético. Un extracto puede traer dos columnas que se
+ * parecen —«Nro Operacion» y «Nro Referencia»— y elegir mal no da un error: da
+ * una conciliación al 0 % un rato después. Cuando hay duda real, lo honesto es
+ * nombrar la otra candidata y que el usuario la contraste con la vista previa.
+ */
+export function detectarColumnasConDudas(
+  headers: string[],
+  muestras: Record<string, unknown>[],
+): DeteccionDetallada<CampoCanonico> {
+  return detectarConDetalle(
+    CAMPOS_EXTRACTO,
+    // ⚠️ Las listas por niveles las lee `puntajeNombreExtracto`, el último
+    // argumento. Éste queda porque lo exige la firma que comparte con la
+    // detección de comprobantes, y no se consulta: quien pasa un puntaje propio
+    // decide él solo cómo pesa cada nombre.
+    FUERTES,
+    puntajeContenido,
+    headers,
+    muestras,
+    DEBILES,
+    puntajeNombreExtracto,
+  );
+}
+
 export function detectarColumnas(
   headers: string[],
   muestras: Record<string, unknown>[],
 ): MapeoColumnas {
-  return detectarCon(CAMPOS, KEYWORDS, puntajeContenido, headers, muestras, DEBILES);
+  return detectarColumnasConDudas(headers, muestras).mapeo;
 }

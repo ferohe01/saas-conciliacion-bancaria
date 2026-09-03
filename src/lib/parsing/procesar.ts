@@ -4,7 +4,11 @@ import {
   esExtensionSoportada,
   esPDF,
 } from "./leerArchivo";
-import { detectarColumnas, type MapeoColumnas } from "./deteccion";
+import {
+  detectarColumnasConDudas,
+  type CampoCanonico,
+  type MapeoColumnas,
+} from "./deteccion";
 import { calcularResumen, type ResumenArchivo } from "./resumen";
 import { validarCoherencia, type ResultadoCoherencia } from "./coherencia";
 
@@ -15,6 +19,15 @@ export type ArchivoProcesado = {
   headers: string[];
   filas: Record<string, unknown>[];
   mapeo: MapeoColumnas;
+  /**
+   * Otros encabezados que casi empataron con el elegido, por campo.
+   *
+   * ⚠️ Elegir mal una columna del extracto no produce un error: produce una
+   * conciliación al 0 % un rato después. El Paso 2 nombra la candidata
+   * descartada para que el usuario pueda contrastarla con la vista previa; es
+   * la única pista disponible antes de gastar la corrida.
+   */
+  alternativas: Partial<Record<CampoCanonico, string[]>>;
   resumen: ResumenArchivo | null;
   coherencia: ResultadoCoherencia | null;
 };
@@ -35,6 +48,7 @@ export async function procesarArchivo(
       headers: [],
       filas: [],
       mapeo: {},
+      alternativas: {},
       resumen: null,
       coherencia: null,
     };
@@ -47,6 +61,7 @@ export async function procesarArchivo(
       headers: [],
       filas: [],
       mapeo: {},
+      alternativas: {},
       resumen: null,
       coherencia: null,
     };
@@ -54,7 +69,7 @@ export async function procesarArchivo(
 
   const { headers, filas } = await leerArchivo(file);
   const muestras = filas.slice(0, 20);
-  const mapeo = detectarColumnas(headers, muestras);
+  const { mapeo, alternativas } = detectarColumnasConDudas(headers, muestras);
   const resumen = calcularResumen(filas, mapeo);
   const coherencia = validarCoherencia(resumen.fechasISO, periodo);
 
@@ -64,6 +79,7 @@ export async function procesarArchivo(
     headers,
     filas,
     mapeo,
+    alternativas,
     resumen,
     coherencia,
   };
@@ -104,13 +120,13 @@ export async function previsualizarArchivo(
   if (esPDF(file.name)) {
     return {
       nombre: file.name, formato: "pdf", headers: [], filas: [],
-      mapeo: {}, resumen: null, coherencia: null,
+      mapeo: {}, alternativas: {}, resumen: null, coherencia: null,
     };
   }
   if (!esExtensionSoportada(file.name)) {
     return {
       nombre: file.name, formato: "no_soportado", headers: [], filas: [],
-      mapeo: {}, resumen: null, coherencia: null,
+      mapeo: {}, alternativas: {}, resumen: null, coherencia: null,
     };
   }
 
@@ -118,12 +134,17 @@ export async function previsualizarArchivo(
   if (file.size <= BYTES_RESUMEN_INMEDIATO) return procesarArchivo(file, periodo);
 
   const { headers, filas } = await leerCabecera(file);
+  const { mapeo, alternativas } = detectarColumnasConDudas(
+    headers,
+    filas.slice(0, 20),
+  );
   return {
     nombre: file.name,
     formato: "excel",
     headers,
     filas,
-    mapeo: detectarColumnas(headers, filas.slice(0, 20)),
+    mapeo,
+    alternativas,
     resumen: null,
     coherencia: null,
   };

@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import {
+  CAMPOS_EXTRACTO,
   ETIQUETA_CAMPO,
   type CampoCanonico,
   type MapeoColumnas,
@@ -20,13 +21,7 @@ const CAMPOS_INTERNOS: CampoCanonico[] = [
   "contraparte",
   "descripcion",
 ];
-const CAMPOS_EXTRACTO: CampoCanonico[] = [
-  "fecha",
-  "monto",
-  "tipo",
-  "referencia",
-  "descripcion",
-];
+
 
 type Props = {
   titulo: string;
@@ -35,6 +30,16 @@ type Props = {
   filas: Record<string, unknown>[];
   mapeo: MapeoColumnas;
   moneda: string;
+  /**
+   * Con qué dudó la detección, por campo.
+   *
+   * ⚠️ No es cosmético. Un extracto puede traer dos columnas que se parecen
+   * —«Nro Operacion» y «Nro Referencia»— y elegir mal no da un error: da una
+   * conciliación al 0 % un rato después, con los dos archivos perfectamente
+   * emparejables. Nombrar la otra candidata es la única pista que el usuario
+   * puede contrastar con la vista previa de abajo.
+   */
+  alternativas?: Partial<Record<CampoCanonico, string[]>>;
   onChange: (m: MapeoColumnas) => void;
 };
 
@@ -45,6 +50,7 @@ export function MapeoDataset({
   filas,
   mapeo,
   moneda,
+  alternativas,
   onChange,
 }: Props) {
   const campos = variante === "internos" ? CAMPOS_INTERNOS : CAMPOS_EXTRACTO;
@@ -77,28 +83,49 @@ export function MapeoDataset({
 
       {/* dropdowns de mapeo */}
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        {campos.map((campo) => (
-          <label key={campo} className="block">
-            <span className="mb-1 block text-xs font-medium text-neutral-600">
-              {ETIQUETA_CAMPO[campo]}
-              {(campo === "fecha" || campo === "monto") && (
-                <span className="text-red-500"> *</span>
+        {campos.map((campo) => {
+          // Solo se avisa mientras siga puesta la columna que eligió la
+          // detección: en cuanto el usuario toca el desplegable ya decidió él, y
+          // repetirle la duda es ruido.
+          const dudas =
+            mapeo[campo] != null
+              ? (alternativas?.[campo] ?? []).filter((h) => h !== mapeo[campo])
+              : [];
+          return (
+            <label key={campo} className="block">
+              <span className="mb-1 block text-xs font-medium text-neutral-600">
+                {ETIQUETA_CAMPO[campo]}
+                {(campo === "fecha" || campo === "monto") && (
+                  <span className="text-red-500"> *</span>
+                )}
+              </span>
+              <select
+                value={mapeo[campo] ?? ""}
+                onChange={(e) => setCampo(campo, e.target.value)}
+                className="h-10 w-full rounded-lg border border-neutral-300 bg-white px-2 text-sm text-neutral-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none"
+              >
+                <option value="">(ninguna)</option>
+                {headers.map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </select>
+              {dudas.length > 0 && (
+                <span className="mt-1 block text-xs text-amber-800">
+                  También podría ser{" "}
+                  {dudas.map((h, i) => (
+                    <span key={h}>
+                      {i > 0 && " o "}
+                      <strong className="font-medium">{h}</strong>
+                    </span>
+                  ))}
+                  . Compruébalo en la vista previa.
+                </span>
               )}
-            </span>
-            <select
-              value={mapeo[campo] ?? ""}
-              onChange={(e) => setCampo(campo, e.target.value)}
-              className="h-10 w-full rounded-lg border border-neutral-300 bg-white px-2 text-sm text-neutral-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none"
-            >
-              <option value="">(ninguna)</option>
-              {headers.map((h) => (
-                <option key={h} value={h}>
-                  {h}
-                </option>
-              ))}
-            </select>
-          </label>
-        ))}
+            </label>
+          );
+        })}
       </div>
 
       {/* vista previa interpretada */}

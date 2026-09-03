@@ -1424,6 +1424,67 @@ PyME que concilia por importe, y ruinoso para quien concilia por número de
 operación. La diferencia entre "opcional" y "opcional pero decisivo" tiene que
 verse en pantalla.
 
+### Peor que no mapear la referencia: mapear la columna de al lado
+
+Un extracto trae DOS columnas que podrían serlo, y elegir la que no es apaga
+las cinco capas en cadena sin producir un solo error:
+
+```
+Nro Operacion    OP-500001 …   ← el codigo interno del banco
+Nro Referencia   REF-1001  …   ← lo que casa con los comprobantes
+```
+
+La heurística elegía la primera **por dos motivos que se reforzaban**: el peso
+por nombre salía de si el encabezado coincidía *entero* con la palabra clave
+(3) o solo la *contenía* (2) —o sea, medía una casualidad tipográfica en vez
+del significado—, y el desempate por unicidad la premiaba encima, porque los
+códigos del banco no se repiten nunca y las referencias sí (un cliente paga dos
+recibos con la misma).
+
+Con datos reales del cliente: 10 comprobantes y 15 movimientos que casaban al
+céntimo dieron **0 pares de 25 partidas**.
+
+1. La capa exacta comparó `REF-1002` contra `OP-500002`.
+2. El respaldo por monto + fecha **tenía pares disponibles** y no los tomó: las
+   dos referencias existían y se contradecían. ⚠️ La guarda hizo **bien** su
+   trabajo (es la de los 541 pares falsos), y por eso el fallo era invisible —
+   el motor actuaba correctamente sobre un dato equivocado.
+3. Difusa, agrupación y candidatos IA exigen las tres identidad compartida.
+
+**El peso lo da ahora la PALABRA, no la forma del encabezado**: `FUERTES` (4)
+para lo que nombra el campo sin ambigüedad —`referencia`, `ref`, `recibo`,
+`voucher`—, `MEDIOS` (2,5) para lo que se comparte con otros campos —toda
+forma de `operacion`, `codigo`, `nro`, `documento`— y `DEBILES` (1).
+Se conserva íntegro lo que ya funcionaba: `Recibos` sigue ganando a
+`Operación`, y `Operación` a secas sigue yendo a *referencia* y no a *tipo*.
+
+- **Los nombres se reconocen por palabras, no por subcadena.** El encabezado se
+  separa en tokens, así que `Nro. Referencia`, `N° Referencia`,
+  `REFERENCIA_BANCO` y `Referencia/Operación` valen igual. ⚠️ Ampliar solo
+  sirve si no arrastra falsos: las palabras de ≤3 letras cuentan como **token
+  completo**, o `id` dentro de «Ciudad» puntuaría como referencia.
+- ⚠️⚠️ **Y un segundo fallo en el mismo archivo, más difícil de ver.** La
+  asignación es greedy y **consume el encabezado**: `contraparte` —campo que
+  `MovimientoBancario` ni siquiera tiene— se llevaba «Concepto / Cliente» y
+  dejaba `descripcion` sin mapear. Como `normalizarMovimiento` construye la
+  `glosa` SOLO desde `mapeo.descripcion`, los movimientos llegaban al motor
+  **sin nombre** y la capa difusa —que exige una palabra en común con la
+  contraparte— no podía emparejar nada. En pantalla eran filas «BCO-0001» sin
+  más, que no parece un error de mapeo. `CAMPOS_EXTRACTO` acota qué campos
+  pueden reclamar una columna, y es la **misma lista** que pinta el Paso 2.
+- **El Paso 2 nombra la candidata descartada** («También podría ser **Nro
+  Operacion**»), como ya hacía la carga de comprobantes. Es la única pista
+  contrastable antes de gastar la corrida, y desaparece en cuanto el usuario
+  toca el desplegable: ahí ya decidió él.
+- ⚠️ **La detección de comprobantes NO cambia.** Comparte maquinaria
+  (`detectarConDetalle`) pero su vocabulario está calibrado contra un mayor
+  contable real, así que el criterio nuevo entra por un parámetro opcional
+  (`porNombre`) y quien no lo pasa puntúa exactamente igual que antes.
+- Tests con los dos archivos del cliente en
+  `tests/conciliacionProinnovate.test.ts`, incluida **la reproducción del
+  fallo**: con la columna equivocada tienen que salir 0 pares. Sin ese test,
+  alguien "simplifica" el desempate y el 0 % vuelve sin que nada se entere.
+
 ### Y avisar de la causa no basta: hay que medir la consecuencia
 
 El aviso ámbar del Paso 2 señala la causa correcta, pero **un aviso que el
@@ -1463,6 +1524,16 @@ real en vez de una heurística sobre lo que se ve en pantalla.
 - **Cuando todo está bien también se dice** (*«casarían 980 de 1.000»*). Un panel
   que solo aparece con problemas deja sin saber si el silencio significa
   "correcto" o "no se miró".
+- ⚠️⚠️ **Y si la comprobación no se pudo hacer, se DICE.**
+  `diagnosticarAntesDeConciliar` devolvía `null` en los tres casos de fallo
+  —fecha inválida, error de la RPC, sin fila— y el Paso 3 no pintaba nada. Pero
+  *nada* es justamente como se ve «todo en orden» en esta sección, así que el
+  silencio no era neutral: se leía como aprobación. Ocurrió con el extracto de
+  dos columnas de arriba — el diagnóstico habría dicho «no hay ni una
+  referencia en común», el usuario vio el Paso 3 limpio y pulsó Iniciar. Ahora
+  devuelve `{ ok, motivo }` y la pantalla enseña **«Sin comprobar»** en ámbar.
+  No bloquea —una comprobación caída no puede impedir conciliar— pero deja
+  dicho que nadie miró.
 - Interpretación en `src/lib/diagnosticoPrevio.ts` (puro, con tests); la base
   solo cuenta. El tope de filas vive en `lib/limites.ts` porque lo comparten el
   aviso y el endpoint que rechaza: con dos números, el wizard diría que cabe algo

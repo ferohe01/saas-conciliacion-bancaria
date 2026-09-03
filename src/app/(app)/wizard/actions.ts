@@ -602,16 +602,31 @@ export async function quitarComprobantesDelPeriodo(
  * devolvería CERO FILAS SIN ERROR — el mismo fallo silencioso que escondió las
  * "Cargas realizadas" en /comprobantes.
  *
- * Si algo falla no se interrumpe nada: se devuelve `null` y el Paso 3 sigue
- * funcionando como antes. Un diagnóstico es una ayuda, no un requisito.
+ * Si algo falla NO se interrumpe nada, pero tampoco se calla.
+ *
+ * Devolvía `null` en los tres casos —fecha inválida, error de la RPC, sin
+ * fila— y el Paso 3 no pintaba absolutamente nada, que en pantalla es idéntico
+ * a "todo en orden". Ese silencio costó una conciliación al 0 %: el
+ * diagnóstico habría dicho «no hay ni una referencia en común» y el usuario vio
+ * una pantalla limpia, así que pulsó Iniciar.
+ *
+ * Un diagnóstico es una ayuda, no un requisito — pero una ayuda que no se pudo
+ * ejecutar tiene que decir que no se ejecutó. Es el mismo criterio que ya rige
+ * en el resto del producto: comprobar SIEMPRE el error, y no dejar que un
+ * silencio se lea como una confirmación.
  */
+export type ResultadoDiagnostico =
+  | { ok: true; contadores: ContadoresPrevios; maxFilas: number }
+  /** No se pudo comprobar. `motivo` se le enseña al usuario. */
+  | { ok: false; motivo: string };
+
 export async function diagnosticarAntesDeConciliar(
   loteId: string,
   desde: string,
   hasta: string,
-): Promise<{ contadores: ContadoresPrevios; maxFilas: number } | null> {
+): Promise<ResultadoDiagnostico> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(desde) || !/^\d{4}-\d{2}-\d{2}$/.test(hasta)) {
-    return null;
+    return { ok: false, motivo: "El período no tiene un formato válido." };
   }
 
   const supabase = await createClient();
@@ -623,12 +638,28 @@ export async function diagnosticarAntesDeConciliar(
     })
     .maybeSingle();
 
-  if (error || !data) return null;
+  if (error) {
+    return {
+      ok: false,
+      motivo:
+        "No se pudo consultar tus datos para revisarlos. Puedes conciliar " +
+        "igualmente, pero nadie ha comprobado el mapeo del Paso 2.",
+    };
+  }
+  if (!data) {
+    return {
+      ok: false,
+      motivo:
+        "No se encontraron los datos de este período para revisarlos. " +
+        "Comprueba el extracto que cargaste en el Paso 2.",
+    };
+  }
 
   const c = data as Record<string, number | null>;
   const n = (k: string) => Number(c[k] ?? 0);
 
   return {
+    ok: true,
     contadores: {
       internos: n("internos"),
       internos_con_ref: n("internos_con_ref"),
@@ -669,8 +700,8 @@ export async function explicarRevisionPrevia(
   }
 
   const datos = await diagnosticarAntesDeConciliar(loteId, desde, hasta);
-  if (!datos) {
-    return { ok: false, error: "No se pudo revisar tus datos." };
+  if (!datos.ok) {
+    return { ok: false, error: datos.motivo };
   }
 
   const hallazgos = evaluarDiagnostico(datos.contadores, datos.maxFilas);

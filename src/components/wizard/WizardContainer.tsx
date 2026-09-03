@@ -255,6 +255,14 @@ export function WizardContainer({
    * a lista vacía.
    */
   const [hallazgos, setHallazgos] = useState<Hallazgo[] | null>(null);
+  /**
+   * Por qué no se pudo revisar, cuando no se pudo.
+   *
+   * ⚠️ Existe porque "no se comprobó" y "se comprobó y está bien" se veían
+   * IGUAL: los dos pintaban una pantalla limpia. Ver el comentario de
+   * `diagnosticarAntesDeConciliar`.
+   */
+  const [falloRevision, setFalloRevision] = useState<string | null>(null);
   const [revisando, setRevisando] = useState(false);
   /** La tarjeta de comprobantes está preguntando qué columna es cada cosa. */
   const [mapeandoComprobantes, setMapeandoComprobantes] = useState(false);
@@ -505,10 +513,21 @@ export function WizardContainer({
     diagnosticarAntesDeConciliar(lote.lote_id, periodo.desde, periodo.hasta)
       .then((r) => {
         if (!vigente) return;
-        setHallazgos(r ? evaluarDiagnostico(r.contadores, r.maxFilas) : null);
+        if (r.ok) {
+          setHallazgos(evaluarDiagnostico(r.contadores, r.maxFilas));
+          setFalloRevision(null);
+        } else {
+          setHallazgos(null);
+          setFalloRevision(r.motivo);
+        }
       })
       .catch(() => {
-        if (vigente) setHallazgos(null);
+        if (!vigente) return;
+        setHallazgos(null);
+        setFalloRevision(
+          "No se pudo revisar tus datos antes de conciliar. Puedes continuar, " +
+            "pero nadie ha comprobado el mapeo del Paso 2.",
+        );
       })
       .finally(() => {
         if (vigente) setRevisando(false);
@@ -947,6 +966,7 @@ export function WizardContainer({
                 filas={extracto.filas}
                 mapeo={mapeoExtracto}
                 moneda={moneda}
+                alternativas={extracto?.alternativas}
                 onChange={setMapeoExtracto}
               />
             ) : (
@@ -1079,6 +1099,7 @@ export function WizardContainer({
                 antes de gastar la corrida. Ver `lib/diagnosticoPrevio.ts`. */}
             <RevisionPrevia
               hallazgos={hallazgos}
+              fallo={falloRevision}
               cargando={revisando}
               preguntar={
                 asistente && lote && periodo

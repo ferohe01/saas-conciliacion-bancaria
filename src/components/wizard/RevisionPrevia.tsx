@@ -43,10 +43,16 @@ const ESTILO: Record<
 
 export function RevisionPrevia({
   hallazgos,
+  fallo = null,
   cargando,
   preguntar,
 }: {
   hallazgos: Hallazgo[] | null;
+  /**
+   * Por qué no se pudo comprobar. Ver abajo por qué esto no puede quedarse en
+   * un `null` silencioso.
+   */
+  fallo?: string | null;
   cargando: boolean;
   /** Sin esto no se ofrece asistente (despliegue sin modelo configurado). */
   preguntar?: Preguntar;
@@ -59,8 +65,48 @@ export function RevisionPrevia({
     );
   }
 
-  // `null` = no se pudo comprobar. No se dice nada: inventar un "todo bien"
-  // sería peor que el silencio, y el Paso 3 funciona igual que antes.
+  /**
+   * ⚠️⚠️ Que la comprobación no se pudiera hacer SE DICE.
+   *
+   * Antes se devolvía `null` y no se pintaba nada, con el argumento de que
+   * inventar un "todo bien" sería peor. Cierto, y aun así el remedio estaba
+   * mal: una pantalla vacía ES el "todo bien" de esta sección —cuando todo
+   * cuadra, lo único que sale es un discreto «casarían 980 de 1.000»—, así que
+   * el silencio no era neutral, se leía como aprobación.
+   *
+   * Pasó de verdad: un extracto con la columna de referencia mal mapeada habría
+   * disparado «no hay ni una referencia en común». El usuario vio el Paso 3
+   * limpio, pulsó Iniciar, y la conciliación salió con 0 pares.
+   *
+   * No bloquea —una comprobación caída no puede impedir conciliar— pero deja
+   * dicho que nadie miró.
+   */
+  if (fallo) {
+    return (
+      <section aria-labelledby="h-revision" className="space-y-2">
+        <h3 id="h-revision" className="text-sm font-semibold text-neutral-900">
+          Antes de conciliar
+        </h3>
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/60 px-5 py-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">
+              Sin comprobar
+            </span>
+            <p className="font-medium text-amber-900">
+              No se pudo revisar tus datos
+            </p>
+          </div>
+          <p className="mt-1.5 max-w-prose text-sm text-amber-900">{fallo}</p>
+          <p className="mt-1.5 max-w-prose text-sm text-amber-900">
+            Puedes iniciar la conciliación igualmente. Si el resultado sale muy
+            bajo, lo primero que conviene mirar es el mapeo de columnas del
+            Paso 2 — sobre todo la referencia o nº de operación.
+          </p>
+        </div>
+      </section>
+    );
+  }
+
   if (!hallazgos || hallazgos.length === 0) return null;
 
   return (
