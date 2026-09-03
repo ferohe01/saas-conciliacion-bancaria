@@ -967,6 +967,7 @@ export function WizardContainer({
                 mapeo={mapeoExtracto}
                 moneda={moneda}
                 alternativas={extracto?.alternativas}
+                detectado={extracto?.mapeo}
                 onChange={setMapeoExtracto}
               />
             ) : (

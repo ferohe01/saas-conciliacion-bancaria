@@ -1472,6 +1472,21 @@ Se conserva íntegro lo que ya funcionaba: `Recibos` sigue ganando a
   contraparte— no podía emparejar nada. En pantalla eran filas «BCO-0001» sin
   más, que no parece un error de mapeo. `CAMPOS_EXTRACTO` acota qué campos
   pueden reclamar una columna, y es la **misma lista** que pinta el Paso 2.
+- ⚠️⚠️ **Y la MEMORIA de la cuenta pisa la detección sin decirlo.** Corregida
+  la heurística, la misma cuenta volvió a salir con `Nro Operacion`: `elegirMapeo`
+  hace ganar al mapeo guardado en `cuentas_bancarias.mapeo_columnas.extracto`,
+  y esa cuenta lo memorizó **en la corrida que dio 0 %**. Un error de mapeo se
+  vuelve así permanente y mudo. Peor: el aviso de empate **se apagaba solo justo
+  ahí**, porque las alternativas se calculan respecto al ganador de la
+  *detección* —«Nro Operacion» era la alternativa— y al filtrarlas contra el
+  valor efectivo quedaba la lista vacía. La única pista desaparecía en el único
+  caso en que hacía falta. El Paso 2 recibe ahora también lo que propuso la
+  detección y, cuando difiere, lo dice: «esta columna viene de la última vez que
+  conciliaste esta cuenta; por el contenido parece que debería ser **Nro
+  Referencia**», con un botón para cambiarla de un clic.
+  ⚠️ Es hermano del fallo que `elegirMapeo` ya documenta —memoria que solo
+  podía QUITAR campos— y demuestra que la otra mitad seguía abierta: memoria que
+  puede poner el campo EQUIVOCADO.
 - **El Paso 2 nombra la candidata descartada** («También podría ser **Nro
   Operacion**»), como ya hacía la carga de comprobantes. Es la única pista
   contrastable antes de gastar la corrida, y desaparece en cuanto el usuario

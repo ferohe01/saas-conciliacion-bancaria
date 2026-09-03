@@ -639,6 +639,24 @@ export async function diagnosticarAntesDeConciliar(
     .maybeSingle();
 
   if (error) {
+    /**
+     * ⚠️ El detalle técnico va al log del servidor, no a la pantalla.
+     *
+     * Al usuario no le sirve un `PGRST202` y al operador le hace falta: la
+     * causa típica es una migración sin aplicar (esta función es `security
+     * definer` y llama a `pares_exactos` y a `arrastre_desde`, de la 0037 y la
+     * 0054). Sin dejar rastro, «Sin comprobar» dice que algo falló pero no da
+     * por dónde empezar, y eso son horas.
+     */
+    console.error("[diagnostico_previo] no se pudo revisar", {
+      loteId,
+      desde,
+      hasta,
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
     return {
       ok: false,
       motivo:

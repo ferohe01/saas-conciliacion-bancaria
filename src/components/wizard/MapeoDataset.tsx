@@ -40,6 +40,12 @@ type Props = {
    * puede contrastar con la vista previa de abajo.
    */
   alternativas?: Partial<Record<CampoCanonico, string[]>>;
+  /**
+   * Lo que la DETECCIÓN propuso, antes de que el mapeo guardado de la cuenta se
+   * mezclara encima (`elegirMapeo`). Sin esto no hay forma de enseñar que la
+   * memoria pisó una propuesta distinta — ver el comentario de `memoriaPisa`.
+   */
+  detectado?: MapeoColumnas;
   onChange: (m: MapeoColumnas) => void;
 };
 
@@ -51,6 +57,7 @@ export function MapeoDataset({
   mapeo,
   moneda,
   alternativas,
+  detectado,
   onChange,
 }: Props) {
   const campos = variante === "internos" ? CAMPOS_INTERNOS : CAMPOS_EXTRACTO;
@@ -84,12 +91,31 @@ export function MapeoDataset({
       {/* dropdowns de mapeo */}
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         {campos.map((campo) => {
-          // Solo se avisa mientras siga puesta la columna que eligió la
-          // detección: en cuanto el usuario toca el desplegable ya decidió él, y
-          // repetirle la duda es ruido.
+          const puesta = mapeo[campo];
+          /**
+           * ⚠️⚠️ Lo que la MEMORIA de la cuenta pisó.
+           *
+           * `elegirMapeo` hace que el mapeo guardado gane sobre la detección, y
+           * eso convierte un error de mapeo en permanente y **mudo**: la cuenta
+           * memorizó «Nro Operacion» en una corrida que dio 0 %, y en la
+           * siguiente vuelve a aplicarlo pisando una detección que ya propone
+           * la columna buena. En pantalla no se distingue de un acierto.
+           *
+           * Peor todavía: el aviso de empate se apagaba solo justo aquí, porque
+           * las alternativas se calculan respecto al ganador de la DETECCIÓN
+           * —«Nro Operacion» era la alternativa— y al filtrarlas contra el valor
+           * efectivo quedaba la lista vacía. La única pista desaparecía en el
+           * único caso en que hacía falta.
+           */
+          const propuesta = detectado?.[campo];
+          const memoriaPisa =
+            propuesta != null && puesta != null && propuesta !== puesta;
+          // Solo se avisa mientras siga puesta la columna que se eligió sola:
+          // en cuanto el usuario toca el desplegable ya decidió él, y repetirle
+          // la duda es ruido.
           const dudas =
-            mapeo[campo] != null
-              ? (alternativas?.[campo] ?? []).filter((h) => h !== mapeo[campo])
+            puesta != null
+              ? (alternativas?.[campo] ?? []).filter((h) => h !== puesta)
               : [];
           return (
             <label key={campo} className="block">
@@ -111,17 +137,32 @@ export function MapeoDataset({
                   </option>
                 ))}
               </select>
-              {dudas.length > 0 && (
+              {memoriaPisa ? (
                 <span className="mt-1 block text-xs text-amber-800">
-                  También podría ser{" "}
-                  {dudas.map((h, i) => (
-                    <span key={h}>
-                      {i > 0 && " o "}
-                      <strong className="font-medium">{h}</strong>
-                    </span>
-                  ))}
-                  . Compruébalo en la vista previa.
+                  Esta columna viene de la última vez que conciliaste esta
+                  cuenta. Por el contenido de tu archivo parece que debería ser{" "}
+                  <strong className="font-medium">{propuesta}</strong>.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setCampo(campo, propuesta)}
+                    className="font-medium text-blue-700 underline underline-offset-2 hover:text-blue-800"
+                  >
+                    Usar {propuesta}
+                  </button>
                 </span>
+              ) : (
+                dudas.length > 0 && (
+                  <span className="mt-1 block text-xs text-amber-800">
+                    También podría ser{" "}
+                    {dudas.map((h, i) => (
+                      <span key={h}>
+                        {i > 0 && " o "}
+                        <strong className="font-medium">{h}</strong>
+                      </span>
+                    ))}
+                    . Compruébalo en la vista previa.
+                  </span>
+                )
               )}
             </label>
           );
