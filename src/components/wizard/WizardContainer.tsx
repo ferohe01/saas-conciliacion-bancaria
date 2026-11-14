@@ -409,7 +409,7 @@ export function WizardContainer({
    *
    * ⚠️ Sin esa columna el saldo final NO se puede autodetectar nunca, y dejar
    * el campo vacío no da «inicial + movimientos» como se creía: el cuadre
-   * (`cuadre.ts`, `04_ensamblar.js`) toma un saldo vacío como CERO. Un reporte
+   * (`cuadre.ts`, que usa también el motor) toma un saldo vacío como CERO. Un reporte
    * de recaudación —`OPERACIÓN, Recibos, Fecha, Importe`— no es un estado de
    * cuenta, y el cuadre saldría contra un banco a cero.
    */
@@ -631,7 +631,7 @@ export function WizardContainer({
             },
             // Ni una partida viaja en el cuerpo: el extracto ya está en la
             // base y los comprobantes también. El backend corre la capa exacta
-            // en SQL y solo manda a n8n el residuo. Es lo que hace que 903.176
+            // en SQL y el motor recibe solo el residuo. Es lo que hace que 903.176
             // partidas quepan en una petición de dos líneas.
             lote_extracto_id: lote?.lote_id,
           }),
@@ -1051,7 +1051,7 @@ export function WizardContainer({
             ) : (
               <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-sm text-neutral-600">
                 El extracto es un PDF: sus columnas se interpretarán durante la
-                conciliación (n8n).
+                conciliación.
               </div>
             )}
           </div>

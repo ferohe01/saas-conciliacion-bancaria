@@ -6,7 +6,8 @@ import { normRef } from "@/lib/normalizacion/referencia";
  *
  * ── El problema ────────────────────────────────────────────────────────────
  *
- * `04_ensamblar.js` etiqueta cada pendiente por su signo:
+ * El ensamblado del motor (`src/lib/motor/ensamblar.ts`) etiqueta cada
+ * pendiente por su signo:
  *
  *     sugerencia: it.monto >= 0 ? 'Posible depósito en tránsito' : 'Posible cheque no cobrado'
  *
@@ -17,8 +18,7 @@ import { normRef } from "@/lib/normalizacion/referencia";
  *
  * ── ⚠️ Qué se afirma, y qué NO ──────────────────────────────────────────────
  *
- * El motor vive en `n8n/*.js` y es fuente única: no se puede importar, no entra
- * en el typecheck y no se ejecuta en los tests. Reimplementar aquí sus
+ * El motor vive en `src/lib/motor` y es fuente única. Reimplementar aquí sus
  * criterios crearía un segundo motor que diverge en silencio — el riesgo que la
  * 0029 documenta con `ref_norm`.
  *
@@ -91,7 +91,7 @@ export type ConfigDiagnostico = {
 const MS_DIA = 86_400_000;
 
 /**
- * Misma normalización que `normRef` en n8n/01_exacta.js y que `ref_norm`.
+ * Misma normalización que usa el motor y que `ref_norm`.
  *
  * Se re-exporta —en vez de definirse aquí, como estaba— para que el diagnóstico
  * no pueda contestar «no coincide la referencia» sobre dos códigos que el motor

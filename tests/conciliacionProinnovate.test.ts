@@ -1,9 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { detectarColumnasConDudas } from "@/lib/parsing/deteccion";
 import { normalizarBancarios } from "@/lib/normalizacion/canonico";
-import type { RegistroInterno } from "@/lib/contract/payload";
+import type { MovimientoBancario, RegistroInterno } from "@/lib/contract/payload";
+import { capaExacta } from "@/lib/motor/exacta";
 
 /**
  * El caso completo, con los dos archivos reales de un cliente: por qué una
@@ -19,22 +18,24 @@ import type { RegistroInterno } from "@/lib/contract/payload";
  * Con la columna equivocada, las cinco capas se apagan en cadena: la exacta
  * compara `REF-1002` contra `OP-500002`; el respaldo por monto+fecha lo bloquea
  * la guarda de contradicción de referencias (haciendo bien su trabajo, ver
- * `01_exacta.js`); y la difusa, la agrupación y la IA exigen todas identidad
- * compartida, que tampoco hay.
+ * `src/lib/motor/exacta.ts`); y la difusa, la agrupación y la IA exigen todas
+ * identidad compartida, que tampoco hay.
  *
  * Este test recorre el camino entero —detección → normalización → capa
  * exacta— porque el fallo solo es visible al final: cada pieza por separado
  * hacía exactamente lo que debía.
  */
 
-const DIR = join(process.cwd(), "n8n");
-
-const correrExacta = (entrada: unknown) => {
-  const src = readFileSync(join(DIR, "01_exacta.js"), "utf8").replace(
-    "const src = $('Webhook').first().json;",
-    "const src = $json;",
-  );
-  return new Function("$json", src)({ body: entrada })[0].json;
+const correrExacta = (entrada: {
+  registros_internos: RegistroInterno[];
+  movimientos_bancarios: MovimientoBancario[];
+}) => {
+  const e = capaExacta(entrada.registros_internos, entrada.movimientos_bancarios);
+  return {
+    matches: e.matches,
+    pendientes_internos: e.pendientesInternos,
+    pendientes_bancarios: e.pendientesBancarios,
+  };
 };
 
 // ── El extracto del banco, tal cual lo entrega ────────────────────────────

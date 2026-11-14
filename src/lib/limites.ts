@@ -14,11 +14,11 @@
  * Es un techo, no un objetivo: el caso para el que está pensado el producto
  * —500 a 2.000 movimientos— no lo roza nunca.
  *
- * ⚠️ No se sube solo. Cada fila pesa ~194 bytes medidos, así que el payload son
- * `filas × 2 × 194`: 20.000 son 7,8 MB (caben en el defecto de n8n, 16 MB) y
- * 50.000 son 19,4 MB (NO caben: hay que subir también `N8N_PAYLOAD_SIZE_MAX`).
- * Por eso el valor por defecto es prudente y quien necesite más lo sube en los
- * dos sitios.
+ * El motor corre dentro de la app, así que el tope protege la memoria del
+ * servidor y el tamaño del `resultado` que se guarda en la fila del job. Ya no
+ * va emparejado con el límite de payload de n8n, que dejó de existir; el valor
+ * por defecto se conserva porque está medido, y se sube con
+ * `MAX_FILAS_CONCILIACION`.
  */
 export function maxFilasConciliacion(): number {
   return Math.max(

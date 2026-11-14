@@ -67,8 +67,8 @@ export type Aplicacion = {
  *
  * Fuera quedan `pendiente` (espera criterio humano) y `rechazado` (lo negó).
  *
- * ⚠️ Esta lista se leyó del enum y se verificó contra lo que emiten los nodos
- * de n8n (`01_exacta.js`, `02_difusa.js`, `03_ia.js`). La primera versión la
+ * ⚠️ Esta lista se leyó del enum y se verificó contra lo que emiten las capas
+ * del motor (`src/lib/motor`: exacta, difusa e IA por encima del umbral). La primera versión la
  * dedujo de los nombres y omitió `auto`: el resultado fue que 29 de 33 pares
  * conciliados no descontaban nada.
  */

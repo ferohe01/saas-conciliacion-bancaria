@@ -45,7 +45,7 @@ export type DefinicionHerramienta = {
  *
  * ⚠️ El tope no es estético: es lo que impide que el prompt crezca con los
  * datos del cliente. Una recaudadora tiene miles de contrapartes y meterlas
- * todas repetiría el error de `ia_llm_01_candidatos.js` — 4,7 MB y 1,2 millones
+ * todas repetiría el error de los candidatos de IA del motor — 4,7 MB y 1,2 millones
  * de tokens. Diez es lo que cabe en una respuesta que alguien va a leer.
  */
 export const TOPE_CONTRAPARTES = 10;

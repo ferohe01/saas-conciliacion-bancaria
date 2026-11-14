@@ -23,7 +23,7 @@ export async function middleware(request: NextRequest) {
  * ARCHIVO, así que un CSV de 30 MB se habría importado a medias **sin error**,
  * que es pérdida de datos silenciosa.
  *
- * Las tres se autentican solas (sesión por cookie o token compartido) y no
+ * Las tres se autentican solas (sesión por cookie) y no
  * dependen del refresco del middleware, así que sacarlas no cambia nada más.
  *
  * **Regla:** toda ruta nueva que reciba un archivo o un payload que crezca con
@@ -34,6 +34,6 @@ export async function middleware(request: NextRequest) {
 export const config = {
   // Ejecuta en todas las rutas salvo estáticos, imágenes y las de cuerpo grande.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|api/conciliacion/iniciar|api/comprobantes/importar|api/extracto/importar|api/webhooks/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/conciliacion/iniciar|api/comprobantes/importar|api/extracto/importar|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

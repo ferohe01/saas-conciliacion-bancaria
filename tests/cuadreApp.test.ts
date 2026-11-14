@@ -2,14 +2,11 @@ import { describe, it, expect } from "vitest";
 import { calcularCuadre } from "@/lib/conciliacion/cuadre";
 
 /**
- * El cuadre de la aplicación tiene que dar EXACTAMENTE lo mismo que
- * `n8n/04_ensamblar.js`. Son dos implementaciones del mismo cálculo en dos
- * lenguajes, y conviven porque en el modo tabla puede no llegar a ejecutarse
- * n8n: si la capa exacta en SQL casa todo, el backend cierra el job solo.
- *
- * Los casos son los mismos que los de `tests/n8nNodos.test.ts` a propósito: si
- * alguna vez divergen, el mismo período daría dos diferencias distintas según
- * qué camino tomó, y no habría forma de saber cuál es la buena.
+ * `calcularCuadre` es la única implementación del cuadre: la usan el motor al
+ * ensamblar y el backend cuando cierra un job sin residuo. Antes había una
+ * segunda copia en n8n y estos casos vigilaban que no divergieran; se
+ * conservan porque el cuadre es el veredicto que el cliente enseña a su
+ * contador, y `tests/motor.test.ts` los repite a través del ensamblado.
  */
 describe("calcularCuadre (aplicación)", () => {
   it("cuadra cuando no hay nada suelto", () => {

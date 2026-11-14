@@ -4,10 +4,12 @@ import { TipoRegistroInterno, TipoMovimientoBancario } from "./enums";
 import { ConfigConciliacion } from "./config";
 
 /**
- * Contrato de ENTRADA: el JSON normalizado que el backend envía al webhook de
- * n8n (§7.2). El frontend hace el parsing/mapeo de archivos; lo que el usuario
- * confirma en pantalla es exactamente lo que se valida aquí y se envía.
- * Nunca viajan archivos crudos — solo estos datos canónicos.
+ * Contrato de ENTRADA del motor de conciliación (§7.2): el JSON normalizado que
+ * el backend arma y que `src/lib/motor` procesa. El frontend hace el
+ * parsing/mapeo de archivos; lo que el usuario confirma en pantalla es
+ * exactamente lo que se valida aquí y se procesa. Nunca viajan archivos
+ * crudos — solo estos datos canónicos. Se guarda tal cual en
+ * `jobs_conciliacion.payload_entrada`.
  */
 
 // job_id generado por el backend. Formato "rec-YYYY-MM-xxxx".
@@ -47,7 +49,11 @@ export const PayloadMetadata = z.object({
   periodo: Periodo,
   cuenta: CuentaMeta,
   saldos: Saldos,
-  callback_url: z.string().url(),
+  /**
+   * Retirado: era a dónde n8n devolvía el resultado. Se sigue aceptando porque
+   * los payloads guardados de antes lo traen y tienen que seguir validando.
+   */
+  callback_url: z.string().url().optional(),
 });
 
 export const RegistroInterno = z.object({
@@ -159,15 +165,3 @@ export const PayloadConciliacion = z
     }
   });
 export type PayloadConciliacion = z.infer<typeof PayloadConciliacion>;
-
-/**
- * Respuesta inmediata esperada de n8n al aceptar el job (modo "Respond
- * Immediately"). El backend compara estos conteos contra lo enviado.
- */
-export const RespuestaAceptacion = z.object({
-  status: z.literal("accepted"),
-  job_id: JobId,
-  registros_recibidos: z.number().int().nonnegative(),
-  movimientos_recibidos: z.number().int().nonnegative(),
-});
-export type RespuestaAceptacion = z.infer<typeof RespuestaAceptacion>;

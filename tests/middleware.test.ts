@@ -58,7 +58,7 @@ describe("matcher del middleware", () => {
     // Si alguna vuelve a entrar, su cuerpo se trunca a los 10 MB sin avisar.
     expect(matcher.test("/api/conciliacion/iniciar")).toBe(false);
     expect(matcher.test("/api/comprobantes/importar")).toBe(false);
-    expect(matcher.test("/api/webhooks/resultado-conciliacion")).toBe(false);
+    expect(matcher.test("/api/extracto/importar")).toBe(false);
   });
 
   it("excluye TODA ruta que reciba un archivo", () => {

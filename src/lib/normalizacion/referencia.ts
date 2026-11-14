@@ -3,13 +3,12 @@
  *
  * ── Por qué existe este módulo ─────────────────────────────────────────────
  *
- * La misma normalización estaba escrita CUATRO veces —`ref_norm` en SQL,
- * `normRef` en `n8n/01_exacta.js`, otro en `n8n/03a_agrupacion.js` y uno más en
- * `diagnosticoPartida.ts`— y las cuatro tenían que decir exactamente lo mismo:
- * si divergen, un par casa en SQL y no en el motor, o al revés, y **la
- * diferencia es invisible**. Los nodos de n8n no pueden importar de aquí (son
- * archivos sueltos que se pegan en un Code node), así que la copia sigue
- * existiendo — pero al menos el lado TypeScript tiene un solo origen y tests.
+ * La misma normalización estuvo escrita CUATRO veces —`ref_norm` en SQL, dos
+ * copias en los nodos de n8n y una en `diagnosticoPartida.ts`— y todas tenían
+ * que decir exactamente lo mismo: si divergen, un par casa en SQL y no en el
+ * motor, o al revés, y **la diferencia es invisible**. Con el motor dentro de
+ * la app (`src/lib/motor`) quedan dos: esta, que importan el motor y el
+ * diagnóstico, y `ref_norm` en SQL. `tests/referencia.test.ts` vigila las dos.
  *
  * ── El prefijo de entidad ──────────────────────────────────────────────────
  *

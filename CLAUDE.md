@@ -18,24 +18,28 @@ defecto, formato propio para quien exporta de un ERP. Al escribir texto nuevo,
 no volver a estrechar el público: lo que distingue a un cliente de otro es cómo
 carga sus datos y cuánto volumen mueve, no su tamaño en abstracto.
 
-**El motor de conciliación NO vive aquí.** Corre como flujos de **n8n**
-externos, invocados por webhook. Este proyecto implementa la interfaz, un
-backend delgado y el esquema Supabase.
+**El motor de conciliación vive aquí, en `src/lib/motor`.** Hasta el
+14/11/2026 corría como un flujo de **n8n** externo invocado por webhook; el
+cliente pidió no depender de n8n y se portó entero a TypeScript (ver «El motor
+dentro de la aplicación»). Este proyecto implementa la interfaz, el backend, el
+motor y el esquema Supabase.
 
 ## Principio arquitectónico rector
 
-> **La interfaz orquesta, normaliza y presenta; n8n procesa.**
+> **La interfaz orquesta, normaliza y presenta; el motor procesa en el
+> servidor, en segundo plano.**
 
-- Todo procesamiento pesado / con IA / de duración variable se delega a n8n con
-  el patrón asíncrono (ver "Contrato con n8n").
+- Todo procesamiento pesado / con IA / de duración variable corre en el
+  servidor con el patrón asíncrono: el backend crea el job, responde, y el motor
+  sigue trabajando (ver «Ejecución asíncrona»).
 - La interfaz hace el **parsing y mapeo de columnas** de los archivos y envía al
-  webhook **datos normalizados en JSON, nunca archivos crudos**.
-- **Lo que el usuario confirma en pantalla es exactamente lo que viaja al
-  webhook.**
-- El **frontend NUNCA** llama a los webhooks de n8n ni conoce keys
-  privilegiadas. Siempre pasa por el backend propio.
+  backend **datos normalizados en JSON, nunca archivos crudos**.
+- **Lo que el usuario confirma en pantalla es exactamente lo que procesa el
+  motor** (queda guardado en `payload_entrada`).
+- El **frontend NUNCA** ejecuta el motor ni conoce keys privilegiadas. Siempre
+  pasa por el backend propio.
 
-### Las capas de conciliación (contexto; corren en n8n)
+### Las capas de conciliación (corren en `src/lib/motor`)
 
 1. Match exacto (monto + ID de pago). ⚠️ El **respaldo por `monto + fecha`
    nunca empareja contra una referencia que se contradice**: existe para datos
@@ -61,8 +65,7 @@ para precisión: suma **casi exacta** (`min(tolerancia_monto_abs, 0.5)`), grupo
 pequeño (`≤ max_combinacion`), dentro de `ventana_ia_dias`, con desempate por
 coherencia de nombre. Se proponen como **sugerencias** (`estado 'pendiente'`,
 `categoria_diferencia = 'agrupacion_1aN'`) → van a revisión humana, nunca se
-auto-concilian. Lógica en el nodo de producción n8n `03a_agrupacion.js` (fuente
-única).
+auto-concilian. Lógica en `src/lib/motor/agrupacion.ts` (fuente única).
 
 ⚠️ **El prefiltro de identidad de la agrupación acepta REFERENCIA o nombre**, no
 solo nombre. Exigir nombre siempre parecía prudente hasta que apareció una cuenta
@@ -72,7 +75,7 @@ no podía agrupar nada — y eran justo los ~490 casos 1:N que había que concil
 el 4% del período y S/ 120.000 de descuadre. Lo que no se toca es que **tiene que
 haber alguna identidad compartida**: sin prefiltro, un subset-sum empareja
 partidas sin relación cuya suma cuadra por azar y el resultado parece correcto.
-Hay tests de las dos caras en `tests/n8nNodos.test.ts`.
+Hay tests de las dos caras en `tests/motor.test.ts`.
 
 **Etapa de generación de candidatos (antes de la IA).** Los pendientes tras
 exacta+difusa no se le pasan crudos a la IA. Primero una etapa determinística
@@ -82,27 +85,28 @@ signo + diferencia de monto ≤ `tolerancia_ia_monto` + fecha en ventana + ≥1
 palabra en común (nombre); luego un **score** (similitud de nombre + cercanía de
 monto/fecha + referencia) y se conservan los **top-K**. La IA solo **adjudica**
 sobre esa shortlist (elige el mejor o "ninguno") y clasifica el tipo de
-diferencia (reason code). Lógica en los nodos de producción n8n `03_ia.js`
-(heurístico) / `ia_llm_01_candidatos.js` (LLM) — fuente única.
+diferencia (reason code). Lógica en `src/lib/motor/candidatosIa.ts` (shortlist +
+prompt) y `adjudicarIa.ts` (validar la respuesta) — fuente única. La ruta
+heurística sin LLM (`03_ia.js`) ya no existía en producción y no se portó.
 
 **Few-shot dinámico (aprendizaje).** El backend extrae de los jobs completados
 de la empresa las **decisiones humanas confirmadas** (aceptado/modificado/manual
 → positivo; rechazado → negativo) y las adjunta al payload como
-`ejemplos_aprendizaje` (compactos, balanceados por clase, tope 12). El nodo LLM
-las inyecta como few-shot en el system prompt para que la IA calibre el criterio
-real de esa empresa (cuánta comisión toleran, cuándo rechazan pese a montos
-iguales). Constructor puro en `src/lib/aprendizaje.ts` (con tests); el path
-heurístico (`03_ia.js`) no lo usa (no hay LLM que calibrar).
+`ejemplos_aprendizaje` (compactos, balanceados por clase, tope 12). La capa de
+IA las inyecta como few-shot en el system prompt para que el modelo calibre el
+criterio real de esa empresa (cuánta comisión toleran, cuándo rechazan pese a
+montos iguales). Constructor puro en `src/lib/aprendizaje.ts` (con tests).
 
 ## Stack
 
 - **Frontend:** Next.js (App Router) + TypeScript **estricto** + Tailwind CSS v4.
-- **Backend:** API Routes de Next.js (backend delgado). El backend es
-  obligatorio entre el frontend y n8n / `service_role`.
+- **Backend:** API Routes de Next.js. El backend es obligatorio entre el
+  frontend y el motor / `service_role`.
 - **Datos/Auth/Storage/Realtime:** Supabase (Postgres + RLS + Auth + Storage +
   Realtime).
-- **Procesamiento pesado:** n8n externo (webhook con token compartido). n8n
-  escribe resultados directo en Supabase usando `service_role`.
+- **Motor de conciliación:** `src/lib/motor` (TypeScript, en el mismo proceso
+  del servidor, lanzado con `after()` tras responder). La capa exacta masiva
+  corre en SQL (`conciliar_exacta`); la IA llama a OpenAI con `OPENAI_API_KEY`.
 - **Parsing de archivos:** SheetJS (`xlsx`) — se añade en la fase del wizard.
 
 ## Estructura del repo
@@ -115,21 +119,29 @@ src/
       client.ts            Cliente navegador (anon). Protegido por RLS.
       server.ts            Cliente servidor (anon + sesión por cookies).
       admin.ts             Cliente service_role. SOLO servidor. Salta RLS.
-    contract/              ⭐ Backbone: contrato compartido con n8n (zod).
+    contract/              ⭐ Backbone: contrato de entrada/salida del motor (zod).
       primitives.ts        Fecha ISO, monto, confianza.
       enums.ts             Literales canónicos (estados, métodos, tipos).
       config.ts            Tolerancias/umbrales por empresa + defaults.
-      payload.ts           JSON de ENTRADA hacia n8n (§7.2) + ejemplos_aprendizaje.
-      resultado.ts         Estructura de `resultado` desde n8n (§7.3).
+      payload.ts           JSON de ENTRADA del motor (§7.2) + ejemplos_aprendizaje.
+      resultado.ts         Estructura de `resultado` que produce el motor (§7.3).
       index.ts             Re-exports.
+    motor/                 ⭐ Motor de conciliación (fuente única; antes en n8n).
+      exacta.ts            Capa 1: monto+referencia, respaldo monto+fecha.
+      difusa.ts            Capa 2: tolerancias + ≥1 palabra de nombre en común.
+      agrupacion.ts        Capa 2.5: 1:N / N:1 (subset-sum), siempre pendiente.
+      candidatosIa.ts      Shortlists top-K + prompt del LLM.
+      adjudicarIa.ts       Valida la respuesta del LLM contra lo que vio.
+      ensamblar.ts         Resumen, no conciliados y cuadre (`calcularCuadre`).
+      motor.ts             Orquesta las capas (puro; IA y avance inyectados).
+      llm.ts               Llamada a OpenAI. Nunca lanza.
+      procesarJob.ts       Corre el motor sobre un job y guarda el resultado.
   lib/
     aprendizaje.ts         Few-shot dinámico: decisiones humanas → ejemplos.
     reportes.ts            Agregaciones de reportes (KPIs, métodos, tipos).
     cicloContable.ts       Estados contables, transiciones y qué mueve saldo.
     filtrosComprobantes.ts Filtros de comprobantes (tipo/estado/período/busca).
     filtrosSaldo.ts        Filtros de las vistas de saldo (tramo, vencido).
-n8n/                       ⭐ Motor de conciliación: nodos Code (fuente única)
-                           + workflows importables (build_*.mjs).
 supabase/
   migrations/
     0001_schema.sql        Tablas.
@@ -182,8 +194,9 @@ tests/                     Vitest (unit).
 - **Convención de signos ÚNICA en todo el sistema:** abonos/entradas
   **positivos**, cargos/salidas **negativos**. Se aplica al normalizar en el
   wizard y nunca se reinterpreta después.
-- **Contrato con n8n:** toda I/O del webhook se valida con los esquemas zod de
-  `src/lib/contract`. Ni el frontend ni n8n redefinen esas formas.
+- **Contrato del motor:** la entrada se valida con los esquemas zod de
+  `src/lib/contract` antes de procesar, y el motor produce exactamente la forma
+  de `resultado.ts`. Nadie redefine esas formas.
 - **BD:** snake_case, `uuid` por defecto `gen_random_uuid()`, timestamps
   `timestamptz`.
 - **Commits pequeños por fase.** Actualizar este archivo cuando cambien
@@ -192,14 +205,11 @@ tests/                     Vitest (unit).
 
 ## Seguridad (no negociable)
 
-- El frontend nunca conoce `N8N_WEBHOOK_URL`/`N8N_WEBHOOK_TOKEN` ni
-  `SUPABASE_SERVICE_ROLE_KEY`.
+- El frontend nunca conoce `SUPABASE_SERVICE_ROLE_KEY` ni `OPENAI_API_KEY`.
 - `service_role` **solo en servidor** (`src/lib/supabase/admin.ts`, protegido
   por `import "server-only"`). El cliente usa `anon` + RLS.
 - RLS habilitado en **todas** las tablas desde la primera migración. La key
   `anon` jamás permite acceso cruzado entre empresas.
-- Webhooks (salida a n8n y callback de entrada) protegidos por token secreto en
-  header; rechazar requests sin token.
 - Validar y sanear **todo** payload entrante en el backend con zod.
 
 ### Variables de entorno (ver `.env.example`)
@@ -209,23 +219,22 @@ tests/                     Vitest (unit).
 | `NEXT_PUBLIC_SUPABASE_URL` | público | Cliente Supabase |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | público | Cliente Supabase (anon + RLS) |
 | `SUPABASE_SERVICE_ROLE_KEY` | **servidor** | Escrituras del sistema (salta RLS) |
-| `N8N_WEBHOOK_URL` | **servidor** | Disparar flujo de conciliación |
-| `N8N_WEBHOOK_TOKEN` | **servidor** | Autenticación del webhook |
-| `NEXT_PUBLIC_APP_URL` | público | Construir `callback_url` |
+| `OPENAI_API_KEY` | **servidor** | Capa de IA del motor + asistente. Sin ella no hay sugerencias de IA; el resto concilia igual |
+| `OPENAI_MODEL` / `OPENAI_MODEL_CONCILIACION` | **servidor** | Modelo (por defecto `gpt-5.6-luna`); el segundo solo para el motor |
+| `MAX_FILAS_CONCILIACION` | **servidor** | Tope de partidas por lado (20.000) |
 
-## Contrato con n8n (patrón asíncrono)
+## Ejecución asíncrona
 
 1. Frontend confirma (paso 3) → `POST /api/conciliacion/iniciar` (backend).
-2. Backend autentica, valida el payload (zod), genera `job_id`, inserta el job
-   (`estado='pendiente'`, `payload_entrada`) y **recién entonces** hace `POST`
-   al webhook de n8n con el token.
-3. n8n responde de inmediato: `{ status:"accepted", job_id, registros_recibidos,
-   movimientos_recibidos }`. El backend compara conteos enviados vs. recibidos;
-   si difieren → job a `error`.
-4. n8n actualiza `estado='procesando'` y `fase_actual` conforme avanza
-   (escribe directo en Supabase con `service_role`).
-5. Al terminar: escribe `resultado`, `estado='completado'`, `completed_at`.
-6. El frontend, suscrito por **Realtime** a la fila del job, navega a
+2. Backend autentica, valida el payload (zod), genera `job_id` e inserta el job
+   (`estado='pendiente'`, `payload_entrada`). En modo tabla corre antes la capa
+   exacta en SQL y el payload lleva solo el residuo.
+3. Responde `{ job_id }` y, **después de responder** (`after()` de Next), lanza
+   `procesarJob`: `estado='procesando'`, `fase_actual` al entrar en cada capa
+   (exacta → difusa → agrupacion → ia), y al final `resultado`,
+   `estado='completado'`, `completed_at`. Luego absorbe los pares a
+   `matches_conciliacion` (modo tabla).
+4. El frontend sigue la fila del job por **Realtime** + polling y navega a
    resultados.
 
 - **`job_id`** lo genera el backend: llave de trazabilidad e idempotencia. No
@@ -240,60 +249,52 @@ tests/                     Vitest (unit).
 
 Esquemas exactos: `src/lib/contract/payload.ts` y `resultado.ts`.
 
-### Workflows n8n (carpeta `n8n/`)
+### El motor dentro de la aplicación (`src/lib/motor`)
 
-Los flujos se **generan** con scripts para no editar JSON a mano: cada nodo Code
-es un `.js` versionado y `build_workflow*.mjs` los ensambla en un `.json`
-importable. Dos variantes:
-
-- `workflow_conciliacion.json` (heurístico, sin LLM):
-  `Webhook → Exacta → Difusa → Agrupacion → IA (sugerencias) → Ensamblar →
-  Actualizar Supabase`.
-- `workflow_conciliacion_ia.json` (IA real): igual, pero la capa IA es
-  `Candidatos IA → AI Agent (+ modelo por `ai_languageModel`) → Parsear IA`.
-
-#### El flujo que está conectado a este sistema
-
-> **`Conciliación Bancaria con IA`** — ese es el nombre exacto en n8n, y es el
-> único que existe: el heurístico se borró (05/08/2026). El path del webhook
-> sigue siendo `conciliaciones`.
-
-Topología en producción, verificada contra el lienzo de n8n:
+Hasta el 14/11/2026 el motor era el flujo **«Conciliación Bancaria con IA»** de
+n8n: siete nodos Code en `.js` sueltos, un AI Agent con OpenAI y un PATCH a
+Supabase. El cliente pidió no depender de n8n y se portó entero:
 
 ```
-Webhook → Responder aceptado → Exacta → Difusa → Agrupacion → Candidatos IA
-        → AI Agent → Parsear IA → Ensamblar resultado → Actualizar Supabase
-                ↑
-       OpenAI Chat Model  (sub-nodo por ai_languageModel)
+iniciar → (SQL: conciliar_exacta, modo tabla) → after(procesarJob):
+  exacta → difusa → agrupacion → candidatosIa → LLM → adjudicarIa → ensamblar
+  → UPDATE jobs_conciliacion.resultado → absorberResultado
 ```
 
-**El modelo es OpenAI y el generador también lo emite** (`lmChatOpenAi`, por
-defecto `gpt-5.6-luna`). Hubo una divergencia —el generador emitía Anthropic
-mientras producción usaba OpenAI, así que reimportar sustituía el nodo sin
-avisar— y se cerró alineando el repo con el despliegue. `ia_llm_02_parsear.js`
-entiende las dos formas de respuesta, así que cambiar de proveedor no rompe el
-parseo.
+- **Misma lógica, misma salida.** Cada nodo es ahora un módulo TypeScript
+  puro, con tipos y con tests (`tests/motor.test.ts`). Antes de retirar n8n se
+  hizo una **prueba diferencial** con los `.js` originales sobre los mismos
+  datos, capa por capa: 8 juegos sintéticos con nombres, agrupaciones y
+  respuestas de IA mezcladas, más junio real (452.463 × 450.999). Pares,
+  pendientes, prompts y cuadre **idénticos**.
+- **Lo que era copia ahora se importa**: `normRef` (antes en tres nodos), el
+  tokenizador de nombres (cuatro) y el cuadre (`calcularCuadre`, que tenía su
+  gemelo en `04_ensamblar.js`).
+- **Corre en el mismo proceso que la app**, lanzado con `after()` de Next
+  después de responder. El trabajo de cada capa es síncrono; entre capas se
+  cede el turno (`setImmediate`) y se escribe `fase_actual`, así que la
+  pantalla de progreso ve avanzar las capas — n8n solo escribía al final.
+- **Un fallo deja el job en `error` CON el motivo.** Con n8n, un flujo que moría
+  a medias dejaba el job en `procesando` para siempre. Lo que sigue sin poder
+  marcarse es que el proceso entero muera (reinicio del contenedor a mitad de
+  una conciliación): para eso sigue el vigilante de `jobsAtascados`.
+- **IA**: `llm.ts` llama a OpenAI con `OPENAI_API_KEY` (la misma del
+  asistente), modelo `OPENAI_MODEL_CONCILIACION` → `OPENAI_MODEL` →
+  `gpt-5.6-luna`, con `response_format: json_object` y dos intentos. **Si no hay
+  shortlists no se llama al modelo** (n8n pagaba una consulta vacía).
+- ⚠️ **Sin `OPENAI_API_KEY` en el entorno de la app no hay sugerencias de IA.**
+  La credencial vivía en n8n; ahora tiene que estar en Dokploy, en la app. La
+  conciliación funciona igual sin ella (exacta, difusa y agrupación), y el log
+  del servidor dice en cada corrida si se consultó al modelo.
+- No se portó `03_ia.js` (ruta heurística sin LLM): en n8n ya se había borrado.
+- Regla al editar una capa: mantener la forma `Etapa` (`matches`,
+  `pendientesInternos`, `pendientesBancarios`) y no mutar la entrada.
 
-Tras importar siguen sin viajar en el JSON, y hay que ponerlos a mano: la
-**credencial de OpenAI**, el **modelo** (confirmar que `gpt-4o-mini` sirve), el
-`service_role` del nodo "Actualizar Supabase" y la **credencial Header Auth** del
-Webhook. Importar además **crea un workflow nuevo**, no actualiza el existente:
-quedarían dos con el mismo nombre y hay que borrar el viejo.
+#### ⚠️ Nada de trabajo por par (en n8n abortaba el runner; aquí bloquea el servidor)
 
-Regenerar: `node n8n/build_workflow.mjs && node n8n/build_workflow_ia.mjs`. Tras
-reimportar, hay que **reseleccionar la credencial del modelo** (no viaja en el
-JSON), pegar el `service_role` en el nodo "Actualizar Supabase" y **seleccionar
-la credencial Header Auth del nodo Webhook** (`x-n8n-token` = `N8N_WEBHOOK_TOKEN`;
-el nodo declara `authentication: "headerAuth"`, pero la credencial tampoco viaja
-en el JSON). El backend
-**siempre** dispara n8n real (no hay simulador local). Los nodos `n8n/*.js` son la
-**fuente única** del motor: no hay implementación paralela en la app. Todo cambio
-de lógica de conciliación se hace ahí y se verifica **end-to-end** en n8n (los
-nodos Code no se testean unitariamente en el repo). Regla al editar: mantener la
-forma de salida de cada nodo (`job_id`, `metadata`, `config`, `matches`,
-`pendientes_*`) para no romper el nodo siguiente.
-
-#### ⚠️ El runner de n8n aborta a los 30 s: nada de trabajo por par
+El motor corre en el proceso de la app, así que un bucle caro ya no aborta un
+runner externo: **congela el servidor para todos los usuarios** mientras dura.
+La lección de n8n vale igual, o más.
 
 `02_difusa.js` llamaba a `comunesEntre(it.contraparte, bc.glosa)` **dentro del
 bucle interno**: por cada par hacía `normalize("NFD")` + regex + `toUpperCase` +
@@ -313,9 +314,9 @@ Arreglo, sin cambiar la semántica:
 Medido con 20.000 × 20.000: **de abortar a los 30 s a 493 ms.**
 `ia_llm_01_candidatos.js` tenía el mismo defecto y lleva el mismo precálculo.
 
-**Regla para cualquier nodo Code nuevo:** nada que dependa solo de un lado se
-calcula dentro del bucle del otro. A 2.000 partidas no se nota; a 20.000 tumba
-el runner, y el error no dice dónde.
+**Regla para cualquier capa nueva:** nada que dependa solo de un lado se
+calcula dentro del bucle del otro. A 2.000 partidas no se nota; a 20.000
+bloquea el servidor, y el error no dice dónde.
 
 ⚠️ **`03a_agrupacion.js` cayó en lo mismo, y por partida doble.** Sus tokens sí
 estaban precalculados —lección aprendida— pero `dias()` llamaba a `Date.parse`
@@ -337,26 +338,24 @@ par, no solo lo que se arregló la vez anterior.
 
 #### Un fallo de la IA no puede tumbar la conciliación
 
-El AI Agent llama a un servicio externo: puede caerse, agotar cuota, pasarse de
-tiempo o devolver algo raro. Sin protección, cualquiera de esas cosas **mata el
-flujo** y no llegan a ejecutarse `Ensamblar resultado` ni `Actualizar Supabase`:
-el job se queda en `procesando` para siempre y se pierden los **447.795 pares
+La capa de IA llama a un servicio externo: puede caerse, agotar cuota, pasarse
+de tiempo o devolver algo raro. En n8n, sin protección, eso **mató el flujo**:
+el job se quedó en `procesando` para siempre y se perdieron los **447.795 pares
 que la capa exacta ya había resuelto** — el 99 % del trabajo, tirado porque un
 modelo no contestó.
 
-El generador emite el nodo con **`onError: "continueRegularOutput"`** y dos
-reintentos. `Parsear IA` reconstruye su estado desde `Candidatos IA`, no del
-Agent, así que sin respuesta simplemente no hay adjudicaciones: todo queda
-pendiente de revisión humana, que es donde estaba.
+`consultarModeloConciliacion` **nunca lanza**: devuelve `null` y `adjudicarIa`
+sin respuesta simplemente no adjudica nada. Todo queda pendiente de revisión
+humana, que es donde estaba (en n8n: `onError: "continueRegularOutput"`).
 
 **La degradación correcta de una capa opcional es hacer menos, no romper.**
 
-`Actualizar Supabase` sí conserva el fallo —continuar en silencio dejaría el job
-creyendo que se guardó— pero reintenta tres veces: un corte de red no debe
-costar la corrida.
+La escritura del resultado sí conserva el fallo —continuar en silencio dejaría
+el job creyendo que se guardó— pero reintenta tres veces, y si aun así falla el
+job queda en `error` con el motivo.
 
-Hay tests de la cadena entera (`tests/n8nNodos.test.ts`) con el residuo real y
-la IA caída: ninguna partida se pierde, el cuadre sale, y una adjudicación sobre
+Hay tests de la cadena entera (`tests/motor.test.ts`) con el residuo real y la
+IA caída: ninguna partida se pierde, el cuadre sale, y una adjudicación sobre
 un registro que el modelo no vio se rechaza.
 
 #### ⚠️⚠️ El código de operación peruano es NUMÉRICO, y la IA no lo veía
@@ -393,7 +392,8 @@ conclusión natural era que faltaba credencial o que había que ampliar
 
 #### Y el prompt de la IA no cabía en ningún modelo
 
-`ia_llm_01_candidatos.js` abortó por lo mismo, pero al medirlo apareció algo
+La etapa de candidatos (`ia_llm_01_candidatos.js` en n8n, hoy
+`candidatosIa.ts`) abortó por lo mismo, pero al medirlo apareció algo
 peor que la lentitud: con el residuo de una recaudadora —4.382 internos— el
 prompt salía de **4,7 MB y ~1,2 MILLONES de tokens**. Ningún modelo lo acepta, y
 si lo aceptara costaría una fortuna por conciliación.
@@ -406,9 +406,9 @@ cabe en un prompt. A este volumen hay que **elegir qué se le pregunta**:
 - Los demás quedan **sin conciliar**, que es exactamente donde estaban: la
   inmensa mayoría no tiene ningún candidato plausible —son recibos cobrados por
   otro banco— y preguntárselo al modelo no aporta nada.
-- El nodo devuelve `shortlists_omitidas`. Callarlo daría a entender que la IA
-  los revisó y no encontró nada.
-- ⚠️ `shortlists` pasa al nodo de parseo **ya recortado**: valida la respuesta
+- `prepararIa` devuelve `shortlistsOmitidas` (va al log de cada corrida).
+  Callarlo daría a entender que la IA los revisó y no encontró nada.
+- ⚠️ `shortlists` pasa a `adjudicarIa` **ya recortado**: valida la respuesta
   contra lo que el modelo vio de verdad. Aceptar una adjudicación sobre algo que
   no se le mostró sería aceptar una invención.
 
@@ -418,68 +418,14 @@ referencia y por palabra (como en la agrupación), y el Jaccard calculado como
 cada uno de los 14 millones de pares—. Con datos como los del cliente: **de
 1,50 s a 0,03 s**, y el prompt de 266 KB a 54 KB.
 
-#### Los nodos `.js` no los revisaba nada — ahora sí (mínimo)
+#### Retirar n8n en producción
 
-Son la **fuente única** del motor pero viven fuera del typecheck (son `.js`
-sueltos) y no se ejecutan en los tests: se verifican end-to-end en n8n. Resultado
-real: un `].join("` con un **salto de línea crudo dentro del string** quedó
-commiteado sin que nada lo detectara. Reimportar habría dejado el nodo muerto, y
-el fallo habría salido en mitad de una conciliación de 20.000 registros.
-
-`tests/n8nNodos.test.ts` cubre lo mínimo indispensable:
-
-1. **`node --check`** sobre cada `.js`: que sea JavaScript válido.
-2. Que **el JSON generado coincida con los `.js`**: si alguien edita un nodo y
-   olvida regenerar, el importable queda desfasado — y es el JSON lo que se sube.
-
-No prueba la lógica del motor; eso sigue siendo end-to-end en n8n. Prueba que el
-archivo no esté roto, que es justo lo que faltaba.
-
-#### ⚠️ n8n no re-registra el webhook al guardar: hay que reiniciar el contenedor
-
-Costó una tarde entera de depuración, así que queda escrito.
-
-Editar el nodo, guardar el workflow, desactivarlo y volver a activarlo **no basta**:
-los cambios se guardan en la base de n8n, pero la ruta viva sigue sirviendo la
-definición con la que se registró el webhook al arrancar. El síntoma es
-desconcertante porque **todo lo que haces en el editor parece no existir** — y
-lleva a repetir el mismo arreglo cinco veces creyendo que se hace mal.
-
-**El arreglo es reiniciar el servicio de n8n en Dokploy** (*Redeploy* / *Restart*).
-Al arrancar vuelve a leer los workflows activos y registra sus webhooks desde
-cero. Guarda primero el flujo como quieras que quede; el reinicio es lo que lo
-hace efectivo. (Si el servicio tuviera más de una réplica el problema sería
-permanente: una instancia registra y otra atiende. Debe estar en 1.)
-
-#### Cómo se diagnostica desde fuera, sin entrar a n8n
-
-Un `POST` al webhook distingue los tres fallos por su respuesta, sin tocar nada:
-
-| Respuesta | Qué significa |
-|---|---|
-| `500` · `No authentication data defined on node!` | El nodo Webhook tiene `authentication: headerAuth` **sin credencial asignada**. Rechaza a todo el mundo, con token o sin él. |
-| `403` · `Authorization data is wrong!` | Credencial puesta y comparando. Si la app también recibe 403, es que los dos valores del token no coinciden. |
-| `200` · `{"status":"accepted", …}` **sin enviar token** | El webhook está **abierto a cualquiera** (`authentication: None`). |
-| `404` · `not registered` | El workflow no está activo, o hay otro compitiendo por el mismo path. |
-
-⚠️ Corrección de una creencia anterior de este documento: **un nodo sin credencial
-NO deja el webhook abierto** — devuelve 500 a todo. Abierto queda solo si alguien
-pone `authentication: None`, que es justo lo que se hace al diagnosticar y lo que
-hay que acordarse de deshacer.
-
-**Los dos workflows que genera el repo registran el mismo path `conciliaciones`**,
-así que solo uno puede estar activo. Hoy no aplica —en n8n solo queda
-`Conciliación Bancaria con IA`—, pero vuelve a aplicar en cuanto se importe el
-heurístico: arreglar el que no está activo no cambia nada, y el error observado
-es idéntico. Comprobar siempre en cuál se está editando antes de dar por bueno
-un arreglo.
-
-El grafo también acota dónde puede fallar: `Responder aceptado` es el **segundo**
-nodo y responde antes de que se ejecute nada más. Por tanto un `500` en el POST
-solo puede venir del Webhook; si lo que falta es la credencial del modelo
-(OpenAI Chat Model), la respuesta es **200** y el trabajo muere después, por dentro —el
-job se queda en `procesando` para siempre—. Son dos averías distintas con
-síntomas opuestos.
+El código ya no llama a n8n. Lo que queda fuera del repo, una vez desplegado:
+**desactivar el workflow** «Conciliación Bancaria con IA» (su webhook queda
+abierto a quien conozca la URL y el token), quitar `N8N_WEBHOOK_URL` /
+`N8N_WEBHOOK_TOKEN` / `NEXT_PUBLIC_APP_URL` del entorno de la app y **añadir
+`OPENAI_API_KEY`** si no estaba (ver arriba). Los jobs anteriores no cambian:
+su `resultado` tiene la misma forma.
 
 ## Comprobantes: cuentas por cobrar (Fase A)
 
@@ -512,7 +458,7 @@ el comprobante no se enteraba. Ahora el bucle está cerrado.
 humano en cada match exacto vaciaría de sentido el producto. Una sugerencia
 `pendiente` **no cobra nada** hasta que alguien la aprueba.
 
-⚠️ Esta lista se lee del enum `EstadoRevision` y de los nodos de n8n, nunca se
+⚠️ Esta lista se lee del enum `EstadoRevision` y de las capas del motor, nunca se
 deduce de los nombres: la primera versión omitió `auto` y dejó 29 de 33 pares
 conciliados sin descontar saldo. `manual` es un **método**, no un estado.
 
@@ -1127,22 +1073,18 @@ del cliente se añade al matcher. `tests/middleware.test.ts` lo vigila: comprueb
 las tres rutas conocidas y **escanea las APIs en busca de `request.formData()`**
 —una subida crece por definición— exigiendo que estén excluidas.
 
-## El tope de partidas es configurable, y va emparejado con n8n
+## El tope de partidas es configurable
 
 `MAX_FILAS_CONCILIACION` (por defecto **20.000**) acota las partidas por lado.
 Es un **techo, no un objetivo**: el caso para el que está pensado el producto
 —500 a 2.000 movimientos— no lo roza nunca.
 
-⚠️ **No se sube solo.** Cada fila pesa ~194 bytes *medidos*, así que el payload
-son `filas × 2 × 194`:
-
-    20.000 →  7,8 MB   cabe en el defecto de n8n (16 MB)
-    36.000 → 14,0 MB   cabe, justo
-    50.000 → 19,4 MB   NO cabe: hay que subir N8N_PAYLOAD_SIZE_MAX
-
-Por eso es variable de entorno con el valor prudente por defecto: quien necesite
-más lo sube **junto con** el de n8n, y ningún despliegue hereda una combinación
-rota.
+Iba emparejado con el tope de payload de n8n (cada fila pesa ~194 bytes, así
+que 50.000 por lado eran 19,4 MB contra 16). Con el motor dentro de la app eso
+ya no aplica: el tope protege la memoria del servidor —el motor corre en su
+proceso— y el tamaño del `resultado` que se guarda en la fila del job. Se sube
+con la variable de entorno; el valor por defecto está medido (20.000 × 20.000
+pasa la difusa en 493 ms).
 
 **Lección de dimensionado:** una recaudadora de 450.000 movimientos al mes da
 una media de 14.600 al día, pero el **pico real es 36.390** — 2,5 veces la
@@ -1334,7 +1276,7 @@ Dos arreglos que salieron de una crítica UX de `/conciliacion/[jobId]`:
 
 `jobs_conciliacion` lleva **dos ejes de estado, ortogonales a propósito**:
 
-- **`estado`** — el procesamiento en n8n: `pendiente | procesando | completado
+- **`estado`** — el procesamiento en el motor: `pendiente | procesando | completado
   | error`.
 - **`estado_contable`** — el documento: `borrador | en_proceso | observada |
   aprobada | anulada | reemplazada`.
@@ -1430,10 +1372,11 @@ referencia distinta.
   producto cartesiano: 300 × 300 = 90.000 pares en vez de 300. Numerar cada
   lado dentro de su grupo reproduce el "toma el siguiente libre" del JavaScript.
 - ⚠️ **Solo el pass 1 (monto + referencia).** El respaldo por monto + FECHA se
-  queda en `n8n/01_exacta.js` a propósito: necesita la guarda de contradicción
-  de referencias —sin ella emparejó 541 pares sin relación marcándolos `auto`—
-  y reescribirla en SQL sería duplicar el punto exacto donde el motor se
-  equivoca en silencio. n8n vuelve a correr su capa exacta sobre el residuo.
+  queda en `src/lib/motor/exacta.ts` a propósito: necesita la guarda de
+  contradicción de referencias —sin ella emparejó 541 pares sin relación
+  marcándolos `auto`— y reescribirla en SQL sería duplicar el punto exacto
+  donde el motor se equivoca en silencio. El motor vuelve a correr su capa
+  exacta sobre el residuo.
 - **Céntimos CON SIGNO**, no valor absoluto: en absoluto, un cobro casaría con
   un pago del mismo importe.
 
@@ -2126,14 +2069,14 @@ volver a ejecutar el mes.
   pendiente" es la frase que hace parar. Y cuando son cero, se dice también:
   callarlo haría dudar de una acción que no toca el dinero.
 
-## Cuando n8n acepta y luego se muere
+## Cuando el motor arranca y luego se muere
 
-`POST /api/conciliacion/iniciar` ya marcaba `error` en tres casos: n8n
-inalcanzable, respuesta que no es 2xx, y conteos recibidos distintos de los
-enviados. Lo que no cubría —y no puede— es que **n8n acepte con 200 y muera
-después**: el flujo responde en su SEGUNDO nodo, así que la aceptación no
-promete nada sobre los ocho siguientes. Si el runner aborta o el contenedor se
-reinicia, el job se queda en `procesando` y nadie lo saca de ahí.
+Nació con n8n, que respondía «aceptado» en su segundo nodo y podía morir en
+cualquiera de los ocho siguientes. Con el motor en la app, `procesarJob` marca
+`error` con su motivo ante cualquier excepción, así que ese caso desapareció.
+Lo que sigue sin poder cubrirse es que **el proceso entero muera a mitad** —un
+reinicio o redespliegue del contenedor mientras alguien concilia—: nadie queda
+vivo para escribir nada, y el job se queda en `procesando`.
 
 ⚠️ **El daño no es la pantalla girando.** Un job en `pendiente` o `procesando`
 **retiene la clave de idempotencia** (cuenta + período), así que el usuario
@@ -2151,8 +2094,8 @@ de un LLM externo y una corrida con miles de adjudicaciones puede tardar minutos
 legítimamente. Un falso "detenida" cuesta más que esperar de más — empuja a
 relanzar algo que iba a terminar.
 
-- **No se marca `error` sola.** Un temporizador no sabe si n8n murió o si va
-  lento; declarar fallida una conciliación que está terminando sería inventarse
+- **No se marca `error` sola.** Un temporizador no sabe si el proceso murió o si
+  va lento; declarar fallida una conciliación que está terminando sería inventarse
   un hecho. Se describe lo observable ("lleva 34 minutos") y decide quien mira.
 - **Lo que sí se hace sin preguntar es dejar de bloquear el relanzamiento**, que
   no afirma nada y desencalla al usuario.
@@ -2160,12 +2103,9 @@ relanzar algo que iba a terminar.
   ha comprobado que fallara, solo que dejó de avanzar. El color no debe afirmar
   más que el texto.
 
-**Por qué no un Error Workflow de n8n:** el payload del Error Trigger solo trae
-metadatos de la ejecución (`execution.id`, `workflow`, el mensaje) — **no el
-`job_id`**, que viajaba en el body del webhook. Marcar el job correcto exigiría
-consultar la API de n8n con otra credencial, y aun así no cubriría el caso de
-que n8n esté caído del todo, que es justo cuando más falta hace. El vigilante
-vive en la app porque solo ahí se sabe qué se esperaba y desde cuándo.
+⚠️ **Al redesplegar la app se corta cualquier conciliación en curso.** Mejor
+desplegar cuando nadie esté conciliando; si no, esa corrida queda
+«Interrumpida» y hay que relanzarla.
 
 ## El cuadre bancario: los pendientes del banco se RESTAN
 
@@ -2221,9 +2161,8 @@ supuestos con lo que está comprobando.
 - **Los signos de las etiquetas describen el EFECTO sobre el saldo, no la
   operación**: las partidas ya vienen firmadas, así que "+ Cheques no cobrados"
   restaría y confundiría a quien lee el detalle.
-- Hay tests en `tests/n8nNodos.test.ts` — segunda excepción deliberada a "los
-  nodos Code no se testean unitariamente", por el mismo motivo que la agrupación:
-  el fallo produce un resultado **plausible y equivocado**.
+- Hay tests en `tests/motor.test.ts` y `tests/cuadreApp.test.ts`: el fallo
+  produce un resultado **plausible y equivocado**.
 
 ## Que una factura no se cobre dos veces
 
@@ -2298,14 +2237,13 @@ era un cartel sin puerta detrás.
 Equipos/roles/invitaciones/SSO · facturación y pagos (cobro, planes, pasarela —
 el límite de prueba de `0005` no es facturación) · pgvector/semántica ·
 OCR y XML UBL de facturas · integraciones ERP/bancos/Open Banking · tablas
-normalizadas de transacciones/matches (el JSONB del job basta) · el motor de
-conciliación (vive en n8n).
+normalizadas de transacciones/matches (el JSONB del job basta).
 
 ### Decisiones que se apartan del spec original
 
 - **PDF de extractos:** el spec lo dejaba fuera del MVP, pero por decisión del
   producto la UI **sí acepta PDF** desde ya (además de Excel/CSV). El
-  *procesamiento* real del PDF se resolverá en n8n; la interfaz solo lo carga y
+  *procesamiento* real del PDF se resolverá en el servidor; la interfaz solo lo carga y
   lo envía normalizado. Mantener el selector preparado para ello.
 
 ## Diseño / lenguaje visual
@@ -3050,7 +2988,7 @@ Traefik terminando TLS (Let's Encrypt) delante de cada servicio:
 |---|---|---|
 | App (esta) | `conciliacion.fernandorh.com` | Application, build **Dockerfile**, puerto 3000 |
 | Supabase | `supabase.fernandorh.com` | Compose; solo se expone `kong` (8000) |
-| n8n | `n8npucp.fernandorh.com` | Webhook de producción `/webhook/conciliaciones` |
+| n8n | `n8npucp.fernandorh.com` | **Ya no lo usa la app** (motor en `src/lib/motor` desde el 14/11/2026). Desactivar el workflow `conciliaciones` |
 
 - **Imagen:** `Dockerfile` multi-etapa sobre `node:22-alpine`, `output:
   "standalone"` en `next.config.mjs`, usuario no-root. `/api/health` existe para

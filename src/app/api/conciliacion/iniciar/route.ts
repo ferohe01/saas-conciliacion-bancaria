@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getUsuarioActual, getEmpresaActual } from "@/lib/auth";
 import { getConfigEmpresa } from "@/lib/config";
 import { generarJobId } from "@/lib/jobs";
-import { enviarAN8n } from "@/lib/n8n/cliente";
+import { procesarJob } from "@/lib/motor/procesarJob";
 import { construirEjemplos, type JobHistorico } from "@/lib/aprendizaje";
 import { hidratarJobsModoTabla } from "@/lib/conciliacion/historico";
 import { criteriosParaIa } from "@/lib/criteriosIniciales";
@@ -28,12 +28,11 @@ import { ConfigConciliacion } from "@/lib/contract/config";
 /**
  * POST /api/conciliacion/iniciar
  *
- * Backend delgado que orquesta el arranque de una conciliación (§7.1):
+ * Orquesta el arranque de una conciliación (§7.1):
  *  1) autentica al usuario y valida el payload,
  *  2) genera job_id e inserta el job (estado 'pendiente'),
- *  3) recién entonces dispara n8n (webhook) con el token,
- *  4) compara los conteos recibidos vs. enviados.
- * El frontend nunca contacta a n8n ni conoce el token.
+ *  3) responde y deja el motor (`src/lib/motor`) corriendo en segundo plano.
+ * La pantalla de progreso sigue el job por Realtime + polling.
  */
 
 /**
@@ -43,17 +42,11 @@ import { ConfigConciliacion } from "@/lib/contract/config";
  * más común— no lo roza nunca. Existe para que un archivo absurdo no tumbe el
  * motor ni deje un `resultado` inmanejable.
  *
- * ⚠️ VA EMPAREJADO CON EL TOPE DE PAYLOAD DE n8n. Cada fila pesa ~194 bytes
- * medidos, así que el payload son `filas × 2 × 194`:
- *
- *     20.000 →  7,8 MB   cabe en el defecto de n8n (16 MB)
- *     36.000 → 14,0 MB   cabe, justo
- *     50.000 → 19,4 MB   ⚠️ NO cabe: hay que subir N8N_PAYLOAD_SIZE_MAX
- *
- * Por eso es una variable de entorno con el valor prudente por defecto: quien
- * necesite más lo sube **junto con** el de n8n, y nadie hereda una combinación
- * rota por defecto. Un despliegue de gran volumen (p. ej. una recaudadora que
- * concilia por día con picos de 36.000) pone 50.000 aquí y 64 MB allá.
+ * El motor corre dentro de este mismo proceso, así que el tope protege la
+ * memoria del servidor y el tamaño del `resultado` que se guarda en la fila del
+ * job. Ya no va emparejado con el límite de payload de n8n (que dejó de
+ * existir), pero el valor por defecto se conserva: está medido (20.000 × 20.000
+ * pasa la difusa en 493 ms) y subirlo es una variable de entorno.
  *
  * El valor vive en `lib/limites.ts` porque el diagnóstico previo del Paso 3
  * avisa de este mismo tope antes de que este endpoint lo aplique: con dos
@@ -68,7 +61,7 @@ const MAX_FILAS = maxFilasConciliacion();
  *
  * El extracto ya está en `movimientos_extracto` y los comprobantes en su tabla,
  * así que el navegador NO manda partidas: manda el identificador del lote y
- * cuatro datos más. La capa exacta corre en SQL y a n8n solo viaja el residuo.
+ * cuatro datos más. La capa exacta corre en SQL y al motor solo llega el residuo.
  *
  * Es lo que hace viable el cliente grande: 903.176 partidas no caben en un
  * JSON, pero un uuid sí.
@@ -202,7 +195,6 @@ export async function POST(request: Request) {
 
   const jobId = generarJobId(req.periodo.desde);
   const modoTabla = req.lote_extracto_id != null;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
   // Config de la empresa (editable en /configuracion) + override por request.
   const configEmpresa = await getConfigEmpresa();
@@ -305,10 +297,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: detalle }, { status: 500 });
     }
 
-    // ⚠️ Si a alguno de los dos lados no le queda residuo, n8n no puede aportar
-    // nada: no hay contra qué casar lo que sobra. Se cierra aquí en vez de
-    // mandar un payload que el motor rechazaría — y el usuario ve una
-    // conciliación completada, que es la verdad.
+    // ⚠️ Si a alguno de los dos lados no le queda residuo, el motor no puede
+    // aportar nada: no hay contra qué casar lo que sobra. Se cierra aquí — y el
+    // usuario ve una conciliación completada, que es la verdad.
     if (internos.length === 0 || bancarios.length === 0) {
       const cuadre = calcularCuadre(req.saldos ?? {}, internos, bancarios);
       await admin
@@ -351,7 +342,6 @@ export async function POST(request: Request) {
         moneda: cuenta.moneda,
       },
       saldos: req.saldos,
-      callback_url: `${appUrl}/api/webhooks/resultado-conciliacion`,
     },
     config: { ...configEmpresa, ...(req.config ?? {}) },
     registros_internos: internos,
@@ -385,51 +375,12 @@ export async function POST(request: Request) {
     );
   }
 
-  // Disparar el procesamiento en n8n (webhook con token).
-  const envio = await enviarAN8n(validado.data);
-  if (!envio.ok) {
-    if (envio.entregaIncierta) {
-      // Se agotó el tiempo con la petición ya en vuelo: NO se sabe si n8n la
-      // recibió. Marcar 'error' seria mentir — puede estar procesándose, y el
-      // resultado llegaría después pisando ese estado. El job se queda en
-      // 'pendiente' y la pantalla de progreso (Realtime + polling) resuelve
-      // sola el caso bueno; si n8n nunca lo recibió, queda visible en el
-      // historial para reintentarlo.
-      await admin
-        .from("jobs_conciliacion")
-        .update({ error_detalle: envio.error })
-        .eq("id", jobId);
-      return NextResponse.json(
-        { job_id: jobId, aviso: envio.error },
-        { status: 202 },
-      );
-    }
-    await admin
-      .from("jobs_conciliacion")
-      .update({ estado: "error", error_detalle: envio.error })
-      .eq("id", jobId);
-    return NextResponse.json({ error: envio.error }, { status: 502 });
-  }
+  // El motor corre aquí mismo, pero DESPUÉS de responder: el navegador navega a
+  // la pantalla de progreso en cuanto tiene el job_id, y esa pantalla sigue el
+  // avance por Realtime + polling. `procesarJob` no lanza: cualquier fallo deja
+  // el job en `error` con su motivo.
+  const datos = validado.data;
+  after(() => procesarJob(jobId, datos));
 
-  // Comparar conteos enviados vs. recibidos.
-  const enviadosInt = validado.data.registros_internos.length;
-  const enviadosBanc = validado.data.movimientos_bancarios.length;
-  if (
-    envio.aceptacion.registros_recibidos !== enviadosInt ||
-    envio.aceptacion.movimientos_recibidos !== enviadosBanc
-  ) {
-    const detalle = `Conteos no coinciden: enviados ${enviadosInt}/${enviadosBanc}, recibidos ${envio.aceptacion.registros_recibidos}/${envio.aceptacion.movimientos_recibidos}.`;
-    await admin
-      .from("jobs_conciliacion")
-      .update({ estado: "error", error_detalle: detalle })
-      .eq("id", jobId);
-    return NextResponse.json({ error: detalle }, { status: 502 });
-  }
-
-  await admin
-    .from("jobs_conciliacion")
-    .update({ estado: "procesando" })
-    .eq("id", jobId);
-
-  return NextResponse.json({ job_id: jobId, modo: "n8n" });
+  return NextResponse.json({ job_id: jobId, modo: "motor" });
 }

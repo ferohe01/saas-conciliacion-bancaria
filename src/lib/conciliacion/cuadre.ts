@@ -3,10 +3,10 @@ import type { Cuadre } from "@/lib/contract/resultado";
 /**
  * El cuadre bancario, calculado en la aplicación.
  *
- * Es el MISMO cálculo que hace `n8n/04_ensamblar.js`, y existe aquí porque en
- * el modo tabla (parte B) puede no llegar a ejecutarse n8n: si la capa exacta
- * en SQL casa todo, o si uno de los dos lados se queda sin residuo, no hay nada
- * que el motor pueda aportar y el backend cierra el job por su cuenta.
+ * Es la ÚNICA implementación del cuadre: la usa el motor al ensamblar el
+ * resultado (`src/lib/motor/ensamblar.ts`) y el backend cuando cierra un job
+ * sin residuo (si la capa exacta en SQL casa todo, el motor no tiene nada que
+ * aportar). Antes había una segunda copia en JavaScript dentro de n8n.
  *
  * ⚠️ Los pares CONCILIADOS no entran en el cuadre, sean 400.000 o cero: por
  * definición están en los dos lados y se cancelan. Solo cuentan las partidas

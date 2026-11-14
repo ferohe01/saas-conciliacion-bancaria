@@ -5,10 +5,10 @@ import { normRef } from "@/lib/normalizacion/referencia";
 
 /**
  * La referencia canónica es lo que decide si dos partidas son la misma
- * operación, y está escrita CUATRO veces: aquí, en `ref_norm` (SQL, 0029/0042)
- * y en dos nodos de n8n. Los tests fijan la regla; la última prueba comprueba
- * que las copias de n8n no se hayan quedado atrás, que es la forma en que esto
- * se rompe de verdad.
+ * operación, y está escrita DOS veces: aquí y en `ref_norm` (SQL, 0029/0042).
+ * Antes había además copias en los nodos de n8n, que no podían importar nada;
+ * el motor ya vive en la app y la importa. Los tests fijan la regla y
+ * comprueban que nadie vuelva a copiarla.
  */
 
 describe("normRef", () => {
@@ -54,8 +54,8 @@ describe("normRef", () => {
   });
 
   it("es idempotente: aplicarla dos veces da lo mismo", () => {
-    // Importa porque el residuo viaja a n8n con la referencia CRUDA y allí se
-    // vuelve a normalizar. Si no lo fuera, la segunda pasada movería la clave.
+    // Importa porque el residuo llega al motor con la referencia CRUDA y allí
+    // se vuelve a normalizar. Si no lo fuera, la segunda pasada movería la clave.
     for (const r of [
       "WIN-S001-11618954",
       "S001-11618954",
@@ -77,14 +77,14 @@ describe("normRef", () => {
   });
 });
 
-describe("las copias del motor no se quedan atrás", () => {
-  const nodos = ["01_exacta.js", "03a_agrupacion.js", "ia_llm_01_candidatos.js", "03_ia.js"];
+describe("el motor usa la misma regla, no una copia", () => {
+  const capas = ["exacta.ts", "agrupacion.ts", "candidatosIa.ts"];
 
-  it.each(nodos)("%s lleva la misma regla de prefijo", (nodo) => {
-    const js = readFileSync(join(process.cwd(), "n8n", nodo), "utf8");
-    // La regex del prefijo, escrita igual en los cuatro.
-    expect(js).toContain("/^[A-Za-z]+[-_/ ]+/");
-    expect(js).toContain("limpiarRef(resto).length >= 6");
+  it.each(capas)("%s importa normRef en vez de reescribirla", (capa) => {
+    const ts = readFileSync(join(process.cwd(), "src", "lib", "motor", capa), "utf8");
+    expect(ts).toContain('from "@/lib/normalizacion/referencia"');
+    // Si alguien vuelve a pegar la regex del prefijo, hay dos reglas otra vez.
+    expect(ts).not.toContain("/^[A-Za-z]+[-_/ ]+/");
   });
 
   it("la migración 0042 usa la misma expresión en las dos tablas", () => {

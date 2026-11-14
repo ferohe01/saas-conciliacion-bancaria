@@ -22,8 +22,9 @@ export type JobRow = {
 };
 
 /**
- * Las cuatro etapas del motor, en el orden real del workflow de n8n:
- * Exacta → Difusa → Agrupación → IA (ver CLAUDE.md § Las capas de conciliación).
+ * Las cuatro etapas del motor (`src/lib/motor`), en su orden real:
+ * Exacta → Difusa → Agrupación → IA. El motor escribe `fase_actual` al entrar
+ * en cada una, así que la lista avanza en vivo.
  */
 const FASES = [
   {
@@ -76,10 +77,10 @@ export function ProgresoConciliacion({ jobInicial }: { jobInicial: JobRow }) {
     };
   }, [jobInicial.id]);
 
-  // Respaldo por polling: el flujo real de n8n hace UNA sola actualización al
-  // final; si el navegador pierde ese único evento de Realtime (caída del
-  // WebSocket durante la espera), Realtime no lo reenvía. El polling garantiza
-  // que la pantalla transicione igual. Se detiene al completar o fallar.
+  // Respaldo por polling: si el navegador pierde el evento de Realtime del
+  // final (caída del WebSocket durante la espera; en producción Realtime
+  // devuelve 403), Realtime no lo reenvía. El polling garantiza que la
+  // pantalla transicione igual. Se detiene al completar o fallar.
   useEffect(() => {
     if (job.estado === "completado" || job.estado === "error") return;
     const supabase = createClient();
@@ -153,7 +154,7 @@ export function ProgresoConciliacion({ jobInicial }: { jobInicial: JobRow }) {
         <p className="mt-1 text-sm text-amber-900">
           El motor devolvió un resultado con un formato que esta pantalla no
           reconoce. Los datos siguen guardados; vuelve a lanzar la conciliación
-          del período o revisa la ejecución en n8n.
+          del período.
         </p>
         {resumen && (
           <p className="mt-2 text-sm tabular-nums text-amber-900">
@@ -175,8 +176,8 @@ export function ProgresoConciliacion({ jobInicial }: { jobInicial: JobRow }) {
   }
 
   // ── Parece detenida ───────────────────────────────────────────────────
-  // n8n responde en su SEGUNDO nodo, así que la aceptación no promete nada
-  // sobre los ocho siguientes: puede aceptar y morir después. Sin esto, la
+  // El motor marca `error` cuando falla, pero no puede marcar nada si el
+  // proceso entero muere a mitad (un reinicio del contenedor). Sin esto, la
   // pantalla giraba indefinidamente y el período quedaba además bloqueado para
   // relanzarlo. No se afirma que haya fallado —no lo sabemos—, se dice lo que
   // se observa y se da salida.
@@ -309,7 +310,7 @@ export function ProgresoConciliacion({ jobInicial }: { jobInicial: JobRow }) {
 
       <div className="mt-5 border-t border-neutral-200 pt-4">
         <p className="text-sm text-neutral-600">
-          ¿Ya terminó en n8n y la pantalla no cambia?
+          ¿Ya terminó y la pantalla no cambia?
         </p>
         <Boton
           variante="secundario"

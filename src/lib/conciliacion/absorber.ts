@@ -4,12 +4,12 @@ import { enLotes } from "@/lib/supabase/paginado";
 import { ResultadoConciliacion } from "@/lib/contract/resultado";
 
 /**
- * Vuelca los matches que devolvió n8n a `matches_conciliacion` (parte B).
+ * Vuelca los matches del motor a `matches_conciliacion` (parte B).
  *
  * ── Por qué hace falta ─────────────────────────────────────────────────────
  *
  * En modo tabla la conciliación queda partida en dos: la capa exacta escribió
- * sus pares en la tabla, y n8n devuelve los suyos —los del residuo— dentro del
+ * sus pares en la tabla, y el motor deja los suyos —los del residuo— dentro del
  * JSONB `resultado`. Dos sitios para la misma cosa es exactamente el estado en
  * el que una pantalla acaba contando la mitad y nadie sabe por qué.
  *
