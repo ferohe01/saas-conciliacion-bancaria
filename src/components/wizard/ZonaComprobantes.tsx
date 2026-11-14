@@ -24,6 +24,7 @@ import {
   type CampoComprobante,
 } from "@/lib/parsing/mapeoComprobantes";
 import { detectarComprobantesConDudas } from "@/lib/parsing/deteccionComprobantes";
+import { reconocerFormato } from "@/lib/parsing/formatosConocidos";
 import { MapeoComprobantesForm } from "@/components/comprobantes/MapeoComprobantesForm";
 import type { ResumenComprobantes } from "@/app/(app)/wizard/actions";
 
@@ -110,8 +111,11 @@ export function ZonaComprobantes({
     muestras: Record<string, unknown>[];
   } | null>(null);
 
-  const subir = (file: File | undefined, config?: Config) => {
+  const subir = (file: File | undefined, configElegida?: Config) => {
     if (!file) return;
+    let config = configElegida;
+    /** Nombre del formato conocido con que se reconoció el archivo, si alguno. */
+    let reconocido: string | null = null;
     setError(null);
     setAviso(null);
     onRechazo?.(null);
@@ -151,7 +155,40 @@ export function ZonaComprobantes({
         }
       }
 
-      // ── Con formato guardado: comprobar que sirve para ESTE archivo ───────
+      // ── Formato conocido: se carga sin preguntar nada ─────────────────────
+      //
+      // El export de siempre del ERP del cliente no tiene nada que decidir:
+      // abrir el formulario de diez campos cada vez sería trabajo sin motivo y
+      // una ocasión de elegir mal. Va ANTES del formato guardado porque es más
+      // preciso que él. Solo se para si falta una columna que la conciliación
+      // necesita, y entonces dice cuál y para qué.
+      if (archivoPropio && !config) {
+        try {
+          const { headers } = await leerCabecera(file, 5);
+          const r = reconocerFormato(headers);
+          if (r && r.faltan.length > 0) {
+            setError(
+              `Reconocimos tu ${r.formato.nombre}, pero ${
+                r.faltan.length === 1 ? "le falta la columna" : "le faltan las columnas"
+              } ${r.faltan
+                .map((f) => `«${f.columna}» (${f.para})`)
+                .join(" y ")}, ${
+                r.faltan.length === 1 ? "necesaria" : "necesarias"
+              } para conciliar. Vuelve a exportarlo desde tu sistema con ${
+                r.faltan.length === 1 ? "esa columna" : "esas columnas"
+              }.`,
+            );
+            return;
+          }
+          if (r) {
+            config = r.config;
+            reconocido = r.formato.nombre;
+          }
+        } catch {
+          // Si no se puede leer la cabecera, sigue el camino de siempre.
+        }
+      }
+
       //
       // ⚠️⚠️ El formato se recuerda para no volver a preguntar, pero recordarlo
       // no significa que valga para cualquier archivo.
@@ -221,7 +258,10 @@ export function ZonaComprobantes({
 
       // El formato se recuerda ANTES de importar: si la carga es larga y el
       // usuario cierra la pestaña, el aprendizaje ya quedó hecho.
-      if (config) await guardarMapeoComprobantes(config);
+      // Un formato conocido no se guarda: no hace falta recordarlo, y pisaría
+      // el que la empresa confirmó para sus otros archivos.
+      if (config && !reconocido) await guardarMapeoComprobantes(config);
+
 
       const cuerpo = new FormData();
       cuerpo.append("archivo", file);
@@ -240,7 +280,14 @@ export function ZonaComprobantes({
           setError(res.error ?? "No se pudo importar.");
           return;
         }
-        setAviso(res.mensaje ?? "Comprobantes importados.");
+        // Con un formato conocido se dice que se reconoció: es lo que explica
+        // que no se haya preguntado nada. El detalle del servidor va detrás,
+        // porque «ya estaban cargados» u «omitidas» no se pueden callar.
+        setAviso(
+          reconocido
+            ? `✓ Registros cargados (${reconocido} reconocido). ${res.mensaje ?? ""}`.trim()
+            : (res.mensaje ?? "Comprobantes importados."),
+        );
         setMapeando(null);
         setConfirmando(null);
         onMapeando?.(false);
