@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 
 export type EmpresaActual = {
@@ -33,7 +34,23 @@ export async function getUsuarioActual() {
  * por usuario; si hubiera varias, toma la primera. Devuelve null si no hay
  * sesión o membresía.
  */
-export async function getEmpresaActual(): Promise<EmpresaActual | null> {
+export const getEmpresaActual = cache(leerEmpresaActual);
+
+/**
+ * ⚠️ `cache()`: UNA lectura por petición, no una por llamada.
+ *
+ * Abrir cualquier pantalla la pedía tres veces —el layout, `getAccesoCuenta`
+ * dentro del layout, y la página— y cada vez eran dos viajes a Supabase
+ * (`getUser`, que valida el token contra el servidor de auth, y la consulta de
+ * la empresa). Seis viajes en serie para el mismo dato: ~1 s de cada carga
+ * desde fuera del VPS.
+ *
+ * La caché de React vive lo que dura UNA petición de render, así que no se
+ * reutiliza una sesión entre peticiones ni entre usuarios: cada navegación
+ * vuelve a validar el token. Fuera de un render (server actions, route
+ * handlers) `cache` no deduplica y la función se comporta como antes.
+ */
+async function leerEmpresaActual(): Promise<EmpresaActual | null> {
   const supabase = await createClient();
   const {
     data: { user },
