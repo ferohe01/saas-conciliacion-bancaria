@@ -4,6 +4,7 @@ import {
   dedupEnArchivo,
   separarExistentes,
   mensajeImportacion,
+  textoProgreso,
 } from "@/lib/importacion";
 
 const fila = (tipo: "cobranza" | "pago", referencia: string | null) => ({
@@ -150,6 +151,42 @@ describe("referencia_externa no interfiere con la deduplicación", () => {
       { tipo: "cobranza", referencia: "SR11-001", referencia_externa: "EFECTIVO901" },
     ]);
     expect(r.repetidas).toBe(1);
+  });
+});
+
+describe("textoProgreso", () => {
+  // El separador de miles es el de es-PE, el mismo que usa toda la app.
+  const n = (x: number) => x.toLocaleString("es-PE");
+  const base = { fase: "cargando" as const, insertados: 0 };
+
+  it("estima el total por la fracción de bytes, con ~ y redondeado a miles", () => {
+    expect(textoProgreso({ ...base, filas: 227_000, fraccion: 0.5 })).toBe(
+      `Importando… ${n(227_000)} de ~${n(454_000)} filas (50 %)`,
+    );
+  });
+
+  it("con muy poco leído NO estima: sería una cifra inventada", () => {
+    expect(textoProgreso({ ...base, filas: 3_000, fraccion: 0.005 })).toBe(
+      `Importando… ${n(3_000)} filas`,
+    );
+  });
+
+  it("sin fracción (XLSX) solo cuenta", () => {
+    expect(textoProgreso({ ...base, filas: 12_000, fraccion: null })).toBe(
+      `Importando… ${n(12_000)} filas`,
+    );
+  });
+
+  it("al principio y al final dice qué está haciendo", () => {
+    expect(textoProgreso({ ...base, filas: 0, fraccion: 0 })).toBe("Importando… leyendo el archivo");
+    expect(
+      textoProgreso({ fase: "terminando", filas: 452_605, insertados: 452_454, fraccion: 1 }),
+    ).toContain("Guardando el resumen");
+  });
+
+  it("el total estimado nunca es menor que lo ya leído", () => {
+    // 1.400 / 0,999 redondea a 1.000, que es menos de lo ya leído.
+    expect(textoProgreso({ ...base, filas: 1_400, fraccion: 0.999 })).toContain(`de ~${n(1_400)}`);
   });
 });
 

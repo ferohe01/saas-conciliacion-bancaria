@@ -25,6 +25,10 @@ import {
 } from "@/lib/parsing/mapeoComprobantes";
 import { detectarComprobantesConDudas } from "@/lib/parsing/deteccionComprobantes";
 import { reconocerFormato } from "@/lib/parsing/formatosConocidos";
+import {
+  textoProgreso,
+  type ProgresoImportacion,
+} from "@/lib/importacion";
 import { MapeoComprobantesForm } from "@/components/comprobantes/MapeoComprobantesForm";
 import type { ResumenComprobantes } from "@/app/(app)/wizard/actions";
 
@@ -87,6 +91,8 @@ export function ZonaComprobantes({
   const [arrastrando, setArrastrando] = useState(false);
   /** Solo para explicar la espera: por encima de esto lo lee el servidor. */
   const [grande, setGrande] = useState(false);
+  /** Último avance que mandó el servidor durante la importación. */
+  const [progreso, setProgreso] = useState<ProgresoImportacion | null>(null);
   /**
    * Cuando el archivo no trae las columnas de la plantilla: qué es cada una.
    * Vive AQUÍ y no en otra pantalla — todo el paso de cargar comprobantes
@@ -189,6 +195,7 @@ export function ZonaComprobantes({
         }
       }
 
+      // ── Con formato guardado: comprobar que sirve para ESTE archivo ───────
       //
       // ⚠️⚠️ El formato se recuerda para no volver a preguntar, pero recordarlo
       // no significa que valga para cualquier archivo.
@@ -262,7 +269,6 @@ export function ZonaComprobantes({
       // el que la empresa confirmó para sus otros archivos.
       if (config && !reconocido) await guardarMapeoComprobantes(config);
 
-
       const cuerpo = new FormData();
       cuerpo.append("archivo", file);
       if (config) cuerpo.append("mapeo", JSON.stringify(config));
@@ -270,13 +276,12 @@ export function ZonaComprobantes({
         const r = await fetch("/api/comprobantes/importar", {
           method: "POST",
           body: cuerpo,
+          // Pide el avance en vivo: sin esto, medio millón de filas son veinte
+          // minutos de «Importando…» que parecen un cuelgue.
+          headers: { accept: "application/x-ndjson" },
         });
-        const res = (await r.json()) as {
-          ok?: boolean;
-          error?: string;
-          mensaje?: string;
-        };
-        if (!r.ok || !res.ok) {
+        const res = await leerRespuesta(r, setProgreso);
+        if (!res.ok) {
           setError(res.error ?? "No se pudo importar.");
           return;
         }
@@ -296,6 +301,8 @@ export function ZonaComprobantes({
         setError(
           "No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.",
         );
+      } finally {
+        setProgreso(null);
       }
     });
   };
@@ -335,8 +342,11 @@ export function ZonaComprobantes({
     />
   );
 
-  const mensajes = (
+  // `conBarra` es falso en la tarjeta vacía, que pinta el avance DENTRO: con la
+  // barra también debajo, la tarjeta decía «Importando…» y la barra otra cosa.
+  const mensajes = (conBarra = true) => (
     <>
+      {conBarra && subiendo && progreso && <BarraProgreso progreso={progreso} />}
       {aviso && (
         <p role="status" className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-900">
           {aviso}
@@ -417,7 +427,7 @@ export function ZonaComprobantes({
             Cancelar
           </button>
         </div>
-        {mensajes}
+        {mensajes()}
         {input}
       </div>
     );
@@ -456,7 +466,7 @@ export function ZonaComprobantes({
           }}
           onConfirmar={() => subir(mapeando.archivo, mapeando.config)}
         />
-        {mensajes}
+        {mensajes()}
       </div>
     );
   }
@@ -557,7 +567,7 @@ export function ZonaComprobantes({
             </button>
           )}
         </div>
-        {mensajes}
+        {mensajes()}
         {input}
       </div>
     );
@@ -575,45 +585,64 @@ export function ZonaComprobantes({
         onDrop={(e) => {
           e.preventDefault();
           setArrastrando(false);
-          subir(e.dataTransfer.files?.[0]);
+          if (!subiendo) subir(e.dataTransfer.files?.[0]);
         }}
-        onClick={() => inputRef.current?.click()}
+        onClick={() => {
+          if (!subiendo) inputRef.current?.click();
+        }}
         role="button"
         tabIndex={0}
+        aria-disabled={subiendo}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
+          if (!subiendo && (e.key === "Enter" || e.key === " ")) {
             e.preventDefault();
             inputRef.current?.click();
           }
         }}
         className={[
-          "flex h-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-8 text-center transition-colors",
-          arrastrando
-            ? "border-blue-400 bg-blue-50"
-            : "border-neutral-300 bg-white hover:border-neutral-400",
+          "flex h-full flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-8 text-center transition-colors",
+          subiendo
+            ? "cursor-default border-blue-300 bg-white"
+            : arrastrando
+              ? "cursor-pointer border-blue-400 bg-blue-50"
+              : "cursor-pointer border-neutral-300 bg-white hover:border-neutral-400",
         ].join(" ")}
       >
         <DocumentoIcon className="h-8 w-8 text-neutral-500" />
         <p className="mt-3 font-semibold text-neutral-800">
           Comprobantes del período
         </p>
-        <p className="mt-1 text-sm text-neutral-600">
-          {subiendo
-            ? "Importando…"
-            : resumen === null
-              ? "Buscando los del período…"
-              : "Arrastra el archivo o haz clic para buscar"}
-          {subiendo && grande && " los archivos grandes tardan un poco"}
-        </p>
-        <span className="mt-4 inline-flex items-center rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 shadow-sm hover:bg-neutral-50">
-          Seleccionar archivo
-        </span>
-        <p className="mt-3 text-xs text-neutral-600">
-          Excel o CSV · tus cobranzas y pagos del período
-        </p>
-        <p className="mt-1 text-xs text-neutral-600">
-          Súbelo con las columnas que tenga: te preguntamos qué es cada una.
-        </p>
+        {/* ⚠️ Mientras importa, UN solo mensaje: el avance real, aquí dentro.
+            Antes la tarjeta decía «Importando…» y una barra debajo decía otra
+            cosa, y el botón de seleccionar seguía invitando a subir otro. */}
+        {subiendo ? (
+          <div className="mt-2 w-full max-w-xs">
+            {progreso ? (
+              <BarraProgreso progreso={progreso} />
+            ) : (
+              <p className="text-sm text-neutral-600">
+                Importando…{grande && " los archivos grandes tardan un poco"}
+              </p>
+            )}
+          </div>
+        ) : (
+          <>
+            <p className="mt-1 text-sm text-neutral-600">
+              {resumen === null
+                ? "Buscando los del período…"
+                : "Arrastra el archivo o haz clic para buscar"}
+            </p>
+            <span className="mt-4 inline-flex items-center rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 shadow-sm hover:bg-neutral-50">
+              Seleccionar archivo
+            </span>
+            <p className="mt-3 text-xs text-neutral-600">
+              Excel o CSV · tus cobranzas y pagos del período
+            </p>
+            <p className="mt-1 text-xs text-neutral-600">
+              Súbelo con las columnas que tenga: te preguntamos qué es cada una.
+            </p>
+          </>
+        )}
       </div>
 
       {/* La plantilla, para quien no tiene ningún archivo que soltar. Va DENTRO
@@ -632,8 +661,91 @@ export function ZonaComprobantes({
         y llénala.
       </p>
 
-      {mensajes}
+      {mensajes(false)}
       {input}
+    </div>
+  );
+}
+
+type RespuestaImportacion = { ok: boolean; error?: string; mensaje?: string };
+
+/**
+ * Lee la respuesta de la importación: un stream NDJSON con el avance, o el JSON
+ * de siempre (errores tempranos —sin sesión, sin archivo— no llevan stream).
+ *
+ * ⚠️ Si el stream termina SIN línea final, la conexión se cortó a mitad. No se
+ * puede afirmar ni que falló ni que terminó: parte de las filas pueden estar ya
+ * en la base. Se dice eso, y dónde comprobarlo, en vez de un «no se pudo» que
+ * invitaría a volver a subir el archivo entero.
+ */
+async function leerRespuesta(
+  r: Response,
+  onProgreso: (p: ProgresoImportacion) => void,
+): Promise<RespuestaImportacion> {
+  const tipo = r.headers.get("content-type") ?? "";
+  if (!tipo.includes("application/x-ndjson") || !r.body) {
+    const res = (await r.json().catch(() => ({}))) as Partial<RespuestaImportacion>;
+    return { ...res, ok: r.ok && res.ok === true };
+  }
+
+  const reader = r.body.getReader();
+  const decoder = new TextDecoder();
+  let resto = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    resto += decoder.decode(value, { stream: true });
+    const lineas = resto.split("\n");
+    resto = lineas.pop() ?? "";
+    for (const linea of lineas) {
+      if (!linea.trim()) continue;
+      const msg = JSON.parse(linea) as
+        | ({ tipo: "progreso" } & ProgresoImportacion)
+        | ({ tipo: "fin"; status: number } & Partial<RespuestaImportacion>);
+      if (msg.tipo === "progreso") onProgreso(msg);
+      else return { ...msg, ok: msg.status === 200 && msg.ok === true };
+    }
+  }
+  return {
+    ok: false,
+    error:
+      "La conexión se cortó antes de terminar la carga. Puede que parte del archivo ya se haya cargado: revisa «Cargas realizadas» en Comprobantes antes de volver a subirlo.",
+  };
+}
+
+/**
+ * El avance de una importación larga.
+ *
+ * La barra solo aparece cuando hay fracción REAL (CSV, bytes leídos). En XLSX
+ * no la hay y se enseña solo el recuento: una barra inventada que se queda
+ * quieta es peor que ninguna.
+ */
+function BarraProgreso({ progreso }: { progreso: ProgresoImportacion }) {
+  const pct =
+    progreso.fase === "terminando"
+      ? 100
+      : progreso.fraccion != null
+        ? Math.floor(progreso.fraccion * 100)
+        : null;
+  return (
+    <div role="status" aria-live="polite" className="mt-3">
+      <p className="text-sm tabular-nums text-neutral-700">
+        {textoProgreso(progreso)}
+      </p>
+      {pct != null && (
+        <div
+          className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-neutral-200"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={pct}
+        >
+          <div
+            className="h-full rounded-full bg-blue-600 transition-[width] duration-500"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }

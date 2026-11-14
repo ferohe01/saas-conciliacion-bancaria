@@ -7,6 +7,7 @@ import { LectorCsv, type FilaCsv } from "@/lib/parsing/csv";
 import {
   claveComprobante,
   mensajeImportacion,
+  type ProgresoImportacion,
   type ResumenImportacion,
 } from "@/lib/importacion";
 import {
@@ -44,6 +45,9 @@ export const maxDuration = 300;
 
 /** Filas por INSERT. Ni tan pocas que sean mil viajes, ni tanto que la petición pese. */
 const LOTE = 1000;
+
+/** Bytes del CSV que se procesan de cada vez: ~1.200 filas de un mayor contable. */
+const TROZO_CSV = 256 * 1024;
 
 /** Tope para XLSX, que se lee entero en memoria. El CSV no tiene tope. */
 const MAX_FILAS_XLSX = 50_000;
@@ -153,6 +157,60 @@ export async function POST(request: Request) {
     ? resolverConfig(mapeoPeticion, empresa.mapeo_comprobantes)
     : { mapeo: MAPEO_PLANTILLA, tipoFijo: null };
 
+  // `procesar` es una declaración (se eleva), y TypeScript no lleva dentro el
+  // estrechamiento de `empresa` y `archivo`: se fijan aquí, ya comprobados.
+  const empresaActual = empresa;
+  const archivoSubido = archivo;
+
+  // ── Con progreso, si el navegador lo pide ─────────────────────────────────
+  //
+  // ⚠️ Medio millón de filas son ~20 minutos, y con un «Importando…» fijo eso
+  // es indistinguible de un cuelgue: lo natural es recargar o volver a subir.
+  // Si la petición acepta NDJSON, la respuesta es un stream con una línea de
+  // avance cada poco y una línea final con el resultado de siempre. Sin esa
+  // cabecera, la ruta responde exactamente como antes.
+  const quiereProgreso = (request.headers.get("accept") ?? "").includes(
+    "application/x-ndjson",
+  );
+  if (!quiereProgreso) {
+    const r = await procesar(() => {});
+    return NextResponse.json(r.body, { status: r.status });
+  }
+
+  const enc = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(ctrl) {
+      // ⚠️ Si el usuario cierra la pestaña el stream se cancela y `enqueue`
+      // lanza. La importación NO se interrumpe por eso: cortarla a mitad
+      // dejaría media carga sin registrar. Solo se deja de avisar.
+      let abierto = true;
+      const enviar = (o: Record<string, unknown>) => {
+        if (!abierto) return;
+        try {
+          ctrl.enqueue(enc.encode(JSON.stringify(o) + "\n"));
+        } catch {
+          abierto = false;
+        }
+      };
+      const r = await procesar((p) => enviar({ tipo: "progreso", ...p }));
+      enviar({ tipo: "fin", status: r.status, ...r.body });
+      if (abierto) ctrl.close();
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "content-type": "application/x-ndjson; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      // Que ningún proxy lo acumule hasta el final: eso anularía el avance.
+      "x-accel-buffering": "no",
+    },
+  });
+
+  async function procesar(
+    avisar: (p: ProgresoImportacion) => void,
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+  const empresa = empresaActual;
+  const archivo = archivoSubido;
   const admin = createAdminClient();
   const lote = randomUUID();
   const resumen: ResumenImportacion = {
@@ -240,6 +298,28 @@ export async function POST(request: Request) {
   const vistas = new Set<string>();
   let pendientes: Preparada[] = [];
 
+  const esCsv = archivo.name.toLowerCase().endsWith(".csv");
+
+  // Avance: en CSV, bytes leídos contra el tamaño del archivo. Es exacto desde
+  // el primer trozo, mientras que el total de filas no se sabe hasta el final.
+  // En XLSX no hay fracción (se lee entero de golpe) y se cuentan las filas.
+  let bytesLeidos = 0;
+  let ultimoAviso = 0;
+  const avanzar = (fase: ProgresoImportacion["fase"], forzar = false) => {
+    const ahora = Date.now();
+    if (!forzar && ahora - ultimoAviso < 500) return;
+    ultimoAviso = ahora;
+    avisar({
+      fase,
+      filas: filasProcesadas,
+      insertados: resumen.insertados,
+      fraccion:
+        esCsv && archivo.size > 0
+          ? Math.min(1, bytesLeidos / archivo.size)
+          : null,
+    });
+  };
+
   const descargar = async (): Promise<string | null> => {
     if (pendientes.length === 0) return null;
 
@@ -286,6 +366,7 @@ export async function POST(request: Request) {
           : "No se pudieron guardar los comprobantes.";
       }
       resumen.insertados += parte.length;
+      avanzar("cargando");
     }
     pendientes = [];
     return null;
@@ -335,7 +416,7 @@ export async function POST(request: Request) {
     pendientes.push(p);
   };
 
-  const esCsv = archivo.name.toLowerCase().endsWith(".csv");
+  avanzar("cargando", true);
 
   try {
     if (esCsv && request.body !== null) {
@@ -348,12 +429,26 @@ export async function POST(request: Request) {
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        for (const f of lector.trozo(decoder.decode(value, { stream: true }))) {
-          admitir(f as unknown as Record<string, unknown>);
-        }
-        if (pendientes.length >= LOTE) {
-          const err = await descargar();
-          if (err) return NextResponse.json({ error: err }, { status: 400 });
+        // ⚠️ Se trocea lo que llega. El archivo ya está en memoria (lo dejó ahí
+        // `formData()`), y su stream puede entregarlo en UN solo trozo de 95 MB:
+        // entonces los bytes leídos marcaban 100 % al primer instante y la
+        // barra se quedaba llena mientras quedaba todo el trabajo con la base.
+        // Con trozos pequeños, leer e insertar avanzan juntos y el porcentaje
+        // dice la verdad. El decoder en modo `stream` une los caracteres que
+        // queden partidos entre dos trozos.
+        for (let i = 0; i < value.byteLength; i += TROZO_CSV) {
+          const parte = value.subarray(i, i + TROZO_CSV);
+          for (const f of lector.trozo(decoder.decode(parte, { stream: true }))) {
+            admitir(f as unknown as Record<string, unknown>);
+          }
+          bytesLeidos += parte.byteLength;
+          // También aquí, no solo al terminar un insert: si todo el archivo ya
+          // estaba cargado no se inserta nada y la barra no se movería nunca.
+          avanzar("cargando");
+          if (pendientes.length >= LOTE) {
+            const err = await descargar();
+            if (err) return { status: 400, body: { error: err } };
+          }
         }
       }
       for (const f of lector.fin() as FilaCsv[]) {
@@ -365,31 +460,38 @@ export async function POST(request: Request) {
       const wb = XLSX.read(await archivo.arrayBuffer(), { cellDates: true });
       const hoja = wb.SheetNames[0];
       if (!hoja) {
-        return NextResponse.json({ error: "El archivo no tiene hojas." }, { status: 400 });
+        return { status: 400, body: { error: "El archivo no tiene hojas." } };
       }
       const filas = XLSX.utils.sheet_to_json<Record<string, unknown>>(
         wb.Sheets[hoja]!,
         { defval: null, raw: false },
       );
       if (filas.length > MAX_FILAS_XLSX) {
-        return NextResponse.json(
-          {
+        return {
+          status: 413,
+          body: {
             error: `Este Excel trae ${filas.length.toLocaleString("es-PE")} filas y el máximo es ${MAX_FILAS_XLSX.toLocaleString("es-PE")}. Guárdalo como CSV: ese formato no tiene tope porque se lee por partes.`,
           },
-          { status: 413 },
-        );
+        };
       }
       for (const f of filas) admitir(f);
     }
 
     const err = await descargar();
-    if (err) return NextResponse.json({ error: err }, { status: 400 });
+    if (err) return { status: 400, body: { error: err } };
   } catch {
-    return NextResponse.json(
-      { error: `No pudimos leer "${archivo.name}". Revisa que sea un Excel o CSV sin contraseña.` },
-      { status: 400 },
-    );
+    return {
+      status: 400,
+      body: {
+        error: `No pudimos leer "${archivo.name}". Revisa que sea un Excel o CSV sin contraseña.`,
+      },
+    };
   }
+
+  // Las filas ya están; queda registrar la carga y refrescar estadísticas, que
+  // con medio millón tarda unos segundos. Se dice, para que la barra al 100 %
+  // no parezca otra vez colgada.
+  avanzar("terminando", true);
 
   // ── Qué pasó en esta carga, para poder contarlo después ──────────────────
   //
@@ -420,12 +522,16 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({
-    ok: true,
-    ...resumen,
-    lote: resumen.insertados > 0 ? lote : undefined,
-    mensaje: mensajeImportacion(resumen),
-  });
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      ...resumen,
+      lote: resumen.insertados > 0 ? lote : undefined,
+      mensaje: mensajeImportacion(resumen),
+    },
+  };
+  }
 }
 
 

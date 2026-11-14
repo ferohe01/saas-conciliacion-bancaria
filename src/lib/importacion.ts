@@ -88,6 +88,47 @@ export function separarExistentes<
   return { nuevas, yaExistian };
 }
 
+/**
+ * Una línea de avance del stream de `/api/comprobantes/importar`.
+ *
+ * Existe porque medio millón de filas son ~20 minutos, y un «Importando…» fijo
+ * durante ese tiempo es indistinguible de un cuelgue.
+ */
+export type ProgresoImportacion = {
+  fase: "cargando" | "terminando";
+  /** Filas del archivo leídas hasta ahora. */
+  filas: number;
+  insertados: number;
+  /** 0–1 en CSV (bytes leídos / tamaño); null en XLSX, que se lee de golpe. */
+  fraccion: number | null;
+};
+
+/** Por debajo de esto, extrapolar el total de filas sería inventarlo. */
+const FRACCION_PARA_ESTIMAR = 0.02;
+
+/**
+ * El avance en una frase.
+ *
+ * ⚠️ El total de filas NO se conoce hasta el final: se ESTIMA por la fracción
+ * de bytes leídos, y por eso lleva «~» y va redondeado a miles. Con muy poco
+ * leído no se estima: «de ~3.000.000» a los dos segundos sería una cifra
+ * inventada que luego se desploma.
+ */
+export function textoProgreso(p: ProgresoImportacion): string {
+  const n = (x: number) => x.toLocaleString("es-PE");
+  if (p.fase === "terminando") {
+    return `Ya están las ${n(p.filas)} filas. Guardando el resumen de la carga…`;
+  }
+  // «Importando», la misma palabra que el resto de la tarjeta: con dos verbos
+  // distintos para lo mismo parecía que pasaban dos cosas.
+  if (p.filas === 0) return "Importando… leyendo el archivo";
+  if (p.fraccion != null && p.fraccion >= FRACCION_PARA_ESTIMAR) {
+    const total = Math.max(p.filas, Math.round(p.filas / p.fraccion / 1000) * 1000);
+    return `Importando… ${n(p.filas)} de ~${n(total)} filas (${Math.floor(p.fraccion * 100)} %)`;
+  }
+  return `Importando… ${n(p.filas)} filas`;
+}
+
 export type ResumenImportacion = {
   insertados: number;
   yaExistian: number;
