@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { reconocerFormato } from "@/lib/parsing/formatosConocidos";
+import {
+  reconocerFormato,
+  saldoMasReciente,
+  type SaldoEnFecha,
+} from "@/lib/parsing/formatosConocidos";
 import { aplicarMapeo } from "@/lib/parsing/mapeoComprobantes";
 
 // Cabecera real del export (primera hoja de «WIN-Libro Mayor JUNIO COMPLETO»).
@@ -84,8 +88,43 @@ describe("formato conocido: libro mayor de WIN", () => {
     expect(r?.config.mapeo.monto).toBe(" DEBITO ");
   });
 
+  it("expone la columna de saldo acumulado, con su cabecera real", () => {
+    expect(reconocerFormato(CABECERA)?.columnaSaldo).toBe("Saldo");
+    expect(
+      reconocerFormato(CABECERA.filter((c) => c !== "Saldo"))?.columnaSaldo,
+    ).toBeNull();
+  });
+
   it("un archivo que no se le parece no se reconoce", () => {
     expect(reconocerFormato(["fecha", "monto", "tipo", "referencia"])).toBeNull();
     expect(reconocerFormato(["Fecha", "Débito", "Crédito", "Saldo"])).toBeNull();
+  });
+});
+
+describe("saldoMasReciente: el saldo según libros es el de la línea más reciente", () => {
+  const recorrer = (lineas: SaldoEnFecha[]) =>
+    lineas.reduce<SaldoEnFecha | null>((p, l) => saldoMasReciente(p, l), null);
+
+  it("por FECHA, no por posición: el mayor empieza con líneas del mes anterior", () => {
+    // Forma real del export: abre con asientos del 26/05 y cierra el 30/06.
+    expect(
+      recorrer([
+        { fecha: "2026-06-30", saldo: 13_886_768.15 },
+        { fecha: "2026-05-26", saldo: 7_055_975.46 },
+      ]),
+    ).toEqual({ fecha: "2026-06-30", saldo: 13_886_768.15 });
+  });
+
+  it("dentro del mismo día gana la línea posterior: el saldo es acumulado", () => {
+    expect(
+      recorrer([
+        { fecha: "2026-06-30", saldo: 13_886_768.15 },
+        { fecha: "2026-06-30", saldo: 13_886_769.15 },
+      ]),
+    ).toEqual({ fecha: "2026-06-30", saldo: 13_886_769.15 });
+  });
+
+  it("sin líneas no hay saldo", () => {
+    expect(recorrer([])).toBeNull();
   });
 });

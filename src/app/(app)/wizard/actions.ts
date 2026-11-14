@@ -487,7 +487,47 @@ export type ResumenComprobantes = {
    * archivo tiene 233 y lo primero que piensa es que algo se duplicó.
    */
   arrastrados: number;
+  /**
+   * Saldo según libros que trae el libro mayor cargado (0056), si su línea más
+   * reciente cae DENTRO del período. Es una propuesta: el Paso 1 la rellena y
+   * dice de dónde sale, y el usuario puede cambiarla.
+   */
+  saldoLibros: { saldo: number; fecha: string; archivo: string | null } | null;
 };
+
+/**
+ * El saldo según libros de la carga más reciente que cae en el período.
+ *
+ * ⚠️ Solo dentro del período: un saldo al 30/06 propuesto para conciliar julio
+ * sería un número plausible y equivocado. Y si falla —p. ej. la 0056 sin
+ * aplicar— devuelve null: el campo vuelve a ser manual, como siempre fue, en
+ * vez de tumbar el recuento de comprobantes por un dato añadido.
+ */
+async function saldoLibrosDelPeriodo(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  desde: string,
+  hasta: string,
+): Promise<ResumenComprobantes["saldoLibros"]> {
+  const { data, error } = await supabase
+    .from("importaciones_comprobantes")
+    .select("saldo_libros, saldo_libros_fecha, archivo")
+    .not("saldo_libros", "is", null)
+    .gte("saldo_libros_fecha", desde)
+    .lte("saldo_libros_fecha", hasta)
+    .order("saldo_libros_fecha", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) {
+    console.error("[wizard] no se pudo leer el saldo según libros:", error);
+    return null;
+  }
+  const f = data?.[0] as
+    | { saldo_libros: number | string; saldo_libros_fecha: string; archivo: string | null }
+    | undefined;
+  return f
+    ? { saldo: Number(f.saldo_libros), fecha: f.saldo_libros_fecha, archivo: f.archivo }
+    : null;
+}
 
 /**
  * Conteo y suma de los comprobantes de un período (migración 0027).
@@ -513,13 +553,17 @@ export async function resumenComprobantesPeriodo(
     fueraPeriodo: 0,
     anulados: 0,
     arrastrados: 0,
+    saldoLibros: null,
   };
   const supabase = await createClient(); // la función acota por auth.uid()
-  const { data, error } = await supabase.rpc("resumen_comprobantes_periodo", {
-    p_desde: desde,
-    p_hasta: hasta,
-    p_moneda: moneda ?? null,
-  });
+  const [{ data, error }, saldoLibros] = await Promise.all([
+    supabase.rpc("resumen_comprobantes_periodo", {
+      p_desde: desde,
+      p_hasta: hasta,
+      p_moneda: moneda ?? null,
+    }),
+    saldoLibrosDelPeriodo(supabase, desde, hasta),
+  ]);
   if (error) {
     // Devolver ceros diría "no hay comprobantes", que es una afirmación falsa
     // sobre datos que sí existen — exactamente el fallo que esto viene a
@@ -529,7 +573,7 @@ export async function resumenComprobantesPeriodo(
     );
   }
   const f = (data as ResumenFila[] | null)?.[0];
-  if (!f) return vacio;
+  if (!f) return { ...vacio, saldoLibros };
   return {
     registros: Number(f.registros ?? 0),
     suma: Number(f.suma ?? 0),
@@ -540,6 +584,7 @@ export async function resumenComprobantesPeriodo(
     fueraPeriodo: Number(f.fuera_periodo ?? 0),
     anulados: Number(f.anulados ?? 0),
     arrastrados: Number(f.arrastrados ?? 0),
+    saldoLibros,
   };
 }
 

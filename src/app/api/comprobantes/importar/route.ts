@@ -18,6 +18,13 @@ import {
   type Config,
 } from "@/lib/parsing/mapeoComprobantes";
 import { permiteArchivoPropio } from "@/lib/modoCarga";
+import {
+  reconocerFormato,
+  saldoMasReciente,
+  type SaldoEnFecha,
+} from "@/lib/parsing/formatosConocidos";
+import { normalizarFecha } from "@/lib/normalizacion/fecha";
+import { normalizarMonto } from "@/lib/normalizacion/monto";
 import { registrarImportacion } from "@/lib/importacion-servidor";
 
 /**
@@ -431,6 +438,33 @@ export async function POST(request: Request) {
    * una fila. Los dos caminos tienen que poder convivir sin configurar nada.
    */
   let configFila: Config | null = null;
+
+  // ── Saldo según libros, si el archivo es un libro mayor conocido ──────────
+  //
+  // Su columna de saldo acumulado dice el saldo en libros línea a línea; el de
+  // la línea más reciente es el que el Paso 1 pedía teclear. Se mira en TODAS
+  // las filas, también las que no entran como comprobante (las de crédito):
+  // llevan el acumulado igual, y saltárselas daría el saldo de otra línea.
+  let columnaSaldo: string | null | undefined;
+  let columnaFechaSaldo: string | null = null;
+  let saldoLibros: SaldoEnFecha | null = null;
+  const seguirSaldo = (cruda: Record<string, unknown>) => {
+    if (columnaSaldo === undefined) {
+      const r = reconocerFormato(Object.keys(cruda));
+      columnaSaldo = r?.columnaSaldo ?? null;
+      columnaFechaSaldo = r?.config.mapeo.fecha ?? null;
+    }
+    if (!columnaSaldo || !columnaFechaSaldo) return;
+    const fecha = normalizarFecha(cruda[columnaFechaSaldo]);
+    const saldo = normalizarMonto(cruda[columnaSaldo]);
+    if (fecha === null || saldo === null) return;
+    // El export trae ruido de coma flotante (13886769.150010169).
+    saldoLibros = saldoMasReciente(saldoLibros, {
+      saldo: Math.round(saldo * 100) / 100,
+      fecha,
+    });
+  };
+
   const admitir = (cruda: Record<string, unknown>) => {
     if (configFila === null) {
       configFila =
@@ -439,6 +473,7 @@ export async function POST(request: Request) {
           : { mapeo: MAPEO_PLANTILLA, tipoFijo: null };
     }
     filasProcesadas++;
+    seguirSaldo(cruda);
     const p = preparar(cruda, empresa.empresa_id, lote, configFila);
     if (!p) {
       resumen.invalidas++;
@@ -559,6 +594,7 @@ export async function POST(request: Request) {
     ...resumen,
     fechaMin,
     fechaMax,
+    saldoLibros,
   });
 
   // Mismo motivo que en la ingesta del extracto: tras meter cientos de miles

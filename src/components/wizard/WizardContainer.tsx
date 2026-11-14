@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Stepper, type PasoWizard } from "./Stepper";
 import { UploadZone, type ArchivoResumen } from "./UploadZone";
 import { ZonaComprobantes, AvisoSinPlantilla } from "./ZonaComprobantes";
@@ -12,7 +12,7 @@ import { CandadoIcon, ChevronIcon, DocumentoIcon } from "./icons";
 import { createClient } from "@/lib/supabase/client";
 import { mesesRecientes, periodoDeRango, VALOR_RANGO } from "@/lib/periodo";
 import { previsualizarArchivo, type ArchivoProcesado } from "@/lib/parsing/procesar";
-import { detectarSaldoFinal } from "@/lib/parsing/saldo";
+import { columnaSaldo, detectarSaldoFinal } from "@/lib/parsing/saldo";
 import { validarCoherencia } from "@/lib/parsing/coherencia";
 import { formatearPEN, formatearFecha } from "@/lib/parsing/resumen";
 import { normalizarMonto } from "@/lib/normalizacion/monto";
@@ -223,6 +223,13 @@ export function WizardContainer({
   const [saldoLibros, setSaldoLibros] = useState("");
   const [saldoExtIni, setSaldoExtIni] = useState("");
   const [saldoExtFin, setSaldoExtFin] = useState("");
+  /**
+   * El saldo según libros que se rellenó SOLO, desde el libro mayor cargado
+   * (0056). Se recuerda para dos cosas: decir de dónde salió mientras siga
+   * intacto, y poder reemplazarlo al cambiar de período sin pisar nunca lo que
+   * el usuario haya escrito a mano.
+   */
+  const saldoLibrosAuto = useRef<string | null>(null);
 
   /**
    * El archivo del extracto, tal cual. Ya no se parsea entero en el navegador:
@@ -327,6 +334,16 @@ export function WizardContainer({
       const r = await resumenComprobantesPeriodo(periodo.desde, periodo.hasta, moneda);
       if (cancelado) return;
       setComprobantesResumen(r);
+      // El saldo según libros del libro mayor, si cae en este período. Solo se
+      // escribe sobre un campo vacío o sobre lo que se rellenó solo antes: lo
+      // que el usuario tecleó manda siempre.
+      const propuesto = r.saldoLibros ? String(r.saldoLibros.saldo) : null;
+      setSaldoLibros((actual) => {
+        const intacto = actual === "" || actual === saldoLibrosAuto.current;
+        if (!intacto) return actual;
+        saldoLibrosAuto.current = propuesto;
+        return propuesto ?? "";
+      });
     })();
     return () => {
       cancelado = true;
@@ -386,6 +403,21 @@ export function WizardContainer({
     fuente === "comprobantes" && (comprobantesResumen?.registros ?? 0) > 0;
   const extractoListo = extracto != null;
 
+  /**
+   * ¿El extracto trae columna de saldo? `null` = no se sabe (sin archivo, o
+   * PDF, que se procesa después).
+   *
+   * ⚠️ Sin esa columna el saldo final NO se puede autodetectar nunca, y dejar
+   * el campo vacío no da «inicial + movimientos» como se creía: el cuadre
+   * (`cuadre.ts`, `04_ensamblar.js`) toma un saldo vacío como CERO. Un reporte
+   * de recaudación —`OPERACIÓN, Recibos, Fecha, Importe`— no es un estado de
+   * cuenta, y el cuadre saldría contra un banco a cero.
+   */
+  const extractoTraeSaldo =
+    extracto && extracto.formato !== "pdf"
+      ? columnaSaldo(extracto.headers) != null
+      : null;
+
   // Un botón deshabilitado sin explicación es un callejón sin salida: la lista
   // dice exactamente qué falta.
   const faltaPaso1 = [
@@ -395,6 +427,9 @@ export function WizardContainer({
     !internosListo && "tener comprobantes en el período",
     !extractoListo && "subir el extracto del banco",
     saldoLibros.trim() === "" && "ingresar el saldo según libros",
+    extractoTraeSaldo === false &&
+      saldoExtFin.trim() === "" &&
+      "escribir el saldo final del extracto (tu archivo no trae columna de saldo)",
   ].filter((x): x is string => Boolean(x));
 
   const puedeContinuarPaso1 = faltaPaso1.length === 0;
@@ -568,10 +603,18 @@ export function WizardContainer({
       setError("Ingresa un saldo según libros válido en el Paso 1.");
       return;
     }
-    // Saldo extracto final: el ingresado, o (si falta) inicial + suma de
-    // movimientos bancarios del período.
     const extIni = normalizarMonto(saldoExtIni);
     const extFin = normalizarMonto(saldoExtFin);
+    // ⚠️ Sin saldo final NO se inicia. No hay respaldo «inicial + movimientos»
+    // —el comentario que lo prometía no tenía código detrás—: el cuadre toma un
+    // saldo vacío como CERO y saldría contra un banco a cero. Aquí llega cuando
+    // el archivo prometía columna de saldo y el servidor no encontró ninguno.
+    if (extFin == null) {
+      setError(
+        "Falta el saldo final del extracto: no se pudo detectar en tu archivo. Vuelve al Paso 1 y escríbelo desde el estado de cuenta de tu banco.",
+      );
+      return;
+    }
 
     startTransition(async () => {
       try {
@@ -883,6 +926,24 @@ export function WizardContainer({
                 placeholder="0.00"
                 className={`${CLASES_ENTRADA} tabular-nums`}
               />
+              {/* De dónde salió, mientras siga siendo el propuesto: un número
+                  que aparece solo y sin origen es un número que hay que creerse. */}
+              {comprobantesResumen?.saldoLibros &&
+                saldoLibros !== "" &&
+                saldoLibros === saldoLibrosAuto.current && (
+                  <span className="mt-1 block text-xs text-neutral-600">
+                    Del libro mayor cargado: saldo al{" "}
+                    {formatearFecha(comprobantesResumen.saldoLibros.fecha)}.
+                    {periodo &&
+                      comprobantesResumen.saldoLibros.fecha < periodo.hasta && (
+                        <span className="text-amber-800">
+                          {" "}
+                          No llega al cierre del período (
+                          {formatearFecha(periodo.hasta)}): revísalo.
+                        </span>
+                      )}
+                  </span>
+                )}
             </label>
             <label className="block">
               <span className="mb-1.5 flex items-baseline justify-between gap-2 text-sm font-medium text-neutral-700">
@@ -910,9 +971,26 @@ export function WizardContainer({
                 inputMode="decimal"
                 value={saldoExtFin}
                 onChange={(e) => setSaldoExtFin(e.target.value)}
-                placeholder="se autodetecta"
-                className={`${CLASES_ENTRADA} tabular-nums`}
+                // Solo promete autodetectar cuando puede cumplirlo.
+                placeholder={
+                  extractoTraeSaldo === false
+                    ? "escríbelo"
+                    : extractoTraeSaldo
+                      ? "se detecta del extracto"
+                      : "se autodetecta si el extracto trae saldo"
+                }
+                className={`${CLASES_ENTRADA} tabular-nums ${
+                  extractoTraeSaldo === false && saldoExtFin.trim() === ""
+                    ? "border-amber-400"
+                    : ""
+                }`}
               />
+              {extractoTraeSaldo === false && saldoExtFin.trim() === "" && (
+                <span className="mt-1 block text-xs text-amber-800">
+                  Tu extracto no trae columna de saldo. Escribe el saldo final
+                  de tu estado de cuenta del banco.
+                </span>
+              )}
             </label>
           </div>
 

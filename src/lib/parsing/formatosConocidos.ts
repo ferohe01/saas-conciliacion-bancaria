@@ -38,6 +38,11 @@ export type FormatoConocido = {
   /** Qué columna base es cada campo. Las ausentes opcionales se omiten. */
   mapeo: Partial<Record<CampoComprobante, string>>;
   tipoFijo: Config["tipoFijo"];
+  /**
+   * Columna con el saldo ACUMULADO de la cuenta, si el export la trae. El de
+   * la línea más reciente es el saldo según libros (ver `saldoMasReciente`).
+   */
+  saldo?: string;
 };
 
 /**
@@ -95,6 +100,7 @@ const WIN_LIBRO_MAYOR: FormatoConocido = {
     descripcion: "Nota - Cabecera",
   },
   tipoFijo: "cobranza",
+  saldo: "Saldo",
 };
 
 export const FORMATOS_CONOCIDOS: FormatoConocido[] = [WIN_LIBRO_MAYOR];
@@ -118,7 +124,27 @@ export type Reconocimiento = {
   faltan: ColumnaNecesaria[];
   /** La config lista para importar, con las cabeceras TAL COMO vienen. */
   config: Config;
+  /** Cabecera real de la columna de saldo acumulado, o null si no viene. */
+  columnaSaldo: string | null;
 };
+
+/** Un saldo acumulado y la fecha de la línea de la que sale. */
+export type SaldoEnFecha = { saldo: number; fecha: string };
+
+/**
+ * Se queda con el saldo de la línea más reciente POR FECHA.
+ *
+ * ⚠️ No con la última línea del archivo: el mayor de WIN empieza con líneas del
+ * 26/05 (asientos del mes anterior) y nada garantiza que el export venga
+ * ordenado. Dentro del mismo día gana la que aparece DESPUÉS, porque el saldo
+ * es acumulado: la última línea del día ya incluye a las anteriores.
+ */
+export function saldoMasReciente(
+  previo: SaldoEnFecha | null,
+  candidato: SaldoEnFecha,
+): SaldoEnFecha {
+  return previo === null || candidato.fecha >= previo.fecha ? candidato : previo;
+}
 
 /**
  * ¿Es este archivo un formato conocido? `null` si no se parece a ninguno, y
@@ -156,6 +182,7 @@ export function reconocerFormato(headers: string[]): Reconocimiento | null {
       formato,
       faltan,
       config: { mapeo, tipoFijo: formato.tipoFijo, monedaFija: null },
+      columnaSaldo: formato.saldo ? (reales.get(clave(formato.saldo)) ?? null) : null,
     };
   }
   return null;

@@ -1214,6 +1214,24 @@ Documento` como recibo, todo cobranzas) y la carga no pregunta nada.
   confirmó para sus otros archivos.
 - Solo aplica en modo `archivo_propio`: en `plantilla` el servidor ignora
   cualquier mapeo (ver `0040`).
+- **El saldo según libros sale del propio mayor** (`0056`). Su columna `Saldo`
+  es el acumulado de la cuenta; el de la línea más reciente **por fecha** —no la
+  última del archivo: el de WIN abre con asientos del 26/05— es el saldo en
+  libros. Se guarda en la ficha de la carga (`importaciones_comprobantes`) y el
+  Paso 1 lo propone **solo si su fecha cae dentro del período**, diciendo de
+  dónde sale y avisando si no llega al cierre. Lo tecleado a mano manda.
+
+### ⚠️ El saldo final del extracto vacío NO es «inicial + movimientos»
+
+El wizard lo prometía en un comentario sin código detrás: `cuadre.ts` y
+`04_ensamblar.js` toman un saldo final vacío como **cero**, así que el cuadre
+salía contra un banco a cero. Y con un reporte de recaudación
+(`OPERACIÓN, Recibos, Fecha, Importe`) no hay columna de saldo que detectar.
+
+- Si el extracto no trae columna de saldo, el Paso 1 lo dice y lo exige.
+- Sin saldo final no se inicia la conciliación (caso: el archivo prometía
+  columna de saldo y el servidor no encontró valor).
+- El placeholder solo promete «se detecta del extracto» cuando puede cumplirlo.
 
 ## Período de prueba (30 días)
 

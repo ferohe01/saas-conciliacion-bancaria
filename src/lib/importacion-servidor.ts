@@ -35,6 +35,8 @@ export async function registrarImportacion(datos: {
   fechas?: string[];
   fechaMin?: string | null;
   fechaMax?: string | null;
+  /** Saldo acumulado de la línea más reciente, si es un libro mayor (0056). */
+  saldoLibros?: { saldo: number; fecha: string } | null;
 }): Promise<void> {
   const admin = createAdminClient();
 
@@ -45,7 +47,7 @@ export async function registrarImportacion(datos: {
     if (max === null || f > max) max = f;
   }
 
-  const { error } = await admin.from("importaciones_comprobantes").upsert({
+  const ficha = {
     lote: datos.lote,
     empresa_id: datos.empresaId,
     archivo: datos.archivo?.slice(0, 200) ?? null,
@@ -56,7 +58,21 @@ export async function registrarImportacion(datos: {
     invalidas: datos.invalidas,
     fecha_min: min,
     fecha_max: max,
-  });
+  };
+  const saldo = datos.saldoLibros
+    ? { saldo_libros: datos.saldoLibros.saldo, saldo_libros_fecha: datos.saldoLibros.fecha }
+    : {};
+
+  let { error } = await admin
+    .from("importaciones_comprobantes")
+    .upsert({ ...ficha, ...saldo });
+  // ⚠️ Si el despliegue va por delante de la 0056, PostgREST rechaza la fila
+  // ENTERA por la columna que no conoce, y se perdería la ficha de la carga
+  // —los contadores de la cascada— por un dato añadido. Se reintenta sin él.
+  if (error && datos.saldoLibros) {
+    console.error("[comprobantes] no se pudo guardar el saldo según libros (¿falta la 0056?):", error);
+    ({ error } = await admin.from("importaciones_comprobantes").upsert(ficha));
+  }
   if (error) {
     console.error("[comprobantes] no se pudo registrar la importación:", error);
   }
