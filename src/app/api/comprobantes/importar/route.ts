@@ -320,6 +320,50 @@ export async function POST(request: Request) {
     });
   };
 
+  // ── Inserts en paralelo ───────────────────────────────────────────────────
+  //
+  // Uno a uno, cada lote esperaba su viaje entero a la base antes de mandar el
+  // siguiente: con 453 lotes, la carga era la suma de 453 esperas. Medido desde
+  // fuera del VPS, 4 a la vez tardan la mitad (12 lotes: 6,3 s → 3,3 s); más
+  // apenas mejora, porque el cuello pasa a ser la base, y cada insert más es una
+  // conexión más contra el mismo Postgres.
+  //
+  // ⚠️ El orden NO importa y la deduplicación no depende de él: las claves se
+  // apartan en memoria (`vistas`, `yaEnBase`) ANTES de lanzar el insert, así que
+  // dos lotes en vuelo nunca llevan el mismo comprobante.
+  const EN_PARALELO = 4;
+  const enVuelo = new Set<Promise<void>>();
+  let errorInsert: string | null = null;
+
+  const lanzarInsert = (parte: Preparada[]) => {
+    const p = (async () => {
+      try {
+        const { error } = await admin.from("comprobantes").insert(parte);
+        if (error) {
+          // El 23505 no debería ocurrir: los repetidos se filtran antes. Si
+          // llega aquí es que el filtro no vio la base, y decir "vuelve a
+          // intentarlo, los repetidos se omiten" manda a repetir algo que va
+          // a fallar igual.
+          console.error(`[comprobantes] fallo al insertar el lote ${lote}:`, error);
+          errorInsert ??=
+            error.code === "23505"
+              ? "Algunos comprobantes de este archivo ya estaban cargados y no se pudo distinguirlos. Revisa la lista antes de volver a subirlo."
+              : "No se pudieron guardar los comprobantes.";
+          return;
+        }
+        resumen.insertados += parte.length;
+        avanzar("cargando");
+      } catch (e) {
+        // Un corte de red lanza en vez de devolver `error`. Sin esta captura
+        // la promesa rechazaría y nadie la estaría esperando.
+        console.error(`[comprobantes] fallo de red insertando el lote ${lote}:`, e);
+        errorInsert ??= "Se perdió la conexión con la base mientras se guardaban los comprobantes.";
+      }
+    })();
+    enVuelo.add(p);
+    void p.then(() => enVuelo.delete(p));
+  };
+
   const descargar = async (): Promise<string | null> => {
     if (pendientes.length === 0) return null;
 
@@ -354,22 +398,25 @@ export async function POST(request: Request) {
     });
 
     for (const parte of enLotes(aInsertar, LOTE)) {
-      const { error } = await admin.from("comprobantes").insert(parte);
-      if (error) {
-        // El 23505 no debería ocurrir: los repetidos se filtran antes. Si
-        // llega aquí es que el filtro no vio la base, y decir "vuelve a
-        // intentarlo, los repetidos se omiten" manda a repetir algo que va a
-        // fallar igual.
-        console.error(`[comprobantes] fallo al insertar el lote ${lote}:`, error);
-        return error.code === "23505"
-          ? "Algunos comprobantes de este archivo ya estaban cargados y no se pudo distinguirlos. No se importó nada; revisa la lista antes de volver a subirlo."
-          : "No se pudieron guardar los comprobantes.";
-      }
-      resumen.insertados += parte.length;
-      avanzar("cargando");
+      if (errorInsert) break;
+      // Como mucho EN_PARALELO a la vez: se espera a que acabe alguno.
+      while (enVuelo.size >= EN_PARALELO) await Promise.race(enVuelo);
+      lanzarInsert(parte);
     }
     pendientes = [];
+    if (errorInsert) {
+      // Antes de informar del fallo se deja terminar lo que ya salió: así el
+      // recuento de insertados es el real y no queda trabajo suelto.
+      await Promise.all(enVuelo);
+      return errorInsert;
+    }
     return null;
+  };
+
+  /** Espera a que terminen todos los inserts lanzados. Devuelve el primer error. */
+  const esperarInserts = async (): Promise<string | null> => {
+    await Promise.all(enVuelo);
+    return errorInsert;
   };
 
   /**
@@ -477,9 +524,11 @@ export async function POST(request: Request) {
       for (const f of filas) admitir(f);
     }
 
-    const err = await descargar();
+    const err = (await descargar()) ?? (await esperarInserts());
     if (err) return { status: 400, body: { error: err } };
   } catch {
+    // Lo que ya salió hacia la base se deja terminar antes de responder.
+    await esperarInserts();
     return {
       status: 400,
       body: {
