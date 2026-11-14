@@ -502,15 +502,24 @@ export type ResumenComprobantes = {
  * sería un número plausible y equivocado. Y si falla —p. ej. la 0056 sin
  * aplicar— devuelve null: el campo vuelve a ser manual, como siempre fue, en
  * vez de tumbar el recuento de comprobantes por un dato añadido.
+ *
+ * ⚠️ Con `admin` y filtro explícito de empresa, como toda otra lectura de esta
+ * tabla. La primera versión la leía con el cliente de sesión —la única de la
+ * aplicación que lo hacía— y en producción no llegaba nada: el saldo estaba
+ * guardado en la ficha y el Paso 1 seguía con el campo vacío, sin un error a la
+ * vista porque este camino devuelve null a propósito. La tabla se escribe con
+ * `service_role` y así no depende de los permisos de `authenticated` sobre ella.
  */
 async function saldoLibrosDelPeriodo(
-  supabase: Awaited<ReturnType<typeof createClient>>,
   desde: string,
   hasta: string,
 ): Promise<ResumenComprobantes["saldoLibros"]> {
-  const { data, error } = await supabase
+  const empresa = await getEmpresaActual();
+  if (!empresa) return null;
+  const { data, error } = await createAdminClient()
     .from("importaciones_comprobantes")
     .select("saldo_libros, saldo_libros_fecha, archivo")
+    .eq("empresa_id", empresa.empresa_id)
     .not("saldo_libros", "is", null)
     .gte("saldo_libros_fecha", desde)
     .lte("saldo_libros_fecha", hasta)
@@ -562,7 +571,7 @@ export async function resumenComprobantesPeriodo(
       p_hasta: hasta,
       p_moneda: moneda ?? null,
     }),
-    saldoLibrosDelPeriodo(supabase, desde, hasta),
+    saldoLibrosDelPeriodo(desde, hasta),
   ]);
   if (error) {
     // Devolver ceros diría "no hay comprobantes", que es una afirmación falsa
