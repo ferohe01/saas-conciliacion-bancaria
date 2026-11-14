@@ -88,9 +88,9 @@ export const AYUDA_COMPROBANTE: Partial<Record<CampoComprobante, string>> = {
   referencia_externa:
     "El código con el que ese cobro aparece en el banco (nº de operación, de depósito). SE REPITE cuando el cliente paga varias facturas juntas, y es con el que se empareja.",
   tipo:
-    "Si la columna no existe, puedes declarar que todo el archivo es de un solo tipo.",
+    "Si tu archivo no trae esta columna, elige en la lista «Todo son cobranzas» o «Todo son pagos».",
   moneda:
-    "Solo se concilian comprobantes de la MISMA moneda que la cuenta bancaria. Si tu archivo no la trae, decláralo abajo.",
+    "Solo se concilian comprobantes de la MISMA moneda que la cuenta bancaria. Si tu archivo no la trae, elige en la lista si todo está en soles o en dólares.",
 };
 
 /** Un archivo entero de un solo tipo, cuando no hay columna que lo diga. */
