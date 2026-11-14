@@ -1177,6 +1177,44 @@ vez de recibir el payload**, y que el resultado vaya a una tabla — lo que
 convierte en obsoleta la nota de "tablas normalizadas fuera de alcance porque el
 JSONB basta": bastaba a 2.000 partidas.
 
+### Avance en vivo e inserts en paralelo
+
+Medio millón de filas tardaban 23 minutos con un «Importando…» fijo, que es
+indistinguible de un cuelgue. Medido por partes: **leer e interpretar las
+452.605 filas cuesta 2,2 s en Node**; el resto eran 453 inserts esperándose en
+fila (y, desde un PC, la red al VPS y la sobrecarga de `next dev`).
+
+- **Inserts de 4 en 4** (`EN_PARALELO`): 22 min 40 s → 11 min 50 s, mismos
+  recuentos. La deduplicación no depende del orden: las claves se apartan en
+  memoria ANTES de lanzar el insert. Más de 4 apenas mejora y es una conexión
+  más contra el mismo Postgres.
+- **Avance por NDJSON** si la petición manda `accept: application/x-ndjson`;
+  sin esa cabecera la ruta responde como siempre. ⚠️ Con stream el HTTP es
+  **siempre 200**: el éxito lo dice la línea final (`tipo: "fin"`, `status`),
+  no el código del log.
+- ⚠️ **El archivo se procesa en trozos de 256 KB** (`TROZO_CSV`). Tras
+  `formData()` ya está en memoria y su stream puede llegar en UN trozo de
+  95 MB: la barra marcaba 100 % al instante con todo el trabajo por delante.
+- El total de filas se **estima** por los bytes leídos («de ~453,000») y no se
+  estima con menos del 2 % leído (`textoProgreso`, con tests).
+- Cerrar la pestaña no corta la importación: dejaría media carga sin registrar.
+
+### Formatos conocidos (`formatosConocidos.ts`)
+
+Un cliente que exporta SIEMPRE el mismo informe de su ERP no tiene nada que
+decidir en el formulario de mapeo. Un formato conocido fija el mapeo de
+antemano (hoy: el libro mayor de WIN — `Débito` como importe, `WIN - Nro.
+Documento` como recibo, todo cobranzas) y la carga no pregunta nada.
+
+- Se reconoce por el **60 % de sus columnas**, no por todas: el caso que hay
+  que poder explicar es el export al que le falta una.
+- **Solo bloquea si falta una columna necesaria para conciliar**, y dice cuál
+  y para qué. Las de más se ignoran; una opcional ausente no se mapea.
+- No se guarda en `mapeo_comprobantes`: pisaría el formato que la empresa
+  confirmó para sus otros archivos.
+- Solo aplica en modo `archivo_propio`: en `plantilla` el servidor ignora
+  cualquier mapeo (ver `0040`).
+
 ## Período de prueba (30 días)
 
 La promesa comercial "tu primer período es gratis" vivía solo como texto en la
