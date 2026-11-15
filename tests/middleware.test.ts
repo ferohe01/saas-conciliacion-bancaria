@@ -59,6 +59,7 @@ describe("matcher del middleware", () => {
     expect(matcher.test("/api/conciliacion/iniciar")).toBe(false);
     expect(matcher.test("/api/comprobantes/importar")).toBe(false);
     expect(matcher.test("/api/extracto/importar")).toBe(false);
+    expect(matcher.test("/api/extracto/leer-pdf")).toBe(false);
   });
 
   it("excluye TODA ruta que reciba un archivo", () => {

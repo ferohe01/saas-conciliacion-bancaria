@@ -154,7 +154,8 @@ function SelectField({
  */
 function resumenParaZona(p: ArchivoProcesado, moneda: string): ArchivoResumen {
   if (p.formato === "pdf") {
-    return { nombre: p.nombre, total: "PDF · se procesará al conciliar" };
+    // No debería verse: el PDF se convierte a CSV al cargarlo (/api/extracto/leer-pdf).
+    return { nombre: p.nombre, total: "PDF" };
   }
   if (!p.resumen) {
     return {
@@ -175,6 +176,55 @@ function resumenParaZona(p: ArchivoProcesado, moneda: string): ArchivoResumen {
         ? `${formatearFecha(r.fechaMin)} – ${formatearFecha(r.fechaMax)}`
         : undefined,
   };
+}
+
+/** Lo que devolvió la lectura con IA de un extracto en PDF. */
+type LecturaPdfVista = {
+  nombre: string;
+  movimientos: number;
+  verificacion: { cuadra: boolean | null; diferencia: number | null; saltosDeSaldo: number };
+};
+
+/**
+ * El resultado de leer un PDF con IA, siempre a la vista.
+ *
+ * ⚠️ Lo que la IA transcribe puede estar mal —un movimiento saltado o un
+ * importe mal leído— y eso no protesta: sale un cuadre plausible y equivocado.
+ * Por eso se dice si los movimientos cuadran con los saldos del propio PDF, y
+ * cuando no se pudo comprobar también se dice: el silencio se leería como
+ * «todo bien».
+ */
+function AvisoLecturaPdf({ lectura, moneda }: { lectura: LecturaPdfVista; moneda: string }) {
+  const { cuadra, diferencia, saltosDeSaldo } = lectura.verificacion;
+  const base = `Leído con IA del PDF: ${lectura.movimientos.toLocaleString("es-PE")} movimientos.`;
+  if (cuadra === true && saltosDeSaldo === 0) {
+    return (
+      <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+        ✓ {base} Cuadran con el saldo inicial y final del propio PDF.
+      </p>
+    );
+  }
+  if (cuadra === false || saltosDeSaldo > 0) {
+    return (
+      <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        ⚠️ {base}{" "}
+        {cuadra === false && diferencia != null
+          ? `No cuadran con los saldos del PDF: hay una diferencia de ${formatearPEN(diferencia, moneda)}. `
+          : ""}
+        {saltosDeSaldo > 0
+          ? `${saltosDeSaldo} ${saltosDeSaldo === 1 ? "fila tiene" : "filas tienen"} un saldo que no sigue a la anterior. `
+          : ""}
+        Puede faltar o estar mal leído algún movimiento: revísalo en el Paso 2, o
+        sube el extracto en Excel o CSV.
+      </p>
+    );
+  }
+  return (
+    <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+      {base} El PDF no trae saldo inicial y final, así que no se pudo comprobar que
+      no falte ninguno: revísalo en el Paso 2.
+    </p>
+  );
 }
 
 /** Lo mínimo que el wizard necesita saber de la conexión (se edita en /conexiones). */
@@ -237,6 +287,9 @@ export function WizardContainer({
    * original viaja al servidor, que es quien lo procesa por lotes.
    */
   const [archivoExtracto, setArchivoExtracto] = useState<File | null>(null);
+  /** Si el extracto vino en PDF: cuántos movimientos leyó la IA y si cuadran. */
+  const [lecturaPdf, setLecturaPdf] = useState<LecturaPdfVista | null>(null);
+  const [leyendoPdf, setLeyendoPdf] = useState(false);
 
   /**
    * Lo que devolvió el servidor al cargar el extracto. Los conteos y el saldo
@@ -360,7 +413,7 @@ export function WizardContainer({
    * dueño y la pantalla se quedaba idéntica: el usuario no sabía si su archivo
    * había entrado o no.
    */
-  async function cargarExtracto(file: File) {
+  async function cargarExtracto(original: File) {
     if (!periodo) {
       setError("Antes de subir el extracto, elige un período válido.");
       return;
@@ -369,7 +422,46 @@ export function WizardContainer({
     setCargando(true);
     // Un extracto nuevo invalida el que se hubiera cargado antes.
     setLote(null);
+    setLecturaPdf(null);
+    let file = original;
     try {
+      // ── PDF: se lee con IA y se convierte en un CSV de columnas fijas ──
+      //
+      // A partir de aquí es un extracto como cualquier otro: el mismo mapeo, el
+      // mismo saldo final, la misma importación por lotes. La lectura dice
+      // además si sus movimientos cuadran con los saldos del propio PDF.
+      if (original.name.toLowerCase().endsWith(".pdf")) {
+        const cuerpo = new FormData();
+        cuerpo.append("archivo", original);
+        setLeyendoPdf(true);
+        const res = await fetch("/api/extracto/leer-pdf", { method: "POST", body: cuerpo }).finally(
+          () => setLeyendoPdf(false),
+        );
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          csv?: string;
+          nombre?: string;
+          movimientos?: number;
+          saldoInicial?: number | null;
+          saldoFinal?: number | null;
+          verificacion?: LecturaPdfVista["verificacion"];
+        };
+        if (!res.ok || !data.csv) {
+          setExtracto(null);
+          setArchivoExtracto(null);
+          setError(data.error ?? `No se pudo leer "${original.name}". Súbelo en Excel o CSV.`);
+          return;
+        }
+        file = new File([data.csv], data.nombre ?? "extracto.csv", { type: "text/csv" });
+        setLecturaPdf({
+          nombre: original.name,
+          movimientos: data.movimientos ?? 0,
+          verificacion: data.verificacion ?? { cuadra: null, diferencia: null, saltosDeSaldo: 0 },
+        });
+        if (data.saldoInicial != null && saldoExtIni.trim() === "") setSaldoExtIni(String(data.saldoInicial));
+        if (data.saldoFinal != null && saldoExtFin.trim() === "") setSaldoExtFin(String(data.saldoFinal));
+      }
+
       // Solo la cabecera: lo justo para reconocer las columnas. Leer el archivo
       // entero aquí es lo que impedía cargar un extracto de 26 MB, y no hace
       // falta — el que lo procesa es el servidor.
@@ -898,6 +990,12 @@ export function WizardContainer({
                   ⚠️ {coherenciaExtracto.mensaje}
                 </p>
               )}
+              {leyendoPdf && (
+                <p role="status" className="mt-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                  Leyendo el PDF con IA… puede tardar hasta un par de minutos.
+                </p>
+              )}
+              {lecturaPdf && <AvisoLecturaPdf lectura={lecturaPdf} moneda={moneda} />}
             </div>
           </div>
 
