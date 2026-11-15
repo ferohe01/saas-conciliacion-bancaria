@@ -11,7 +11,8 @@
 -- ⚠️ NO SE DESHACE. Borra también las conciliaciones APROBADAS.
 --
 -- CÓMO EJECUTARLO
---   SQL Editor de Supabase Studio, cada bloque POR SEPARADO y EN ORDEN (1 y 2).
+--   SQL Editor de Supabase Studio, cada bloque POR SEPARADO y EN ORDEN (1, 2
+--   y 4 — el VACUUM, línea a línea). El 3 es la comprobación.
 --   Por la API no se puede: corta a los 8 s y no permite apagar triggers.
 --
 --   Si Studio devuelve un error con `invalid_type` y `formattedError`, es su
@@ -91,6 +92,27 @@ select
   (select count(*) from public.comprobantes
     where empresa_id = '05dade93-3aaf-4a7e-bba0-d7d9e0859080'
       and estado in ('cobrado', 'parcial'))                                         as OJO_deberia_ser_0;
+
+
+-- ---------------------------------------------------------------------------
+-- BLOQUE 4 — VACUUM (después del 2, y después de borrar lotes de extracto)
+--
+-- ⚠️ No es opcional en este volumen. El bloque 2 reescribe los 452.454
+-- comprobantes y el 1 borra ~900.000 pares y cobros; cada UPDATE/DELETE deja
+-- la fila vieja muerta en la tabla hasta que pasa un VACUUM. La capa exacta
+-- recorre las tablas enteras en CADA uno de sus trozos, así que con la basura
+-- encima se pasa de los 8 s incluso partida en 32: falló así el 15/11/2026
+-- («no pudo completarse ni troceada en 32 partes») con los mismos datos que
+-- el día anterior habían conciliado en 99 s.
+--
+-- ⚠️ VACUUM no puede ir dentro de una transacción: ejecuta CADA LÍNEA SOLA en
+-- el SQL Editor (selecciónala y pulsa Run). Si Studio se corta por tiempo,
+-- repítela: es inofensivo.
+-- ---------------------------------------------------------------------------
+vacuum (analyze) public.comprobantes;
+vacuum (analyze) public.movimientos_extracto;
+vacuum (analyze) public.matches_conciliacion;
+vacuum (analyze) public.aplicaciones_cobro;
 
 
 -- ============================================================================
