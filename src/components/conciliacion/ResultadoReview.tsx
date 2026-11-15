@@ -40,6 +40,12 @@ import { Boton, Tarjeta, BadgeMetodo, BadgeAgrupacion } from "@/components/ui";
  */
 
 const PAGINA = 50;
+/**
+ * Las fichas de «Por revisar» son altas —dos lados, diferencia, justificación,
+ * precedente—: de 5 en 5 y dentro de una caja con scroll, para que «Sin
+ * conciliar» siga a la vista debajo aunque haya decenas de sugerencias.
+ */
+const PAGINA_REVISION = 5;
 const UMBRAL_LOTE = 0.95;
 
 /**
@@ -140,9 +146,9 @@ export function ResultadoReview({
   // La cola tambien pagina —con 500-2000 movimientos podia pintar cientos de
   // fichas de golpe—, y cada apartado por su cuenta.
   const [topesCola, setTopesCola] = useState<Record<ClaveGrupo, number>>({
-    ia: PAGINA,
-    agrupacion: PAGINA,
-    otras: PAGINA,
+    ia: PAGINA_REVISION,
+    agrupacion: PAGINA_REVISION,
+    otras: PAGINA_REVISION,
   });
 
   const internoById = useMemo(
@@ -444,7 +450,7 @@ export function ResultadoReview({
                   <p className="text-sm text-neutral-600">{g.detalle}</p>
                 </div>
 
-                <ul className="space-y-3">
+                <ul className="max-h-[40rem] space-y-3 overflow-y-auto overscroll-contain rounded-2xl pr-1">
                   {g.visibles.map(({ m, idx }) => (
                     <li key={idx}>
                       <FichaSugerencia
@@ -500,25 +506,27 @@ export function ResultadoReview({
                       />
                     </li>
                   ))}
+                  {/* Dentro de la caja, al final del scroll: es donde está
+                      quien acaba de recorrer las cinco anteriores. */}
+                  {g.items.length > g.visibles.length && (
+                    <li className="flex justify-center pb-1">
+                      <Boton
+                        variante="secundario"
+                        tamano="sm"
+                        onClick={() =>
+                          setTopesCola((t) => ({
+                            ...t,
+                            [g.clave]: t[g.clave] + PAGINA_REVISION,
+                          }))
+                        }
+                      >
+                        Ver{" "}
+                        {Math.min(PAGINA_REVISION, g.items.length - g.visibles.length)}{" "}
+                        más de {g.items.length - g.visibles.length} pendientes
+                      </Boton>
+                    </li>
+                  )}
                 </ul>
-
-                {g.items.length > g.visibles.length && (
-                  <div className="flex justify-center">
-                    <Boton
-                      variante="secundario"
-                      tamano="sm"
-                      onClick={() =>
-                        setTopesCola((t) => ({
-                          ...t,
-                          [g.clave]: t[g.clave] + PAGINA,
-                        }))
-                      }
-                    >
-                      Ver {Math.min(PAGINA, g.items.length - g.visibles.length)}{" "}
-                      más de {g.items.length - g.visibles.length} pendientes
-                    </Boton>
-                  </div>
-                )}
               </div>
             ))}
           </div>
