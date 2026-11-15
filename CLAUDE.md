@@ -181,6 +181,10 @@ supabase/
                              meses anteriores entran a la conciliación.
     0055_analizar_cobros.sql         Refrescar solo lo que cambia durante el
                              reparto: el remedio no puede costar más que el mal.
+    0057_roles_usuarios.sql          Cuatro roles y cierre del alta libre en
+                             empresas ajenas.
+    0058_sso_proveedores.sql         Proveedor SAML de cada empresa.
+    0059_pgvector_ejemplos.sql       Ejemplos de aprendizaje por similitud.
 tests/                     Vitest (unit).
 ```
 
@@ -220,7 +224,8 @@ tests/                     Vitest (unit).
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | público | Cliente Supabase (anon + RLS) |
 | `SUPABASE_SERVICE_ROLE_KEY` | **servidor** | Escrituras del sistema (salta RLS) |
 | `OPENAI_API_KEY` | **servidor** | Capa de IA del motor + asistente. Sin ella no hay sugerencias de IA; el resto concilia igual |
-| `OPENAI_MODEL` / `OPENAI_MODEL_CONCILIACION` | **servidor** | Modelo (por defecto `gpt-5.6-luna`); el segundo solo para el motor |
+| `OPENAI_MODEL` / `OPENAI_MODEL_CONCILIACION` | **servidor** | Modelo (por defecto `gpt-5.6-luna`); el segundo solo para el motor y la lectura de PDF |
+| `OPENAI_MODEL_EMBEDDINGS` | **servidor** | Embeddings de los ejemplos (por defecto `text-embedding-3-small`, 1536 dimensiones como la columna de la 0059) |
 | `MAX_FILAS_CONCILIACION` | **servidor** | Tope de partidas por lado (20.000) |
 
 ## Ejecución asíncrona
@@ -2252,19 +2257,80 @@ era un cartel sin puerta detrás.
   registros. Lo que se añadió es el enlace a `/conexiones` y, si ya hay ficha,
   qué sistema se registró y en qué estado.
 
+## Roles, aprobación con cuatro ojos, SSO y extractos en PDF (0057–0059)
+
+Lo que pide una empresa grande antes de comprar, añadido el 15/11/2026.
+
+### Roles (0057)
+
+`usuarios_empresa.rol` existía desde la 0001 con `'admin'` para todos y no lo
+leía nadie. Ahora son cuatro: **Administrador** (todo, usuarios y
+configuración), **Aprobador** (carga, concilia, decide y aprueba/anula),
+**Conciliador** (carga, concilia y decide; no aprueba) y **Consulta** (solo
+lectura). Matriz en `src/lib/roles.ts` (pura, con tests).
+
+- ⚠️ **Se hace cumplir en el SERVIDOR**: `exigir(permiso)` (`roles-servidor.ts`)
+  abre las 3 rutas API que escriben y las 20 server actions; en
+  `conciliacion/[jobId]/actions.ts` va DENTRO de `cargarContexto`, para que una
+  acción nueva no pueda olvidarse del control. La interfaz solo oculta lo que el
+  servidor rechazaría (sin botón de aprobar, revisión en solo lectura, wizard
+  cerrado a quien no concilia).
+- ⚠️ **Separación de funciones («cuatro ojos»)**: quien inició una conciliación
+  no puede aprobarla **si en la empresa hay otra persona que pueda aprobar**.
+  Una regla absoluta habría dejado a toda empresa de un solo usuario sin poder
+  aprobar nunca; con un segundo aprobador se aplica sin excepción. Ante un error
+  al contar aprobadores se aplica el control, no se salta.
+- **/usuarios** (solo Administrador): equipo con correo, rol y último acceso;
+  cambiar rol, quitar, invitar. **La empresa nunca se queda sin administrador**
+  (`dejaSinAdministrador`). Quitar retira la membresía, no la cuenta: sus
+  decisiones siguen firmadas.
+- **Invitar devuelve un ENLACE**, no manda un correo: el Supabase self-hosted
+  puede no tener SMTP. El enlace lleva el `hashed_token` de `generateLink` a
+  `/auth/confirmar`, que lo valida en el servidor (`verifyOtp`) y abre
+  `/bienvenida` para elegir contraseña. Una persona pertenece a UNA empresa
+  (`getEmpresaActual` resuelve una).
+- ⚠️⚠️ **Hueco de seguridad cerrado**: la política `usuarios_empresa_insert`
+  solo exigía `usuario_id = auth.uid()`, sin mirar la empresa. Cualquier
+  usuario registrado podía insertarse en CUALQUIER empresa con la key pública
+  y `es_miembro()` le abría todos sus datos. Se retira (y la de DELETE): el
+  registro y /usuarios escriben con `service_role`.
+
+### SSO corporativo con SAML (0058)
+
+Un mecanismo para Entra ID, Okta, Google Workspace y cualquier proveedor SAML
+2.0, sobre el SSO de Supabase Auth. Login: «Ingresar con el SSO de mi empresa»
+con el dominio del correo; vuelta en `/auth/callback` (PKCE en el servidor).
+
+- ⚠️⚠️ **El alta automática no se fía del dominio.** Quien entra por primera
+  vez queda en la empresa con el rol por defecto **solo si la sesión vino del
+  proveedor SAML de esa empresa** (`app_metadata.provider = sso:<id>`). Si
+  bastara el correo `@empresa.com`, cualquiera se registraría con contraseña y
+  entraría. `altaPorSso` en `src/lib/sso.ts`, con tests de las dos caras.
+- El administrador registra su proveedor en /usuarios (dominio + URL de
+  metadatos); la app lo da de alta en GoTrue por su API admin y muestra el
+  Entity ID y la ACS que debe pegar en su proveedor.
+- ⚠️ **Requiere activar SAML una vez en el servidor**: `ops/SSO-SAML.md`
+  (clave, variables de `auth` y dos rutas de Kong que el proveedor llama SIN
+  `apikey`; sin ellas, el login corporativo vuelve a un 401 sin explicación).
+
+### Extractos en PDF leídos con IA
+
+La interfaz aceptaba PDF «para procesarlo al conciliar» y nadie lo procesaba.
+`/api/extracto/leer-pdf` manda el PDF al modelo como archivo adjunto y devuelve
+un **CSV de columnas fijas** que el wizard trata como cualquier extracto.
+
+- **El modelo copia cargo y abono por separado; el SIGNO lo pone el código.**
+- **Control anti-invención** (`src/lib/pdfExtracto.ts`, con tests): saldo
+  inicial + movimientos = saldo final, y la cadena de saldos fila a fila. El
+  wizard lo dice en verde, o en ámbar si no cuadra o no se pudo comprobar.
+- Topes: 30 páginas y 10 MB. Un estado de cuenta de miles de páginas no es para
+  esto: Excel o CSV no tienen tope.
+
 ## Fuera de alcance del MVP
 
-Equipos/roles/invitaciones/SSO · facturación y pagos (cobro, planes, pasarela —
-el límite de prueba de `0005` no es facturación) · pgvector/semántica ·
-OCR y XML UBL de facturas · integraciones ERP/bancos/Open Banking · tablas
-normalizadas de transacciones/matches (el JSONB del job basta).
-
-### Decisiones que se apartan del spec original
-
-- **PDF de extractos:** el spec lo dejaba fuera del MVP, pero por decisión del
-  producto la UI **sí acepta PDF** desde ya (además de Excel/CSV). El
-  *procesamiento* real del PDF se resolverá en el servidor; la interfaz solo lo carga y
-  lo envía normalizado. Mantener el selector preparado para ello.
+Facturación y pagos (cobro, planes, pasarela — el límite de prueba de `0005` no
+es facturación) · OCR y XML UBL de facturas · integraciones ERP/bancos/Open
+Banking · tablas normalizadas de transacciones/matches (el JSONB del job basta).
 
 ## Diseño / lenguaje visual
 
@@ -2969,9 +3035,10 @@ sacar uno del pool.
 
 ## Nota de arquitectura: aprendizaje de la IA (few-shot dinámico)
 
-**El aprendizaje NO usa base de datos vectorial ni reentrena/fine-tunea ningún
-modelo.** El LLM es siempre el mismo y no "recuerda" nada por su cuenta entre
-corridas. Lo que aprende vive como **texto en el prompt** (in-context learning):
+**El aprendizaje no reentrena ni fine-tunea ningún modelo.** El LLM es siempre
+el mismo y no "recuerda" nada por su cuenta entre corridas. Lo que aprende vive
+como **texto en el prompt** (in-context learning), y desde la 0059 los ejemplos
+se eligen por **similitud con pgvector** (ver abajo):
 
 1. Cada decisión humana (aceptar / rechazar / modificar / conciliar manual) se
    persiste en `resultado.matches[].decisiones` (usuario + timestamp). Nunca se
@@ -2982,22 +3049,33 @@ corridas. Lo que aprende vive como **texto en el prompt** (in-context learning):
    resume en texto corto (`monto · nombre · fecha`), **deduplica, balancea por
    clase (≤6) y limita a 12**.
 3. Viajan en el payload como `ejemplos_aprendizaje` (opcional en el contrato).
-4. El nodo `ia_llm_01_candidatos.js` los pega en el **system prompt** como
-   ejemplos few-shot; el LLM calibra el criterio propio de esa empresa (cuánta
-   comisión toleran, cuándo rechazan pese a montos iguales).
+4. La capa de IA del motor (`candidatosIa.ts`) los pega en el **system prompt**
+   como ejemplos few-shot; el LLM calibra el criterio propio de esa empresa
+   (cuánta comisión toleran, cuándo rechazan pese a montos iguales).
 
 **Analogía:** cada corrida es como darle al asistente una hoja con "así resolvió
-tu jefe los casos dudosos recientes". No cambia el modelo; le das contexto fresco.
+tu jefe los casos parecidos". No cambia el modelo; le das contexto fresco.
 
-**Por qué así:** cero infraestructura nueva, transparente (los ejemplos exactos
-quedan en la traza del nodo) y suficiente a esta escala. `pgvector`/semántica
-está **fuera del alcance del MVP** a propósito.
+### Por similitud: pgvector (0059)
 
-**Roadmap (post-MVP):** con cientos/miles de decisiones convendría recuperar los
-ejemplos **más *similares*** al caso concreto (embeddings + pgvector) en vez de
-los más recientes. La arquitectura ya está lista: solo cambiaría **cómo
-`construirEjemplos` selecciona** el subconjunto; el resto del flujo (payload →
-prompt) queda igual.
+Antes viajaban las 12 decisiones **más recientes**, se parecieran o no al caso.
+Ahora `iniciar` arma además un **pool** (hasta 1.000, mismo criterio y mismas
+exclusiones) y en la fase IA el motor elige las **más parecidas** a los casos
+que va a consultar:
+
+- `ejemplos_vectoriales`: un embedding por decisión (`text-embedding-3-small`,
+  HNSW coseno), calculado **una sola vez**; cada corrida calcula solo las
+  nuevas y los casos a consultar.
+- `ejemplos_similares` trae los 3 vecinos de TODOS los casos en una llamada.
+  Gana lo que es vecino de más casos y, a igualdad, lo más cercano, con el
+  equilibrio por clase de siempre (≤6 + ≤6, ≤12). `src/lib/ejemplosSimilares.ts`.
+- El texto que se vectoriza es el mismo «monto · nombre · fecha» que lee el
+  modelo, **sin la decisión**: lo que se mide es el parecido del caso, no el
+  veredicto.
+- ⚠️ **Cualquier fallo cae a los recientes** (sin la 0059, sin clave, sin
+  decisiones todavía). El log del motor dice `ejemplos: similitud|recientes`.
+- ⚠️ La pantalla `/aprendizaje` sigue listando los **recientes** (es lo que se
+  puede curar a mano); los que entran por similitud cambian en cada corrida.
 
 ## Despliegue en producción (VPS Contabo + Dokploy)
 
