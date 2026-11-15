@@ -70,20 +70,38 @@ export async function cargarVistaResultado(
     .select("id", { count: "exact", head: true })
     .eq("job_id", jobId);
 
-  // Lo que espera decisión, primero. `pendiente` ordena antes que el resto
-  // alfabéticamente por casualidad, así que el orden se hace explícito para que
-  // no dependa de eso.
-  const { data: filas } = await admin
+  // Lo que espera decisión, primero, y en una consulta APARTE.
+  //
+  // ⚠️⚠️ Antes era un solo `order("estado_revision")` con un comentario que
+  // decía que `pendiente` ordenaba antes que el resto. No: alfabéticamente
+  // `aceptado` < `auto` < `modificado` < `pendiente`. Con 448.070 pares `auto`
+  // y un tope de 1.000, la pantalla traía mil exactos y las 9 sugerencias de la
+  // IA no llegaban nunca — el resumen decía «Sugeridos por IA: 9» y la cola de
+  // revisión salía vacía. Con 500 pares no se nota; a volumen las esconde
+  // siempre, justo donde más falta hacen.
+  const columnas =
+    "id, comprobante_ids, movimiento_ids, metodo, estado_revision, confianza, categoria_diferencia, diferencia_monto, justificacion, decisiones, excluido_aprendizaje";
+  const { data: pendientes } = await admin
     .from("matches_conciliacion")
-    .select(
-      "id, comprobante_ids, movimiento_ids, metodo, estado_revision, confianza, categoria_diferencia, diferencia_monto, justificacion, decisiones, excluido_aprendizaje",
-    )
+    .select(columnas)
     .eq("job_id", jobId)
-    .order("estado_revision", { ascending: true })
+    .eq("estado_revision", "pendiente")
     .order("id", { ascending: true })
     .limit(MAX_PARES_VISTA);
+  const resto = MAX_PARES_VISTA - (pendientes?.length ?? 0);
+  const { data: demas } =
+    resto > 0
+      ? await admin
+          .from("matches_conciliacion")
+          .select(columnas)
+          .eq("job_id", jobId)
+          .neq("estado_revision", "pendiente")
+          .order("estado_revision", { ascending: true })
+          .order("id", { ascending: true })
+          .limit(resto)
+      : { data: [] };
 
-  const matchesTabla = (filas ?? []) as FilaMatch[];
+  const matchesTabla = [...(pendientes ?? []), ...(demas ?? [])] as FilaMatch[];
 
   // Las partidas que esos pares referencian. El payload solo tiene el residuo,
   // así que los pares de la capa exacta hay que hidratarlos de sus tablas.
