@@ -3,6 +3,8 @@ import { exigir } from "@/lib/roles-servidor";
 import { rolDe } from "@/lib/roles";
 import { EncabezadoPagina, Tarjeta } from "@/components/ui";
 import { UsuariosPanel, type Miembro } from "@/components/app/UsuariosPanel";
+import { SsoPanel, type ProveedorVista } from "@/components/app/SsoPanel";
+import { datosParaElProveedor } from "@/lib/sso";
 
 /**
  * /usuarios — quién trabaja en la empresa y con qué rol (0057).
@@ -47,6 +49,17 @@ export default async function UsuariosPage() {
     }),
   );
 
+  const { data: filasSso } = await admin
+    .from("sso_proveedores")
+    .select("id, dominio, rol_por_defecto")
+    .eq("empresa_id", acceso.empresa.empresa_id)
+    .order("created_at", { ascending: true });
+  const proveedores: ProveedorVista[] = (filasSso ?? []).map((f) => ({
+    id: f.id as string,
+    dominio: f.dominio as string,
+    rol: rolDe(f.rol_por_defecto),
+  }));
+
   return (
     <div className="space-y-6">
       <EncabezadoPagina
@@ -54,6 +67,10 @@ export default async function UsuariosPage() {
         descripcion="Quién trabaja en tu empresa y qué puede hacer cada persona. Quien inicia una conciliación no puede aprobarla si hay otra persona que pueda hacerlo."
       />
       <UsuariosPanel miembros={miembros} yo={acceso.usuario.id} />
+      <SsoPanel
+        proveedores={proveedores}
+        datos={datosParaElProveedor(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "")}
+      />
     </div>
   );
 }

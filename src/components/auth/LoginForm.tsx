@@ -13,12 +13,49 @@ export function LoginForm() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  // Un enlace de invitación caducado o un SSO fallido vuelven aquí con el
+  // motivo en `?error=`: decirlo, en vez de enseñar un login sin explicación.
+  const [error, setError] = useState<string | null>(searchParams.get("error"));
   const [cargando, setCargando] = useState(false);
+
+  /**
+   * SSO corporativo (SAML). Se usa el dominio del correo para encontrar el
+   * proveedor de la empresa; el proveedor de identidad hace el resto y vuelve a
+   * /auth/callback.
+   */
+  async function onSso() {
+    setError(null);
+    const dominio = email.trim().toLowerCase().split("@")[1];
+    if (!dominio) {
+      setError("Escribe tu correo corporativo para entrar con el SSO de tu empresa.");
+      return;
+    }
+    setCargando(true);
+    const { data, error: e } = await createClient().auth.signInWithSSO({
+      domain: dominio,
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+      },
+    });
+    if (e || !data?.url) {
+      setError(
+        `No hay acceso corporativo (SSO) configurado para ${dominio}. Entra con tu contraseña o pídele a tu administrador que lo active.`,
+      );
+      setCargando(false);
+      return;
+    }
+    window.location.href = data.url;
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    // La contraseña ya no es `required` en el campo, para que el botón de SSO
+    // funcione con solo el correo; se comprueba aquí para el acceso normal.
+    if (!password) {
+      setError("Escribe tu contraseña, o entra con el SSO de tu empresa.");
+      return;
+    }
     setCargando(true);
 
     const supabase = createClient();
@@ -52,7 +89,6 @@ export function LoginForm() {
         label="Contraseña"
         type="password"
         autoComplete="current-password"
-        required
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         placeholder="••••••••"
@@ -69,6 +105,16 @@ export function LoginForm() {
 
       <Boton type="submit" tamano="lg" disabled={cargando} className="w-full">
         {cargando ? "Ingresando…" : "Ingresar"}
+      </Boton>
+      <Boton
+        type="button"
+        variante="secundario"
+        tamano="lg"
+        disabled={cargando}
+        onClick={() => void onSso()}
+        className="w-full"
+      >
+        Ingresar con el SSO de mi empresa
       </Boton>
     </form>
   );
