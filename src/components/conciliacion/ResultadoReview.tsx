@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { formatearPEN, formatearFecha } from "@/lib/parsing/resumen";
 import { etiquetaTipo } from "@/lib/reportes";
@@ -31,15 +31,51 @@ import { Boton, Tarjeta, BadgeMetodo, BadgeAgrupacion } from "@/components/ui";
  * lee cada fila, así que la pantalla ordena el trabajo en tres bloques por
  * urgencia decreciente:
  *
- *   1. Por revisar   — lo que la IA propuso y espera tu criterio. Ordenado por
- *                      confianza ASCENDENTE: primero lo dudoso. Despachable en
- *                      lote.
+ *   1. Por revisar   — lo que espera tu criterio, en apartados por origen (lo
+ *                      que propuso el modelo, las agrupaciones 1:N, otras).
+ *                      Dentro de cada uno, confianza ASCENDENTE: primero lo
+ *                      dudoso. Despachable en lote.
  *   2. Sin conciliar — lo que nadie logró emparejar. Requiere trabajo manual.
  *   3. Ya conciliado — colapsado. Está resuelto; se consulta, no se revisa.
  */
 
 const PAGINA = 50;
 const UMBRAL_LOTE = 0.95;
+
+/**
+ * Los apartados de «Por revisar».
+ *
+ * ⚠️ No se puede separar por `metodo`: la agrupación 1:N también se guarda como
+ * `metodo: "ia"` (va a revisión igual que una propuesta del modelo), pero es
+ * una suma determinística, no una apuesta del modelo, y se revisa distinto. Lo
+ * que la distingue es `categoria_diferencia = "agrupacion_1aN"`.
+ */
+type ClaveGrupo = "ia" | "agrupacion" | "otras";
+const GRUPOS_REVISION: { clave: ClaveGrupo; titulo: string; detalle: string }[] = [
+  {
+    clave: "ia",
+    titulo: "Sugeridas por la IA",
+    detalle:
+      "El modelo eligió estos pares entre los candidatos más parecidos. Los pagos parciales nunca se concilian solos: esperan tu decisión.",
+  },
+  {
+    clave: "agrupacion",
+    titulo: "Depósitos agrupados",
+    detalle:
+      "Un abono que junta varios de tus registros, o un pago repartido en varios movimientos del banco.",
+  },
+  {
+    clave: "otras",
+    titulo: "Otras sugerencias",
+    detalle: "Pares propuestos por las reglas que esperan tu confirmación.",
+  },
+];
+const grupoDe = (m: Match): ClaveGrupo =>
+  m.categoria_diferencia === "agrupacion_1aN"
+    ? "agrupacion"
+    : m.metodo === "ia"
+      ? "ia"
+      : "otras";
 
 type Props = {
   jobId: string;
@@ -100,11 +136,14 @@ export function ResultadoReview({
   // Búsquedas y paginación.
   const [buscaPend, setBuscaPend] = useState("");
   const [buscaConc, setBuscaConc] = useState("");
-  const [topeSin, setTopeSin] = useState(PAGINA);
   const [topeConc, setTopeConc] = useState(PAGINA);
-  // La cola tambien pagina: con 500-2000 movimientos podia pintar cientos de
-  // fichas de golpe, mientras sus dos secciones hermanas si paginaban.
-  const [topeCola, setTopeCola] = useState(PAGINA);
+  // La cola tambien pagina —con 500-2000 movimientos podia pintar cientos de
+  // fichas de golpe—, y cada apartado por su cuenta.
+  const [topesCola, setTopesCola] = useState<Record<ClaveGrupo, number>>({
+    ia: PAGINA,
+    agrupacion: PAGINA,
+    otras: PAGINA,
+  });
 
   const internoById = useMemo(
     () => new Map(internos.map((r) => [r.id_interno, r])),
@@ -154,7 +193,20 @@ export function ResultadoReview({
     return { cola, conciliados, idsConciliados: ids };
   }, [resultado]);
 
-  const colaVisible = useMemo(() => cola.slice(0, topeCola), [cola, topeCola]);
+  // Los apartados que tienen algo; dentro de cada uno se conserva el orden de
+  // `cola` (confianza ascendente).
+  const gruposCola = useMemo(
+    () =>
+      GRUPOS_REVISION.map((g) => {
+        const items = cola.filter(({ m }) => grupoDe(m) === g.clave);
+        return { ...g, items, visibles: items.slice(0, topesCola[g.clave]) };
+      }).filter((g) => g.items.length > 0),
+    [cola, topesCola],
+  );
+  const colaVisible = useMemo(
+    () => gruposCola.flatMap((g) => g.visibles),
+    [gruposCola],
+  );
 
   const sinConciliarInt = useMemo(
     () => internos.filter((r) => !idsConciliados.has(r.id_interno)),
@@ -335,7 +387,7 @@ export function ResultadoReview({
             </h2>
             <p className="text-sm text-neutral-600">
               {cola.length > 0
-                ? "Ordenadas de menor a mayor confianza: lo dudoso primero."
+                ? "Por apartado y, dentro de cada uno, de menor a mayor confianza: lo dudoso primero."
                 : "No queda nada esperando tu criterio."}
             </p>
           </div>
@@ -380,76 +432,95 @@ export function ResultadoReview({
               }
             />
 
-            <ul className="space-y-3">
-              {colaVisible.map(({ m, idx }) => (
-                <li key={idx}>
-                  <FichaSugerencia
-                    precedente={
-                      precedentes[
-                        clavePrecedente(
-                          m.ids_internos ?? [],
-                          m.ids_movimientos ?? [],
-                        )
-                      ] ?? null
-                    }
-                    match={m}
-                    moneda={moneda}
-                    seleccionada={enLote.has(idx)}
-                    pendiente={pendiente}
-                    internos={m.ids_internos.map(itemInterno)}
-                    movimientos={m.ids_movimientos.map(itemMov)}
-                    onToggle={() =>
-                      setEnLote((s) => {
-                        const n = new Set(s);
-                        if (n.has(idx)) n.delete(idx);
-                        else n.add(idx);
-                        return n;
-                      })
-                    }
-                    onAceptar={() =>
-                      ejecutar(
-                        () => registrarDecision(jobId, idx, "aceptado"),
-                        "Sugerencia aceptada.",
-                        () => reabrir(idx),
-                      )
-                    }
-                    pidiendoMotivo={pidiendoMotivo === idx}
-                    onPedirMotivo={() => setPidiendoMotivo(idx)}
-                    onCancelarMotivo={() => setPidiendoMotivo(null)}
-                    onRechazar={(motivo) =>
-                      ejecutar(
-                        async () => {
-                          const r = await registrarDecision(
-                            jobId,
-                            idx,
-                            "rechazado",
-                            undefined,
-                            motivo,
-                          );
-                          if (r.ok) setPidiendoMotivo(null);
-                          return r;
-                        },
-                        "Sugerencia rechazada.",
-                        () => reabrir(idx),
-                      )
-                    }
-                  />
-                </li>
-              ))}
-            </ul>
+            {gruposCola.map((g) => (
+              <div key={g.clave} className="space-y-3 pt-2">
+                <div>
+                  <h3 className="font-semibold text-neutral-900">
+                    {g.titulo}{" "}
+                    <span className="tabular-nums text-neutral-500">
+                      ({g.items.length})
+                    </span>
+                  </h3>
+                  <p className="text-sm text-neutral-600">{g.detalle}</p>
+                </div>
 
-            {cola.length > colaVisible.length && (
-              <div className="flex justify-center">
-                <Boton
-                  variante="secundario"
-                  tamano="sm"
-                  onClick={() => setTopeCola((t) => t + PAGINA)}
-                >
-                  Ver {Math.min(PAGINA, cola.length - colaVisible.length)} más
-                  de {cola.length - colaVisible.length} pendientes
-                </Boton>
+                <ul className="space-y-3">
+                  {g.visibles.map(({ m, idx }) => (
+                    <li key={idx}>
+                      <FichaSugerencia
+                        precedente={
+                          precedentes[
+                            clavePrecedente(
+                              m.ids_internos ?? [],
+                              m.ids_movimientos ?? [],
+                            )
+                          ] ?? null
+                        }
+                        match={m}
+                        moneda={moneda}
+                        seleccionada={enLote.has(idx)}
+                        pendiente={pendiente}
+                        internos={m.ids_internos.map(itemInterno)}
+                        movimientos={m.ids_movimientos.map(itemMov)}
+                        onToggle={() =>
+                          setEnLote((s) => {
+                            const n = new Set(s);
+                            if (n.has(idx)) n.delete(idx);
+                            else n.add(idx);
+                            return n;
+                          })
+                        }
+                        onAceptar={() =>
+                          ejecutar(
+                            () => registrarDecision(jobId, idx, "aceptado"),
+                            "Sugerencia aceptada.",
+                            () => reabrir(idx),
+                          )
+                        }
+                        pidiendoMotivo={pidiendoMotivo === idx}
+                        onPedirMotivo={() => setPidiendoMotivo(idx)}
+                        onCancelarMotivo={() => setPidiendoMotivo(null)}
+                        onRechazar={(motivo) =>
+                          ejecutar(
+                            async () => {
+                              const r = await registrarDecision(
+                                jobId,
+                                idx,
+                                "rechazado",
+                                undefined,
+                                motivo,
+                              );
+                              if (r.ok) setPidiendoMotivo(null);
+                              return r;
+                            },
+                            "Sugerencia rechazada.",
+                            () => reabrir(idx),
+                          )
+                        }
+                      />
+                    </li>
+                  ))}
+                </ul>
+
+                {g.items.length > g.visibles.length && (
+                  <div className="flex justify-center">
+                    <Boton
+                      variante="secundario"
+                      tamano="sm"
+                      onClick={() =>
+                        setTopesCola((t) => ({
+                          ...t,
+                          [g.clave]: t[g.clave] + PAGINA,
+                        }))
+                      }
+                    >
+                      Ver {Math.min(PAGINA, g.items.length - g.visibles.length)}{" "}
+                      más de {g.items.length - g.visibles.length} pendientes
+                    </Boton>
+                  </div>
+                )}
               </div>
-            )}
+            ))}
           </div>
         )}
       </section>
@@ -471,10 +542,7 @@ export function ResultadoReview({
           {sinConciliarInt.length + sinConciliarMov.length > 0 && (
             <BuscadorPartidas
               valor={buscaPend}
-              onCambio={(v) => {
-                setBuscaPend(v);
-                setTopeSin(PAGINA);
-              }}
+              onCambio={setBuscaPend}
               etiqueta="Buscar entre las partidas sin conciliar"
             />
           )}
@@ -492,8 +560,6 @@ export function ResultadoReview({
               titulo="Tus registros"
               items={sinConciliarInt.map((r) => itemInterno(r.id_interno))}
               busqueda={buscaPend}
-              tope={topeSin}
-              onMas={() => setTopeSin((t) => t + PAGINA)}
               moneda={moneda}
               jobId={jobId}
               asistente={asistente}
@@ -511,8 +577,6 @@ export function ResultadoReview({
               titulo="Tu banco"
               items={sinConciliarMov.map((m) => itemMov(m.id_movimiento))}
               busqueda={buscaPend}
-              tope={topeSin}
-              onMas={() => setTopeSin((t) => t + PAGINA)}
               moneda={moneda}
               seleccion={selMov}
               onToggle={(id) =>
@@ -1122,12 +1186,17 @@ function coincide(it: ItemLado, q: string): boolean {
 }
 
 // ── Panel de partidas sin conciliar (selección para match manual) ───────────
+//
+// Cada columna es independiente: su propio filtro por fecha y su propio «ver
+// más». Con 4.375 registros y 2.920 movimientos sueltos, buscar el día 17 en
+// el banco no puede obligar a perder la posición en tus registros. La lista va
+// en una caja con scroll de altura fija, ordenada por fecha, y muestra de 50 en
+// 50: las dos columnas quedan a la vista una junto a la otra, que es lo que
+// permite elegir una partida de cada lado para conciliarlas a mano.
 function PanelSinConciliar({
   titulo,
   items,
   busqueda,
-  tope,
-  onMas,
   moneda,
   seleccion,
   onToggle,
@@ -1137,8 +1206,6 @@ function PanelSinConciliar({
   titulo: string;
   items: ItemLado[];
   busqueda: string;
-  tope: number;
-  onMas: () => void;
   moneda: string;
   seleccion: Set<string>;
   onToggle: (id: string) => void;
@@ -1150,27 +1217,79 @@ function PanelSinConciliar({
   jobId?: string;
   asistente?: boolean;
 }) {
-  const filtrados = items.filter((it) => coincide(it, busqueda));
+  const [fecha, setFecha] = useState("");
+  const [tope, setTope] = useState(PAGINA);
+  // Una búsqueda nueva vuelve a empezar por los primeros 50.
+  useEffect(() => setTope(PAGINA), [busqueda]);
+
+  const ordenados = useMemo(
+    () =>
+      [...items].sort(
+        (a, b) => a.fecha.localeCompare(b.fecha) || a.monto - b.monto,
+      ),
+    [items],
+  );
+  const filtrados = ordenados.filter(
+    (it) => (!fecha || it.fecha === fecha) && coincide(it, busqueda),
+  );
   const visibles = filtrados.slice(0, tope);
+  // El calendario se acota a los días que tienen partidas sueltas.
+  const fechaMin = ordenados[0]?.fecha || undefined;
+  const fechaMax = ordenados[ordenados.length - 1]?.fecha || undefined;
 
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white p-4">
       <div className="mb-3 flex items-baseline justify-between gap-2">
         <h3 className="font-semibold text-neutral-900">{titulo}</h3>
         <span className="text-sm tabular-nums text-neutral-600">
-          {filtrados.length}
-          {filtrados.length !== items.length && ` de ${items.length}`}
+          {filtrados.length.toLocaleString("es-PE")}
+          {filtrados.length !== items.length &&
+            ` de ${items.length.toLocaleString("es-PE")}`}
         </span>
       </div>
+
+      {items.length > 0 && (
+        <div className="mb-3 flex items-center gap-2">
+          <label className="flex min-w-0 flex-1 items-center gap-2 text-sm text-neutral-700">
+            <span className="shrink-0">Fecha</span>
+            <input
+              type="date"
+              value={fecha}
+              min={fechaMin}
+              max={fechaMax}
+              onChange={(e) => {
+                setFecha(e.target.value);
+                setTope(PAGINA);
+              }}
+              aria-label={`Filtrar ${titulo.toLowerCase()} por fecha`}
+              className="h-10 min-w-0 flex-1 rounded-xl border border-neutral-300 bg-white px-3 text-sm tabular-nums text-neutral-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none"
+            />
+          </label>
+          {fecha && (
+            <Boton
+              variante="sutil"
+              tamano="sm"
+              onClick={() => {
+                setFecha("");
+                setTope(PAGINA);
+              }}
+            >
+              Todas
+            </Boton>
+          )}
+        </div>
+      )}
 
       {filtrados.length === 0 ? (
         <p className="py-6 text-center text-sm text-neutral-600">
           {items.length === 0
             ? "Nada pendiente de este lado."
-            : "Ninguna partida coincide con la búsqueda."}
+            : fecha
+              ? `Nada sin conciliar el ${formatearFecha(fecha)}${busqueda ? " que coincida con la búsqueda" : ""}.`
+              : "Ninguna partida coincide con la búsqueda."}
         </p>
       ) : (
-        <>
+        <div className="max-h-[32rem] overflow-y-auto overscroll-contain pr-1">
           <ul className="space-y-1">
             {visibles.map((it) => {
               const marcado = seleccion.has(it.id);
@@ -1222,14 +1341,14 @@ function PanelSinConciliar({
             <Boton
               variante="sutil"
               tamano="sm"
-              onClick={onMas}
+              onClick={() => setTope((t) => t + PAGINA)}
               className="mt-2 w-full"
             >
               Ver {Math.min(PAGINA, filtrados.length - visibles.length)} más
-              (quedan {filtrados.length - visibles.length})
+              (quedan {(filtrados.length - visibles.length).toLocaleString("es-PE")})
             </Boton>
           )}
-        </>
+        </div>
       )}
     </div>
   );
