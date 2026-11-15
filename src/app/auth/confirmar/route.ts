@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
+import { origenPublico } from "@/lib/origenPublico";
 
 /**
  * GET /auth/confirmar?token_hash=…&type=invite|magiclink&next=/bienvenida
@@ -14,6 +15,8 @@ const TIPOS: EmailOtpType[] = ["invite", "magiclink", "email"];
 
 export async function GET(request: NextRequest) {
   const url = request.nextUrl;
+  // ⚠️ Las redirecciones van al host PÚBLICO: `nextUrl` lleva el del contenedor.
+  const origen = origenPublico(request.headers, url.origin);
   const tokenHash = url.searchParams.get("token_hash");
   const tipo = url.searchParams.get("type") as EmailOtpType | null;
   // Solo rutas internas: un `next` absoluto convertiría el enlace en una
@@ -22,10 +25,7 @@ export async function GET(request: NextRequest) {
   const destino = nextParam.startsWith("/") && !nextParam.startsWith("//") ? nextParam : "/dashboard";
 
   const fallo = (motivo: string) => {
-    const login = url.clone();
-    login.pathname = "/login";
-    login.search = `?error=${encodeURIComponent(motivo)}`;
-    return NextResponse.redirect(login);
+    return NextResponse.redirect(`${origen}/login?error=${encodeURIComponent(motivo)}`);
   };
 
   if (!tokenHash || !tipo || !TIPOS.includes(tipo)) {
@@ -38,8 +38,5 @@ export async function GET(request: NextRequest) {
     return fallo("El enlace caducó o ya se usó. Pide uno nuevo a tu administrador.");
   }
 
-  const ir = url.clone();
-  ir.pathname = destino;
-  ir.search = "";
-  return NextResponse.redirect(ir);
+  return NextResponse.redirect(`${origen}${destino}`);
 }

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { origenPublico } from "@/lib/origenPublico";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { altaPorSso, type ProveedorSso } from "@/lib/sso";
 
@@ -18,15 +19,14 @@ import { altaPorSso, type ProveedorSso } from "@/lib/sso";
  */
 export async function GET(request: NextRequest) {
   const url = request.nextUrl;
+  // ⚠️ Las redirecciones van al host PÚBLICO: `nextUrl` lleva el del contenedor.
+  const origen = origenPublico(request.headers, url.origin);
   const code = url.searchParams.get("code");
   const nextParam = url.searchParams.get("next") ?? "/dashboard";
   const destino = nextParam.startsWith("/") && !nextParam.startsWith("//") ? nextParam : "/dashboard";
 
   const fallo = (motivo: string) => {
-    const login = url.clone();
-    login.pathname = "/login";
-    login.search = `?error=${encodeURIComponent(motivo)}`;
-    return NextResponse.redirect(login);
+    return NextResponse.redirect(`${origen}/login?error=${encodeURIComponent(motivo)}`);
   };
 
   if (!code) return fallo("No se pudo completar el acceso corporativo. Vuelve a intentarlo.");
@@ -79,8 +79,5 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const ir = url.clone();
-  ir.pathname = destino;
-  ir.search = "";
-  return NextResponse.redirect(ir);
+  return NextResponse.redirect(`${origen}${destino}`);
 }
