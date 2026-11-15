@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { traerTodo, enLotes } from "@/lib/supabase/paginado";
 import { getUsuarioActual } from "@/lib/auth";
+import { exigir, otrosAprobadores } from "@/lib/roles-servidor";
+import { separacionAlAprobar, type Permiso } from "@/lib/roles";
 import {
   ResultadoConciliacion,
   type Match,
@@ -60,9 +62,18 @@ type Ctx = {
   idsTabla: string[] | null;
 };
 
-async function cargarContexto(jobId: string): Promise<Ctx | { error: string }> {
-  const usuario = await getUsuarioActual();
-  if (!usuario) return { error: "No autenticado." };
+/**
+ * ⚠️ Todo lo que pasa por aquí ESCRIBE (decisiones, pares manuales, cobros),
+ * así que el permiso se exige aquí dentro: una acción nueva que cargue el
+ * contexto no puede olvidarse del control de rol.
+ */
+async function cargarContexto(
+  jobId: string,
+  permiso: Permiso = "decidir",
+): Promise<Ctx | { error: string }> {
+  const acceso = await exigir(permiso);
+  if (!acceso.ok) return { error: acceso.error };
+  const usuario = acceso.usuario;
 
   const supabase = await createClient(); // RLS: solo jobs de su empresa
   const { data } = await supabase
@@ -665,14 +676,17 @@ export async function cambiarEstadoContable(
   const parsed = AccionContableSchema.safeParse(accion);
   if (!parsed.success) return { ok: false, error: "Acción inválida." };
 
-  const usuario = await getUsuarioActual();
-  if (!usuario) return { ok: false, error: "No autenticado." };
+  // Aprobar, observar, anular y reabrir son decisiones sobre el documento
+  // contable: las cuatro exigen el permiso de aprobar (0057).
+  const acceso = await exigir("aprobar");
+  if (!acceso.ok) return { ok: false, error: acceso.error };
+  const usuario = acceso.usuario;
 
   // Lectura con RLS: garantiza que el job es de su empresa.
   const supabase = await createClient();
   const { data: job } = await supabase
     .from("jobs_conciliacion")
-    .select("id, estado, estado_contable")
+    .select("id, estado, estado_contable, usuario_id")
     .eq("id", jobId)
     .maybeSingle();
   if (!job) return { ok: false, error: "Conciliación no encontrada." };
@@ -683,6 +697,18 @@ export async function cambiarEstadoContable(
   if (parsed.data === "aprobar") {
     const permiso = puedeAprobarse(estadoContable, job.estado as string);
     if (!permiso.ok) return { ok: false, error: permiso.motivo };
+
+    // Cuatro ojos: quien inició la conciliación no la aprueba, si en la empresa
+    // hay otra persona que pueda hacerlo.
+    const separacion = separacionAlAprobar({
+      aprobadorId: usuario.id,
+      iniciadorId: (job.usuario_id as string | null) ?? null,
+      otrosAprobadores:
+        job.usuario_id === usuario.id
+          ? await otrosAprobadores(acceso.empresa.empresa_id, usuario.id)
+          : 0,
+    });
+    if (!separacion.ok) return { ok: false, error: separacion.motivo };
 
     const { data, error } = await admin.rpc("aprobar_conciliacion", {
       p_job_id: jobId,
@@ -698,7 +724,7 @@ export async function cambiarEstadoContable(
     }
 
     // Recién ahora rige, así que recién ahora mueve saldo.
-    const ctx = await cargarContexto(jobId);
+    const ctx = await cargarContexto(jobId, "aprobar");
     const cobros = "error" in ctx
       ? { ok: false, aplicadas: 0 }
       : await sincronizarCobranzas(jobId, ctx.resultado);
@@ -1077,8 +1103,10 @@ export async function estadoCobros(jobId: string): Promise<EstadoCobros> {
 export async function reintentarCobros(
   jobId: string,
 ): Promise<{ ok: boolean; aplicadas: number; error?: string }> {
-  const usuario = await getUsuarioActual();
-  if (!usuario) return { ok: false, aplicadas: 0, error: "No autenticado." };
+  // Reintentar mueve saldos de una conciliación aprobada: mismo permiso que
+  // aprobarla.
+  const acceso = await exigir("aprobar");
+  if (!acceso.ok) return { ok: false, aplicadas: 0, error: acceso.error };
 
   // Lectura con RLS: garantiza que el job es de su empresa.
   const supabase = await createClient();
@@ -1094,7 +1122,7 @@ export async function reintentarCobros(
     return { ok: false, aplicadas: 0, error: "Solo una conciliación aprobada aplica cobros." };
   }
 
-  const ctx = await cargarContexto(jobId);
+  const ctx = await cargarContexto(jobId, "aprobar");
   if ("error" in ctx) return { ok: false, aplicadas: 0, error: ctx.error };
 
   const res = await sincronizarCobranzas(jobId, ctx.resultado);

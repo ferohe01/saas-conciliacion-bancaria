@@ -183,13 +183,13 @@ export async function POST(request: Request) {
 
   const usuarioId = userData.user.id;
 
-  // 3) Crear la membresía (rol admin).
+  // 3) Crear la membresía: quien registra la empresa es su administrador (0057).
   const { error: membresiaError } = await admin
     .from("usuarios_empresa")
     .insert({
       usuario_id: usuarioId,
       empresa_id: empresa.id,
-      rol: "admin",
+      rol: "administrador",
       nombre_completo: d.admin_nombre,
       telefono: d.admin_telefono,
     });

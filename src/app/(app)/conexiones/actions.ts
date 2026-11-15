@@ -1,5 +1,6 @@
 "use server";
 
+import { exigir } from "@/lib/roles-servidor";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getEmpresaActual } from "@/lib/auth";
@@ -27,6 +28,9 @@ export async function guardarConexion(
   _prev: ConexionResultado,
   formData: FormData,
 ): Promise<ConexionResultado> {
+  const acceso = await exigir("configurar");
+  if (!acceso.ok) return { ok: false, error: acceso.error };
+
   const parsed = ConexionErpInput.safeParse({
     sistema: texto(formData, "sistema") ?? "",
     nombre_sistema: texto(formData, "nombre_sistema"),
@@ -93,6 +97,9 @@ export async function guardarConexion(
 }
 
 export async function eliminarConexion(): Promise<ConexionResultado> {
+  const acceso = await exigir("configurar");
+  if (!acceso.ok) return { ok: false, error: acceso.error };
+
   const empresa = await getEmpresaActual();
   if (!empresa) return { ok: false, error: "Sesión no válida." };
 

@@ -86,6 +86,7 @@ export function EstadoContablePanel({
   fechaAprobacion,
   hayVersionesPrevias,
   cobros,
+  puedeAprobar = true,
 }: {
   jobId: string;
   estadoContable: EstadoContable;
@@ -95,6 +96,11 @@ export function EstadoContablePanel({
   hayVersionesPrevias: boolean;
   /** Cobros esperados vs aplicados. Ausente en las conciliaciones antiguas. */
   cobros?: { esperados: number; aplicados: number } | null;
+  /**
+   * El rol permite aprobar, observar, anular y reintentar (0057). Sin él no se
+   * ofrecen los botones —el servidor los rechazaría igual— y se dice por qué.
+   */
+  puedeAprobar?: boolean;
 }) {
   const router = useRouter();
   const [pendiente, startTransition] = useTransition();
@@ -117,7 +123,7 @@ export function EstadoContablePanel({
     cobros.aplicados < cobros.esperados;
 
   const tono = TONO[estadoContable];
-  const acciones = accionesPosibles(estadoContable);
+  const acciones = puedeAprobar ? accionesPosibles(estadoContable) : [];
   const permisoAprobar = puedeAprobarse(estadoContable, estadoTecnico);
 
   function ejecutar(accion: AccionContable) {
@@ -231,8 +237,17 @@ export function EstadoContablePanel({
         )}
       </div>
 
+      {/* Sin permiso no hay botones: se dice por qué, para que no parezca que
+          la conciliación no se puede aprobar. */}
+      {!puedeAprobar && estadoContable !== "aprobada" && permisoAprobar.ok && (
+        <p className="mt-4 border-t border-neutral-200/70 pt-3 text-sm text-neutral-600">
+          Lista para aprobar. Tu rol no permite aprobarla: la aprueba una persona
+          con rol Aprobador o Administrador.
+        </p>
+      )}
+
       {/* El efecto de aprobar no se ve en esta pantalla, así que se anuncia. */}
-      {estadoContable !== "aprobada" && permisoAprobar.ok && (
+      {puedeAprobar && estadoContable !== "aprobada" && permisoAprobar.ok && (
         <p className="mt-4 border-t border-neutral-200/70 pt-3 text-sm text-neutral-600">
           Al aprobarla pasará a ser la conciliación que vale para este período y
           se descontará el saldo de los comprobantes cobrados.
@@ -259,7 +274,8 @@ export function EstadoContablePanel({
             variante="confirmar"
             tamano="sm"
             className="mt-3"
-            disabled={pendiente}
+            disabled={pendiente || !puedeAprobar}
+            title={puedeAprobar ? undefined : "Tu rol no permite aplicar cobros."}
             onClick={() => {
               setError(null);
               setAviso(null);

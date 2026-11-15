@@ -1,5 +1,6 @@
 "use server";
 
+import { exigir } from "@/lib/roles-servidor";
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -87,6 +88,9 @@ export async function importarComprobantes(
   filas: unknown,
   invalidas = 0,
 ): Promise<ImportResultado> {
+  const acceso = await exigir("cargar");
+  if (!acceso.ok) return { ok: false, error: acceso.error };
+
   const parsed = ImportPayload.safeParse(filas);
   if (!parsed.success) {
     return {
@@ -313,6 +317,9 @@ async function limpiarFichasVacias(): Promise<void> {
 export async function deshacerImportacion(
   lote: string,
 ): Promise<BorradoResultado> {
+  const acceso = await exigir("cargar");
+  if (!acceso.ok) return { ok: false, error: acceso.error };
+
   const empresa = await getEmpresaActual();
   if (!empresa) return { ok: false, error: "Sesión no válida." };
   if (!lote) return { ok: false, error: "Falta indicar qué importación deshacer." };
@@ -332,6 +339,9 @@ export async function deshacerImportacion(
 export async function vaciarComprobantes(
   confirmacion: string,
 ): Promise<BorradoResultado> {
+  const acceso = await exigir("cargar");
+  if (!acceso.ok) return { ok: false, error: acceso.error };
+
   if (confirmacion.trim().toUpperCase() !== CONFIRMACION_VACIAR) {
     return {
       ok: false,
@@ -360,6 +370,9 @@ export async function guardarMapeoCuenta(
   cuentaId: string,
   mapeos: { extracto?: MapeoColumnas },
 ): Promise<{ ok: boolean }> {
+  const acceso = await exigir("cargar");
+  if (!acceso.ok) return { ok: false };
+
   const supabase = await createClient();
   // Merge con lo existente (RLS asegura que la cuenta sea de la empresa).
   const { data: actual } = await supabase
@@ -628,6 +641,9 @@ export async function quitarComprobantesDelPeriodo(
   desde: string,
   hasta: string,
 ): Promise<BorradoResultado> {
+  const acceso = await exigir("cargar");
+  if (!acceso.ok) return { ok: false, error: acceso.error };
+
   const empresa = await getEmpresaActual();
   if (!empresa) return { ok: false, error: "Sesión no válida." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(desde) || !/^\d{4}-\d{2}-\d{2}$/.test(hasta)) {
@@ -822,6 +838,9 @@ export async function explicarRevisionPrevia(
 export async function guardarMapeoComprobantes(
   config: unknown,
 ): Promise<{ ok: boolean; error?: string }> {
+  const acceso = await exigir("cargar");
+  if (!acceso.ok) return { ok: false, error: acceso.error };
+
   const empresa = await getEmpresaActual();
   if (!empresa) return { ok: false, error: "Sesión no válida." };
 

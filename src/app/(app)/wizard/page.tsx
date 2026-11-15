@@ -8,7 +8,8 @@ import { ConfigMapeoGuardado } from "@/lib/parsing/mapeoComprobantes";
 import { getConexionErp } from "@/lib/conexiones-servidor";
 import { nombreSistema, estadoConexion } from "@/lib/conexiones";
 import { PruebaVencida } from "@/components/app/AvisoPrueba";
-import { clasesBoton } from "@/components/ui";
+import { clasesBoton, Tarjeta } from "@/components/ui";
+import { motivoSinPermiso, puede, rolDe } from "@/lib/roles";
 import {
   WizardContainer,
   type CuentaOpcion,
@@ -55,6 +56,29 @@ export default async function WizardPage() {
         <div className="text-center">
           <Link href="/dashboard" className={clasesBoton("secundario", "md")}>
             Volver al panel
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // Rol sin permiso para conciliar (0057): mismo criterio que la prueba
+  // vencida — no dejar entrar a subir archivos para rechazarlo al final.
+  const rol = rolDe(empresa?.rol);
+  if (!puede(rol, "conciliar")) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-6">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold tracking-tight text-neutral-900">
+            Nueva conciliación
+          </h1>
+        </div>
+        <Tarjeta tono="atencion">
+          <p className="text-sm text-amber-900">{motivoSinPermiso(rol, "conciliar")}</p>
+        </Tarjeta>
+        <div className="text-center">
+          <Link href="/conciliacion" className={clasesBoton("secundario", "md")}>
+            Ver las conciliaciones
           </Link>
         </div>
       </div>

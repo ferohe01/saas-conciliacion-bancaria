@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getEmpresaActual, getUsuarioActual } from "@/lib/auth";
+import { exigir } from "@/lib/roles-servidor";
 import { enLotes } from "@/lib/supabase/paginado";
 import { LectorCsv, type FilaCsv } from "@/lib/parsing/csv";
 import { normalizarMovimiento } from "@/lib/normalizacion/canonico";
@@ -87,10 +87,11 @@ type Fila = {
 };
 
 export async function POST(request: Request) {
-  const empresa = await getEmpresaActual();
-  if (!empresa) {
-    return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+  const acceso = await exigir("cargar");
+  if (!acceso.ok) {
+    return NextResponse.json({ error: acceso.error }, { status: acceso.status });
   }
+  const { empresa } = acceso;
 
   const form = await request.formData().catch(() => null);
   const archivo = form?.get("archivo");
@@ -325,7 +326,7 @@ export async function POST(request: Request) {
     filas: insertados,
     saldo_declarado: saldoFinal,
     origen,
-    subido_por: (await getUsuarioActual())?.id ?? null,
+    subido_por: acceso.usuario.id,
   });
   if (errFicha) {
     console.error(`[extracto] no se pudo registrar la carga ${lote_id}:`, errFicha);

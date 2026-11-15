@@ -1,5 +1,6 @@
 "use server";
 
+import { exigir } from "@/lib/roles-servidor";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
@@ -35,6 +36,9 @@ type Resultado = { ok: boolean; error?: string };
 export async function revertirCobro(
   entrada: z.infer<typeof RevertirSchema>,
 ): Promise<Resultado> {
+  const acceso = await exigir("aprobar");
+  if (!acceso.ok) return { ok: false, error: acceso.error };
+
   const parsed = RevertirSchema.safeParse(entrada);
   if (!parsed.success) return { ok: false, error: "Datos inválidos." };
 
@@ -89,6 +93,9 @@ export async function deshacerReversion(
   job_id: string,
   id_movimiento: string,
 ): Promise<Resultado> {
+  const acceso = await exigir("aprobar");
+  if (!acceso.ok) return { ok: false, error: acceso.error };
+
   const usuario = await getUsuarioActual();
   if (!usuario) return { ok: false, error: "No autenticado." };
 

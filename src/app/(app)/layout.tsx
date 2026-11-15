@@ -5,6 +5,7 @@ import { getEmpresaActual } from "@/lib/auth";
 import { estadoSuscripcion } from "@/lib/suscripcion";
 import { getSuscripcionesModulo, getAccesoCuenta } from "@/lib/modulos-servidor";
 import { MODULOS, tieneModulo } from "@/lib/modulos";
+import { puede, rolDe } from "@/lib/roles";
 
 /**
  * Layout del área autenticada. El middleware ya protege estas rutas; aquí se
@@ -50,6 +51,7 @@ export default async function AppLayout({
         empresaNombre={empresa.nombre}
         puedeConciliar={estadoSuscripcion(empresa).puedeConciliar}
         modulos={modulosActivos}
+        administrador={puede(rolDe(empresa.rol), "gestionar_usuarios")}
       />
       {/* La guarda es fija a partir de lg; el lienzo se desplaza para no quedar
           debajo. Cada pantalla fija su propio ancho por tarea dentro de él. */}

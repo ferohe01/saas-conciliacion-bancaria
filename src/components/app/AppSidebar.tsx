@@ -126,12 +126,24 @@ const IconoCobranzas = (p: IconProps) => (
   />
 );
 
+const IconoUsuarios = (p: IconProps) => (
+  <Ico
+    {...p}
+    d={["M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2", "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z", "M22 21v-2a4 4 0 0 0-3-3.9", "M16 3.1a4 4 0 0 1 0 7.8"]}
+  />
+);
+
 type Enlace = {
   href: string;
   label: string;
   Icono: (p: IconProps) => React.JSX.Element;
   /** Solo se muestra si el módulo correspondiente está contratado. */
   modulo?: "cobranzas";
+  /**
+   * Solo para el rol administrador. Ocultarlo orienta; lo que protege es el
+   * servidor (`exigir("gestionar_usuarios")`).
+   */
+  soloAdmin?: boolean;
 };
 
 const ENLACES: Enlace[] = [
@@ -164,6 +176,7 @@ const ENLACES: Enlace[] = [
   { href: "/asistente", label: "Asistente", Icono: IconoAsistente },
   { href: "/cuentas", label: "Cuentas", Icono: IconoCuentas },
   { href: "/conexiones", label: "Conectar sistema", Icono: IconoConexion },
+  { href: "/usuarios", label: "Usuarios", Icono: IconoUsuarios, soloAdmin: true },
   { href: "/configuracion", label: "Configuración", Icono: IconoConfig },
 ];
 
@@ -177,6 +190,7 @@ function Contenido({
   empresaNombre,
   puedeConciliar,
   modulos,
+  administrador,
   saliendo,
   cerrarSesion,
 }: {
@@ -184,6 +198,7 @@ function Contenido({
   empresaNombre: string;
   puedeConciliar: boolean;
   modulos: string[];
+  administrador: boolean;
   saliendo: boolean;
   cerrarSesion: () => void;
 }) {
@@ -224,7 +239,9 @@ function Contenido({
       <nav aria-label="Principal" className="min-h-0 flex-1 overflow-y-auto px-3">
         <ul className="space-y-0.5">
           {ENLACES.filter(
-            (e) => !e.modulo || modulos.includes(e.modulo),
+            (e) =>
+              (!e.modulo || modulos.includes(e.modulo)) &&
+              (!e.soloAdmin || administrador),
           ).map(({ href, label, Icono }) => {
             const activo = esActivo(pathname, href);
             return (
@@ -272,11 +289,14 @@ export function AppSidebar({
   empresaNombre,
   puedeConciliar,
   modulos,
+  administrador = false,
 }: {
   empresaNombre: string;
   puedeConciliar: boolean;
   /** Ids de los módulos contratados y vigentes. */
   modulos: string[];
+  /** Rol administrador: ve la gestión de usuarios. */
+  administrador?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -315,6 +335,7 @@ export function AppSidebar({
     empresaNombre,
     puedeConciliar,
     modulos,
+    administrador,
     saliendo,
     cerrarSesion,
   };

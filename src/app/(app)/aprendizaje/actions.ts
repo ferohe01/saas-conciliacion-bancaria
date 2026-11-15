@@ -1,5 +1,6 @@
 "use server";
 
+import { exigir } from "@/lib/roles-servidor";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getEmpresaActual } from "@/lib/auth";
@@ -21,6 +22,9 @@ export type CriteriosResultado = { ok: boolean; error?: string };
 export async function guardarCriterios(
   ids: string[],
 ): Promise<CriteriosResultado> {
+  const acceso = await exigir("configurar");
+  if (!acceso.ok) return { ok: false, error: acceso.error };
+
   const empresa = await getEmpresaActual();
   if (!empresa) return { ok: false, error: "Sesión no válida." };
 
@@ -60,6 +64,9 @@ export async function excluirDelAprendizaje(
   matchIndex: number,
   excluir: boolean,
 ): Promise<CriteriosResultado> {
+  const acceso = await exigir("configurar");
+  if (!acceso.ok) return { ok: false, error: acceso.error };
+
   const empresa = await getEmpresaActual();
   if (!empresa) return { ok: false, error: "Sesión no válida." };
 

@@ -16,6 +16,8 @@ import { EncabezadoPagina, BadgeEstadoJob } from "@/components/ui";
 import { EstadoContablePanel } from "@/components/conciliacion/EstadoContablePanel";
 import { getPrecedentes } from "@/lib/precedentes-servidor";
 import type { EstadoContable } from "@/lib/cicloContable";
+import { rolActual } from "@/lib/roles-servidor";
+import { puede } from "@/lib/roles";
 
 /**
  * Pantalla de una conciliación:
@@ -75,6 +77,10 @@ export default async function ConciliacionPage({
 
   // Solo tiene sentido en el modo tabla: en el de siempre, el reparto va con
   // las decisiones y no puede quedarse a medias.
+  // Qué puede hacer quien mira: la pantalla no ofrece lo que el servidor
+  // rechazaría (0057).
+  const rol = await rolActual();
+
   const cobros =
     data.lote_extracto_id && data.estado_contable === "aprobada"
       ? await estadoCobros(jobId)
@@ -134,6 +140,7 @@ export default async function ConciliacionPage({
         fechaAprobacion={data.fecha_aprobacion ?? null}
         hayVersionesPrevias={hayVersionesPrevias}
         cobros={cobros}
+        puedeAprobar={rol ? puede(rol, "aprobar") : false}
       />
 
       {mostrarReview ? (
@@ -159,6 +166,7 @@ export default async function ConciliacionPage({
             precedentes={precedentes}
             totalPares={vista?.totalPares}
             asistente={asistenteDisponible()}
+            soloLectura={!rol || !puede(rol, "decidir")}
           />
         </>
       ) : (

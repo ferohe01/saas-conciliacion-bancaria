@@ -108,7 +108,14 @@ export function ResultadoReview({
   precedentes = {},
   asistente = false,
   totalPares,
+  soloLectura = false,
 }: Props & {
+  /**
+   * Rol sin permiso para decidir (Consulta, 0057): se ve todo y no se ofrece
+   * ninguna acción. El servidor las rechazaría igual; esto evita botones que
+   * siempre fallan.
+   */
+  soloLectura?: boolean;
   precedentes?: Record<string, Precedente>;
   /** Si el despliegue tiene modelo configurado (lo decide el servidor). */
   asistente?: boolean;
@@ -418,7 +425,14 @@ export function ResultadoReview({
                 disabled={pendiente}
               />
             )}
-            <BarraLote
+            {soloLectura && (
+              <p className="text-sm text-neutral-600">
+                Tu rol es de consulta: ves las sugerencias, pero aceptarlas o
+                rechazarlas le corresponde a un Conciliador, Aprobador o
+                Administrador.
+              </p>
+            )}
+            {!soloLectura && <BarraLote
               cola={colaVisible}
               enLote={enLote}
               altaConfianza={altaConfianza}
@@ -436,7 +450,7 @@ export function ResultadoReview({
                   "aceptado",
                 )
               }
-            />
+            />}
 
             {gruposCola.map((g) => (
               <div key={g.clave} className="space-y-3 pt-2">
@@ -464,6 +478,7 @@ export function ResultadoReview({
                         }
                         match={m}
                         moneda={moneda}
+                        soloLectura={soloLectura}
                         seleccionada={enLote.has(idx)}
                         pendiente={pendiente}
                         internos={m.ids_internos.map(itemInterno)}
@@ -572,6 +587,7 @@ export function ResultadoReview({
               jobId={jobId}
               asistente={asistente}
               seleccion={selInt}
+              soloLectura={soloLectura}
               onToggle={(id) =>
                 setSelInt((s) => {
                   const n = new Set(s);
@@ -587,6 +603,7 @@ export function ResultadoReview({
               busqueda={buscaPend}
               moneda={moneda}
               seleccion={selMov}
+              soloLectura={soloLectura}
               onToggle={(id) =>
                 setSelMov((s) => {
                   const n = new Set(s);
@@ -644,7 +661,7 @@ export function ResultadoReview({
               onMas={() => setTopeConc((t) => t + PAGINA)}
               moneda={moneda}
               pendiente={pendiente}
-              onReabrir={reabrir}
+              onReabrir={soloLectura ? undefined : reabrir}
             />
           </div>
         </details>
@@ -992,6 +1009,7 @@ function FichaSugerencia({
   match,
   moneda,
   precedente,
+  soloLectura = false,
   seleccionada,
   pendiente,
   pidiendoMotivo,
@@ -1006,6 +1024,7 @@ function FichaSugerencia({
   match: Match;
   moneda: string;
   precedente: Precedente | null;
+  soloLectura?: boolean;
   seleccionada: boolean;
   pendiente: boolean;
   pidiendoMotivo: boolean;
@@ -1031,15 +1050,17 @@ function FichaSugerencia({
       ].join(" ")}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <label className="flex min-h-9 items-center gap-2">
-          <input
-            type="checkbox"
-            checked={seleccionada}
-            onChange={onToggle}
-            className="h-4 w-4 rounded border-neutral-400 text-neutral-900"
-          />
-          <span className="sr-only">Seleccionar esta sugerencia</span>
-        </label>
+        {!soloLectura && (
+          <label className="flex min-h-9 items-center gap-2">
+            <input
+              type="checkbox"
+              checked={seleccionada}
+              onChange={onToggle}
+              className="h-4 w-4 rounded border-neutral-400 text-neutral-900"
+            />
+            <span className="sr-only">Seleccionar esta sugerencia</span>
+          </label>
+        )}
         <BadgeMetodo metodo={match.metodo} confianza={match.confianza} />
         {esGrupo && (
           <BadgeAgrupacion
@@ -1090,7 +1111,7 @@ function FichaSugerencia({
       {/* Rechazar abre la pregunta en vez de ejecutar: el motivo es la senal
           mas informativa del ciclo y se perdia entera. Aceptar no pregunta
           nada — "por que aceptaste" no es una duda que nadie tenga. */}
-      {pidiendoMotivo ? (
+      {soloLectura ? null : pidiendoMotivo ? (
         <SelectorMotivo
           onElegir={onRechazar}
           onCancelar={onCancelarMotivo}
@@ -1207,6 +1228,7 @@ function PanelSinConciliar({
   busqueda,
   moneda,
   seleccion,
+  soloLectura = false,
   onToggle,
   jobId,
   asistente,
@@ -1216,6 +1238,8 @@ function PanelSinConciliar({
   busqueda: string;
   moneda: string;
   seleccion: Set<string>;
+  /** Sin permiso para decidir: no se ofrece la casilla de conciliar a mano. */
+  soloLectura?: boolean;
   onToggle: (id: string) => void;
   /**
    * Con `jobId`, cada fila puede explicar por qué no se concilió. Solo lo
@@ -1311,12 +1335,14 @@ function PanelSinConciliar({
                         : "border-transparent hover:bg-neutral-50",
                     ].join(" ")}
                   >
-                    <input
-                      type="checkbox"
-                      checked={marcado}
-                      onChange={() => onToggle(it.id)}
-                      className="h-4 w-4 shrink-0 rounded border-neutral-400 text-neutral-900"
-                    />
+                    {!soloLectura && (
+                      <input
+                        type="checkbox"
+                        checked={marcado}
+                        onChange={() => onToggle(it.id)}
+                        className="h-4 w-4 shrink-0 rounded border-neutral-400 text-neutral-900"
+                      />
+                    )}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-neutral-800">
                         {it.fecha ? `${formatearFecha(it.fecha)} · ` : ""}
@@ -1382,7 +1408,8 @@ function TablaPares({
   onMas: () => void;
   moneda: string;
   pendiente: boolean;
-  onReabrir: (idx: number) => void;
+  /** Ausente para un rol sin permiso para decidir: no se ofrece reabrir. */
+  onReabrir?: (idx: number) => void;
 }) {
   const filtrados = pares.filter(({ m }) => {
     if (!busqueda) return true;
@@ -1463,14 +1490,16 @@ function TablaPares({
                     <BadgeMetodo metodo={m.metodo} confianza={m.confianza} />
                   </td>
                   <td className="py-2 text-right whitespace-nowrap">
-                    <button
-                      type="button"
-                      disabled={pendiente}
-                      onClick={() => onReabrir(idx)}
-                      className="min-h-9 rounded-lg px-2 text-xs font-medium text-blue-700 underline underline-offset-2 transition-colors hover:bg-blue-50 hover:text-blue-800 disabled:opacity-50"
-                    >
-                      Volver a revisar
-                    </button>
+                    {onReabrir && (
+                      <button
+                        type="button"
+                        disabled={pendiente}
+                        onClick={() => onReabrir(idx)}
+                        className="min-h-9 rounded-lg px-2 text-xs font-medium text-blue-700 underline underline-offset-2 transition-colors hover:bg-blue-50 hover:text-blue-800 disabled:opacity-50"
+                      >
+                        Volver a revisar
+                      </button>
+                    )}
                   </td>
                 </tr>
               );

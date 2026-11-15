@@ -2,7 +2,7 @@ import { NextResponse, after } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getUsuarioActual, getEmpresaActual } from "@/lib/auth";
+import { exigir } from "@/lib/roles-servidor";
 import { getConfigEmpresa } from "@/lib/config";
 import { generarJobId } from "@/lib/jobs";
 import { procesarJob } from "@/lib/motor/procesarJob";
@@ -101,11 +101,11 @@ const IniciarReq = z
   );
 
 export async function POST(request: Request) {
-  const usuario = await getUsuarioActual();
-  const empresa = await getEmpresaActual();
-  if (!usuario || !empresa) {
-    return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+  const acceso = await exigir("conciliar");
+  if (!acceso.ok) {
+    return NextResponse.json({ error: acceso.error }, { status: acceso.status });
   }
+  const { usuario, empresa } = acceso;
 
   // Período de prueba: este es el punto donde el límite se hace cumplir. La
   // interfaz además lo explica y desactiva el acceso al wizard, pero ocultar un

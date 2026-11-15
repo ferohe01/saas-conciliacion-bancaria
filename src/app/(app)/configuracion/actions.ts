@@ -1,5 +1,6 @@
 "use server";
 
+import { exigir } from "@/lib/roles-servidor";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
@@ -20,6 +21,9 @@ export async function guardarConfiguracion(
   _prev: ConfigResultado,
   formData: FormData,
 ): Promise<ConfigResultado> {
+  const acceso = await exigir("configurar");
+  if (!acceso.ok) return { ok: false, error: acceso.error };
+
   const candidato = {
     tolerancia_monto_abs: num(formData.get("tolerancia_monto_abs")),
     tolerancia_monto_pct: num(formData.get("tolerancia_monto_pct")),
@@ -67,6 +71,9 @@ export async function guardarConfiguracion(
 export async function guardarModoCarga(
   modo: unknown,
 ): Promise<{ ok: boolean; error?: string }> {
+  const acceso = await exigir("configurar");
+  if (!acceso.ok) return { ok: false, error: acceso.error };
+
   const parsed = z.enum(["plantilla", "archivo_propio"]).safeParse(modo);
   if (!parsed.success) {
     return { ok: false, error: "Opción no válida." };

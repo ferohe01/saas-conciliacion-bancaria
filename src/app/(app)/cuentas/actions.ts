@@ -1,5 +1,6 @@
 "use server";
 
+import { exigir } from "@/lib/roles-servidor";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
@@ -28,6 +29,9 @@ export async function crearCuenta(
   _prev: AccionResultado,
   formData: FormData,
 ): Promise<AccionResultado> {
+  const acceso = await exigir("configurar");
+  if (!acceso.ok) return { ok: false, error: acceso.error };
+
   const parsed = CuentaSchema.safeParse({
     banco: formData.get("banco"),
     numero: formData.get("numero"),
@@ -56,6 +60,9 @@ export async function crearCuenta(
 }
 
 export async function eliminarCuenta(id: string): Promise<AccionResultado> {
+  const acceso = await exigir("configurar");
+  if (!acceso.ok) return { ok: false, error: acceso.error };
+
   const supabase = await createClient();
   // RLS garantiza que solo se elimine una cuenta de la empresa del usuario.
   const { error } = await supabase
