@@ -335,6 +335,84 @@ describe("candidatos IA: el código de operación numérico cuenta como referenc
   });
 });
 
+/**
+ * Pagos parciales: mismo recibo, el banco recibió MENOS. En la recaudadora eran
+ * los 9 casos que llegaban al modelo y salían todos «ninguno»: sin nombre en
+ * ningún lado, el prompt le exigía una identidad que no podía ver.
+ */
+describe("candidatos IA: pagos parciales", () => {
+  const cfg = { tolerancia_ia_monto: 10, ventana_ia_dias: 30, top_k_candidatos: 3, umbral_confianza_auto: 0.95 };
+  // Caso real de junio, sin nombre en ningún lado.
+  const caso = (montoBanco: number) =>
+    etapa(
+      [reg({ id_interno: "REG-1", fecha: "2026-06-17", monto: 53.79, referencia: "SR11-03320120", contraparte: null, descripcion: null })],
+      [mov({ id_movimiento: "BCO-1", fecha: "2026-06-17", monto: montoBanco, referencia_banco: "SR11-03320120", glosa: "EFECTIVO00000040225552" })],
+    );
+
+  it("mismo código y el banco recibió menos: llega marcado como pago parcial", () => {
+    const s = prepararIa(caso(33.79), cfg).shortlists;
+    expect(s).toHaveLength(1);
+    expect(s[0]!.candidatos[0]!.categoria_probable).toBe("pago_parcial");
+  });
+
+  it("si el banco recibió MÁS no es pago parcial", () => {
+    expect(prepararIa(caso(73.79), cfg).shortlists[0]!.candidatos[0]!.categoria_probable).toBe(
+      "requiere_investigacion",
+    );
+  });
+
+  it("una diferencia pequeña sigue siendo comisión", () => {
+    expect(prepararIa(caso(50.79), cfg).shortlists[0]!.candidatos[0]!.categoria_probable).toBe(
+      "comision_bancaria",
+    );
+  });
+
+  it("el prompt le dice al modelo que el código es identidad y qué es un pago parcial", () => {
+    const { system } = prepararIa(caso(33.79), cfg);
+    expect(system).toContain("comparte_ref=true");
+    expect(system).toContain("PAGO PARCIAL");
+  });
+
+  it("un pago parcial nunca se auto-concilia, aunque el modelo esté seguro", () => {
+    const e = caso(33.79);
+    const prep = prepararIa(e, cfg);
+    const r = adjudicarIa(
+      e,
+      prep.shortlists,
+      JSON.stringify({ pares: [{ id_interno: "REG-1", id_movimiento: "BCO-1", confianza: 0.99, categoria: "pago_parcial" }] }),
+      cfg,
+    );
+    expect(r.matches).toHaveLength(1);
+    expect(r.matches[0]!.categoria_diferencia).toBe("pago_parcial");
+    expect(r.matches[0]!.diferencia_monto).toBe(20);
+    expect(r.matches[0]!.estado_revision).toBe("pendiente");
+  });
+
+  it("tampoco si el modelo lo etiqueta de otra forma", () => {
+    const e = caso(33.79);
+    const prep = prepararIa(e, cfg);
+    const r = adjudicarIa(
+      e,
+      prep.shortlists,
+      JSON.stringify({ pares: [{ id_interno: "REG-1", id_movimiento: "BCO-1", confianza: 0.99, categoria: "redondeo" }] }),
+      cfg,
+    );
+    expect(r.matches[0]!.estado_revision).toBe("pendiente");
+  });
+
+  it("lo que no es parcial sigue la regla del umbral de siempre", () => {
+    const e = caso(53.79 - 3); // comisión de 3
+    const prep = prepararIa(e, cfg);
+    const r = adjudicarIa(
+      e,
+      prep.shortlists,
+      JSON.stringify({ pares: [{ id_interno: "REG-1", id_movimiento: "BCO-1", confianza: 0.99, categoria: "comision_bancaria" }] }),
+      cfg,
+    );
+    expect(r.matches[0]!.estado_revision).toBe("auto");
+  });
+});
+
 describe("el motor completo", () => {
   const payload = (
     internos: RegistroInterno[],

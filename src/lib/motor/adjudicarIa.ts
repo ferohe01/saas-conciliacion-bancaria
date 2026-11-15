@@ -59,20 +59,28 @@ export function adjudicarIa(
     const bc = bancarios[j]!;
     const bruta = Number(p.confianza ?? 0.8);
     const confianza = Math.max(0, Math.min(1, Number.isFinite(bruta) ? bruta : 0.8));
+    const categoria =
+      (typeof p.categoria === "string" ? p.categoria : null) ??
+      cand.catPorMov.get(idB) ??
+      "requiere_investigacion";
+    // ⚠️ Un pago parcial NUNCA se auto-concilia, diga lo que diga la confianza.
+    // Aceptarlo descuenta solo lo cobrado y deja el comprobante en `parcial`:
+    // es una decisión sobre el dinero de un cliente, y la toma una persona. Se
+    // mira también la categoría que dieron los números, por si el modelo la
+    // etiquetó de otra forma.
+    const esParcial =
+      categoria === "pago_parcial" || cand.catPorMov.get(idB) === "pago_parcial";
     matches.push({
       ids_internos: [idI],
       ids_movimientos: [idB],
       metodo: "ia",
       confianza,
       diferencia_monto: diferencia(it.monto, bc.monto),
-      categoria_diferencia:
-        (typeof p.categoria === "string" ? p.categoria : null) ??
-        cand.catPorMov.get(idB) ??
-        "requiere_investigacion",
+      categoria_diferencia: categoria,
       justificacion:
         typeof p.justificacion === "string" ? p.justificacion : "Sugerido por IA.",
       // La IA nunca concilia sola por debajo del umbral.
-      estado_revision: confianza >= umbral ? "auto" : "pendiente",
+      estado_revision: confianza >= umbral && !esParcial ? "auto" : "pendiente",
     });
     intUsado.add(i);
     bancUsado.add(j);

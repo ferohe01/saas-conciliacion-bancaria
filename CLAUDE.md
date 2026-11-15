@@ -390,6 +390,26 @@ conclusión natural era que faltaba credencial o que había que ampliar
   el campo entero, no tokens. Por eso los 163 pares exactos y las 13
   agrupaciones sí salían — y por eso el fallo pasó desapercibido.
 
+#### Los pagos parciales se sugieren (y nunca se auto-concilian)
+
+Con la recaudadora, la IA recibía 9 casos y los descartaba todos: mismo recibo
+en los dos lados (`SR11-03320120`), pero el banco con **menos** (53,79 → 33,79)
+y **sin nombre** en ninguno. El prompt exigía «correspondencia de identidad
+(nombre)», una identidad que el modelo no podía ver, así que contestaba
+«ninguno» — que es lo que se le había pedido.
+
+- `catProb` marca `pago_parcial` cuando `comparte_ref`, el banco recibió menos
+  y la diferencia pasa de 10 (≤ 10 sigue siendo comisión). Si el banco recibió
+  MÁS no es parcial: `requiere_investigacion`.
+- El prompt dice que **el código compartido es identidad** aunque no haya
+  nombre, y cómo adjudicar un pago parcial (confianza 0,6–0,85, cuánto se cobró
+  y cuánto falta). Una retención/detracción cae en el mismo caso: se pide que
+  lo diga en la justificación, porque no es deuda del cliente.
+- ⚠️ **Un pago parcial queda SIEMPRE `pendiente`**, aunque el modelo conteste
+  con 0,99 o lo etiquete de otra forma (`adjudicarIa` mira también la
+  categoría que dieron los números). Aceptarlo aplica solo lo cobrado y deja el
+  comprobante en `parcial`: es una decisión sobre el dinero de un cliente.
+
 #### Y el prompt de la IA no cabía en ningún modelo
 
 La etapa de candidatos (`ia_llm_01_candidatos.js` en n8n, hoy

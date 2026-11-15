@@ -103,8 +103,25 @@ const intersecta = (a: Set<string>, b: Set<string>) => {
   for (const x of a) if (b.has(x)) return true;
   return false;
 };
-const catProb = (d: number) =>
-  d < 0.005 ? "diferencia_temporal" : d <= 10 ? "comision_bancaria" : "requiere_investigacion";
+/**
+ * La categoría que sugieren los números, antes de que opine el modelo.
+ *
+ * `pago_parcial`: mismo código en los dos lados y el banco recibió MENOS que el
+ * documento. Es el caso que la recaudadora dejaba suelto: el recibo
+ * SR11-03320120 por 53,79 con un depósito de 33,79 bajo el mismo código. Se le
+ * dice al modelo con esta etiqueta porque, sin nombre en ninguno de los dos
+ * lados, el prompt anterior le exigía una identidad que no podía ver y los
+ * descartaba todos. Una diferencia pequeña (≤ 10) sigue siendo comisión, como
+ * antes.
+ */
+const catProb = (difAbs: number, comparteRef: boolean, montoInterno: number, montoBanco: number) =>
+  difAbs < 0.005
+    ? "diferencia_temporal"
+    : difAbs <= 10
+      ? "comision_bancaria"
+      : comparteRef && Math.abs(montoBanco) < Math.abs(montoInterno)
+        ? "pago_parcial"
+        : "requiere_investigacion";
 
 const SYSTEM_BASE = [
   "Eres un experto en conciliación bancaria peruana. Para cada REGISTRO INTERNO",
@@ -116,10 +133,25 @@ const SYSTEM_BASE = [
   "Reglas:",
   "- Elige a lo sumo UN candidato por registro interno (usa su id_movimiento).",
   "- Un movimiento bancario no debe usarse para dos registros distintos.",
-  "- Debe haber correspondencia de identidad (nombre) y coherencia de monto/fecha.",
-  '- Si dudas, responde "ninguno". Prefiere precisión sobre cobertura.',
-  "- La fecha puede diferir bastante (el depósito llega tarde); prioriza monto y",
-  "  nombre por sobre la cercanía de fecha.",
+  "- Debe haber correspondencia de identidad y coherencia de monto/fecha. La",
+  "  identidad es el NOMBRE o el CÓDIGO: un candidato con comparte_ref=true",
+  "  lleva el mismo número de recibo/operación que el registro, y eso identifica",
+  "  la transacción aunque ninguno de los dos traiga nombre.",
+  "- PAGO PARCIAL: si comparte_ref=true, el signo coincide y el banco recibió",
+  "  MENOS que el registro, es la misma transacción cobrada en parte (el resto",
+  "  puede llegar en otro depósito o no llegar). Adjudícalo con categoria",
+  "  pago_parcial, confianza entre 0.6 y 0.85, y di en la justificación cuánto",
+  '  se cobró y cuánto falta. No respondas "ninguno" solo porque el monto',
+  "  difiera: el código compartido es la prueba de que es la misma operación.",
+  "  Si la diferencia equivale a una retención, detracción o percepción (3 %,",
+  "  4 %, 10 % o 12 % del importe), dilo en la justificación: no es deuda",
+  "  pendiente del cliente.",
+  "- Si el banco recibió MÁS que el registro con el mismo código, no es un pago",
+  "  parcial: usa requiere_investigacion.",
+  '- Fuera de esos casos, si dudas, responde "ninguno". Prefiere precisión sobre',
+  "  cobertura.",
+  "- La fecha puede diferir bastante (el depósito llega tarde); prioriza monto,",
+  "  código y nombre por sobre la cercanía de fecha.",
   "- Clasifica la diferencia en `categoria`, una de: comision_bancaria,",
   "  pago_parcial, diferencia_temporal, diferencia_moneda, redondeo,",
   "  requiere_investigacion.",
@@ -204,7 +236,7 @@ export function prepararIa(
         palabras_comunes: comunes,
         comparte_ref: comparteRef,
         score,
-        categoria_probable: catProb(difAbs),
+        categoria_probable: catProb(difAbs, comparteRef, it.monto, bc.monto),
       });
     }
     cands.sort((a, b) => b.score - a.score);
