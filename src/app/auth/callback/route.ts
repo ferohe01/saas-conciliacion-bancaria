@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { origenPublico } from "@/lib/origenPublico";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { altaPorSso, type ProveedorSso } from "@/lib/sso";
+import { SSO_ACTIVO, altaPorSso, type ProveedorSso } from "@/lib/sso";
 
 /**
  * GET /auth/callback?code=…&next=/dashboard
@@ -29,6 +29,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origen}/login?error=${encodeURIComponent(motivo)}`);
   };
 
+  // SSO implementado pero desactivado (SSO_ACTIVO, src/lib/sso.ts).
+  if (!SSO_ACTIVO) return fallo("El acceso corporativo (SSO) no está activado. Entra con tu correo y contraseña.");
   if (!code) return fallo("No se pudo completar el acceso corporativo. Vuelve a intentarlo.");
 
   const supabase = await createClient();

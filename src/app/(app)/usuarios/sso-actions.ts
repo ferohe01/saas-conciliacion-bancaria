@@ -5,7 +5,10 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { exigir } from "@/lib/roles-servidor";
 import { ROLES } from "@/lib/roles";
-import { esDominioPublico, normalizarDominio } from "@/lib/sso";
+import { SSO_ACTIVO, esDominioPublico, normalizarDominio } from "@/lib/sso";
+
+/** Mientras SSO_ACTIVO sea false, estas acciones no hacen nada (src/lib/sso.ts). */
+const SSO_APAGADO = "El acceso corporativo (SSO) no está activado en este sistema.";
 
 /**
  * Alta y baja del proveedor SAML de la empresa (0058).
@@ -53,6 +56,7 @@ function explicarFalloGoTrue(status: number, cuerpo: string): string {
 }
 
 export async function registrarSso(entrada: unknown): Promise<Resultado> {
+  if (!SSO_ACTIVO) return { ok: false, error: SSO_APAGADO };
   const acceso = await exigir("gestionar_usuarios");
   if (!acceso.ok) return { ok: false, error: acceso.error };
   const parsed = AltaSchema.safeParse(entrada);
@@ -119,6 +123,7 @@ export async function registrarSso(entrada: unknown): Promise<Resultado> {
 }
 
 export async function quitarSso(id: string): Promise<Resultado> {
+  if (!SSO_ACTIVO) return { ok: false, error: SSO_APAGADO };
   const acceso = await exigir("gestionar_usuarios");
   if (!acceso.ok) return { ok: false, error: acceso.error };
 

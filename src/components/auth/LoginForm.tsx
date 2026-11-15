@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { esDominioPublico } from "@/lib/sso";
+import { SSO_ACTIVO, esDominioPublico } from "@/lib/sso";
 import { CampoTexto } from "./AuthShell";
 import { Boton } from "@/components/ui";
 
@@ -62,7 +62,11 @@ export function LoginForm() {
     // La contraseña ya no es `required` en el campo, para que el botón de SSO
     // funcione con solo el correo; se comprueba aquí para el acceso normal.
     if (!password) {
-      setError("Escribe tu contraseña, o entra con el SSO de tu empresa.");
+      setError(
+        SSO_ACTIVO
+          ? "Escribe tu contraseña, o entra con el SSO de tu empresa."
+          : "Escribe tu contraseña.",
+      );
       return;
     }
     setCargando(true);
@@ -98,6 +102,9 @@ export function LoginForm() {
         label="Contraseña"
         type="password"
         autoComplete="current-password"
+        // Obligatoria como siempre; con SSO activo deja de serlo en el campo
+        // para que el botón corporativo funcione con solo el correo.
+        required={!SSO_ACTIVO}
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         placeholder="••••••••"
@@ -115,16 +122,20 @@ export function LoginForm() {
       <Boton type="submit" tamano="lg" disabled={cargando} className="w-full">
         {cargando ? "Ingresando…" : "Ingresar"}
       </Boton>
-      <Boton
-        type="button"
-        variante="secundario"
-        tamano="lg"
-        disabled={cargando}
-        onClick={() => void onSso()}
-        className="w-full"
-      >
-        Ingresar con el SSO de mi empresa
-      </Boton>
+      {/* SSO corporativo: implementado pero desactivado (SSO_ACTIVO en
+          src/lib/sso.ts). Se mostrará cuando una empresa grande lo solicite. */}
+      {SSO_ACTIVO && (
+        <Boton
+          type="button"
+          variante="secundario"
+          tamano="lg"
+          disabled={cargando}
+          onClick={() => void onSso()}
+          className="w-full"
+        >
+          Ingresar con el SSO de mi empresa
+        </Boton>
+      )}
     </form>
   );
 }

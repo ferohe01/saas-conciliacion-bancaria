@@ -8,6 +8,28 @@ import { rolDe, type Rol } from "@/lib/roles";
  * empresa registra su proveedor con su dominio de correo. Puro y con tests.
  */
 
+/**
+ * ⚠️⚠️ SSO DESACTIVADO A PROPÓSITO (decisión de producto, 15/11/2026).
+ *
+ * El sistema se vende también a pequeñas y medianas empresas, que no tienen un
+ * proveedor de identidad corporativo ni lo necesitan: para ellas el botón de
+ * SSO en el login solo confundía. El SSO está IMPLEMENTADO y probado —botón,
+ * vuelta en /auth/callback, alta automática segura, panel en /usuarios,
+ * migración 0058— y se activará cuando una empresa grande lo solicite.
+ *
+ * Con `false`: el login no muestra el botón, /usuarios no muestra el panel, y
+ * /auth/callback y las acciones de alta/baja de proveedor no hacen nada. La
+ * tabla `sso_proveedores` (0058) se queda en la base, vacía e inofensiva.
+ *
+ * PARA ACTIVARLO: poner `true` aquí, desplegar, y seguir ops/SSO-SAML.md
+ * (activar SAML en el Supabase self-hosted). Ver CLAUDE.md § SSO.
+ *
+ * Se apaga con este interruptor y NO comentando el código a propósito: así
+ * sigue compilando y pasando sus tests, y encenderlo es cambiar una palabra. Un
+ * bloque comentado se queda atrás sin que nadie lo note y deja de compilar.
+ */
+export const SSO_ACTIVO = false;
+
 /** El dominio de un correo, en minúsculas; `null` si no lo parece. */
 export function dominioDe(email: string | null | undefined): string | null {
   const partes = String(email ?? "").trim().toLowerCase().split("@");

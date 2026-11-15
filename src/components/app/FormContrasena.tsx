@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { SSO_ACTIVO } from "@/lib/sso";
 import { Boton, CLASES_ENTRADA, Tarjeta } from "@/components/ui";
 
 /** Fija la contraseña de quien entró con un enlace de invitación. */
@@ -53,9 +54,11 @@ export function FormContrasena() {
         <Boton type="submit" disabled={pendiente}>
           {pendiente ? "Guardando…" : "Guardar y entrar"}
         </Boton>
-        <p className="text-xs text-neutral-500">
-          Si tu empresa entra con su cuenta corporativa (SSO), puedes saltarte este paso.
-        </p>
+        {SSO_ACTIVO && (
+          <p className="text-xs text-neutral-500">
+            Si tu empresa entra con su cuenta corporativa (SSO), puedes saltarte este paso.
+          </p>
+        )}
       </form>
     </Tarjeta>
   );

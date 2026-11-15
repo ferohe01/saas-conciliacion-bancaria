@@ -1,5 +1,12 @@
 # Activar el SSO corporativo (SAML) en el Supabase self-hosted
 
+> ⚠️ **Hoy el SSO está DESACTIVADO a propósito** (`SSO_ACTIVO = false` en
+> `src/lib/sso.ts`, decisión del 15/11/2026). El sistema se vende también a
+> PyMEs, que no tienen proveedor de identidad corporativo, y el botón solo las
+> confundía. Está implementado y con tests: se activará cuando una empresa
+> grande lo solicite. **Paso 0:** poner `SSO_ACTIVO = true` y desplegar; luego
+> seguir esta guía.
+
 La aplicación ya trae todo lo suyo: el botón «Ingresar con el SSO de mi empresa»
 en el login, el alta automática por dominio (`/auth/callback`, migración `0058`)
 y el registro del proveedor desde **/usuarios → Acceso corporativo (SSO)**.

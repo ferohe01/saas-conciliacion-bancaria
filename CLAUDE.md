@@ -2295,7 +2295,17 @@ lectura). Matriz en `src/lib/roles.ts` (pura, con tests).
   y `es_miembro()` le abría todos sus datos. Se retira (y la de DELETE): el
   registro y /usuarios escriben con `service_role`.
 
-### SSO corporativo con SAML (0058)
+### SSO corporativo con SAML (0058) — IMPLEMENTADO, DESACTIVADO
+
+> ⚠️⚠️ **Hoy está apagado** con `SSO_ACTIVO = false` (`src/lib/sso.ts`),
+> decisión de producto del 15/11/2026: el sistema se vende también a PyMEs, que
+> no tienen proveedor de identidad corporativo, y el botón en el login solo las
+> confundía. Con el interruptor en `false` no se ve el botón ni el panel de
+> /usuarios, y `/auth/callback` y las acciones de proveedor no hacen nada. **Se
+> activará cuando una empresa grande lo solicite**: `true`, desplegar y seguir
+> `ops/SSO-SAML.md`. Se apagó con un interruptor y no comentando el código para
+> que siga compilando y pasando sus tests mientras espera. La tabla
+> `sso_proveedores` queda en la base, vacía.
 
 Un mecanismo para Entra ID, Okta, Google Workspace y cualquier proveedor SAML
 2.0, sobre el SSO de Supabase Auth. Login: «Ingresar con el SSO de mi empresa»
