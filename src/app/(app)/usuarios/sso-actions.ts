@@ -5,7 +5,7 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { exigir } from "@/lib/roles-servidor";
 import { ROLES } from "@/lib/roles";
-import { normalizarDominio } from "@/lib/sso";
+import { esDominioPublico, normalizarDominio } from "@/lib/sso";
 
 /**
  * Alta y baja del proveedor SAML de la empresa (0058).
@@ -61,6 +61,12 @@ export async function registrarSso(entrada: unknown): Promise<Resultado> {
   }
   const dominio = normalizarDominio(parsed.data.dominio);
   if (!dominio) return { ok: false, error: "Escribe el dominio de correo de tu empresa, por ejemplo win.pe." };
+  if (esDominioPublico(dominio)) {
+    return {
+      ok: false,
+      error: `${dominio} es un correo personal, no de tu empresa: no puede tener acceso corporativo. Usa el dominio propio de tu empresa (por ejemplo, empresa.com.pe).`,
+    };
+  }
 
   const admin = createAdminClient();
   const { data: previo } = await admin

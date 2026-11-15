@@ -1,5 +1,23 @@
 import { describe, it, expect } from "vitest";
-import { altaPorSso, datosParaElProveedor, dominioDe, normalizarDominio } from "@/lib/sso";
+import { altaPorSso, datosParaElProveedor, dominioDe, esDominioPublico, normalizarDominio } from "@/lib/sso";
+
+describe("esDominioPublico", () => {
+  it("reconoce los correos personales, sin importar mayúsculas", () => {
+    expect(esDominioPublico("hotmail.com")).toBe(true);
+    expect(esDominioPublico("Gmail.com")).toBe(true);
+    expect(esDominioPublico("outlook.es")).toBe(true);
+  });
+
+  it("un dominio de empresa no es público", () => {
+    expect(esDominioPublico("win.pe")).toBe(false);
+    expect(esDominioPublico("empresa.com.pe")).toBe(false);
+    expect(esDominioPublico(null)).toBe(false);
+  });
+
+  it("encaja con lo que saca dominioDe de un correo", () => {
+    expect(esDominioPublico(dominioDe("ferohe@hotmail.com"))).toBe(true);
+  });
+});
 
 describe("dominioDe", () => {
   it("saca el dominio en minúsculas", () => {

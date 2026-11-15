@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { esDominioPublico } from "@/lib/sso";
 import { CampoTexto } from "./AuthShell";
 import { Boton } from "@/components/ui";
 
@@ -28,6 +29,14 @@ export function LoginForm() {
     const dominio = email.trim().toLowerCase().split("@")[1];
     if (!dominio) {
       setError("Escribe tu correo corporativo para entrar con el SSO de tu empresa.");
+      return;
+    }
+    // Un correo personal nunca tiene SSO: se dice qué hacer, en vez del
+    // «no hay SSO configurado», que invita a pedírselo a un administrador.
+    if (esDominioPublico(dominio)) {
+      setError(
+        `El acceso corporativo (SSO) es para cuentas de empresa. Con un correo personal como @${dominio}, entra con tu contraseña.`,
+      );
       return;
     }
     setCargando(true);

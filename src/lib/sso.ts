@@ -15,6 +15,27 @@ export function dominioDe(email: string | null | undefined): string | null {
   return /^[a-z0-9.-]+\.[a-z]{2,}$/.test(partes[1]) ? partes[1] : null;
 }
 
+/**
+ * Dominios de correo personal: no pertenecen a ninguna empresa, así que no
+ * pueden tener SSO corporativo. Una sola lista para las dos caras: /usuarios no
+ * deja registrar un proveedor sobre ellos, y el login explica que con esos
+ * correos se entra con contraseña.
+ *
+ * Registrar SSO sobre `gmail.com` sería grave, no solo inútil: daría a entender
+ * que cualquier cuenta de Gmail pertenece a esa empresa.
+ */
+const DOMINIOS_PUBLICOS = new Set([
+  "gmail.com", "googlemail.com",
+  "hotmail.com", "hotmail.es", "outlook.com", "outlook.es", "live.com", "live.com.pe", "msn.com",
+  "yahoo.com", "yahoo.es", "ymail.com", "rocketmail.com",
+  "icloud.com", "me.com", "mac.com",
+  "aol.com", "protonmail.com", "proton.me", "gmx.com", "zoho.com", "mail.com", "yandex.com",
+]);
+
+export function esDominioPublico(dominio: string | null | undefined): boolean {
+  return dominio != null && DOMINIOS_PUBLICOS.has(dominio.trim().toLowerCase());
+}
+
 /** Un dominio escrito por el administrador, normalizado; `null` si no vale. */
 export function normalizarDominio(entrada: string): string | null {
   const d = entrada.trim().toLowerCase().replace(/^@/, "").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
