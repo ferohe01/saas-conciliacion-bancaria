@@ -1,9 +1,9 @@
-import type { PayloadConciliacion } from "@/lib/contract/payload";
+import type { EjemploAprendizaje, PayloadConciliacion } from "@/lib/contract/payload";
 import type { ResultadoConciliacion } from "@/lib/contract/resultado";
 import { capaExacta } from "./exacta";
 import { capaDifusa } from "./difusa";
 import { capaAgrupacion } from "./agrupacion";
-import { prepararIa } from "./candidatosIa";
+import { construirPromptIa, prepararIa, type Shortlist } from "./candidatosIa";
 import { adjudicarIa } from "./adjudicarIa";
 import { ensamblarResultado } from "./ensamblar";
 import type { ConfigMotor } from "./tipos";
@@ -37,13 +37,25 @@ export type TrazaMotor = {
   omitidasIa: number;
   /** Si se llamó al modelo y contestó. `null` = no hubo nada que preguntar o no hay IA. */
   iaRespondio: boolean | null;
+  /**
+   * De dónde salieron los ejemplos del prompt: `similitud` = los más parecidos
+   * a estos casos (pgvector, 0059); `recientes` = los de siempre.
+   */
+  ejemplos: "similitud" | "recientes";
 };
+
+/**
+ * Elige los ejemplos de aprendizaje más parecidos a los casos que se van a
+ * consultar. `null` = no se pudo; se usan los recientes del payload.
+ */
+export type ElegirEjemplos = (shortlists: Shortlist[]) => Promise<EjemploAprendizaje[] | null>;
 
 export async function ejecutarMotor(
   payload: PayloadConciliacion,
   opciones: {
     consultarIa?: ConsultarIa | null;
     alEntrarEnFase?: (fase: FaseMotor) => Promise<void> | void;
+    elegirEjemplos?: ElegirEjemplos | null;
   } = {},
 ): Promise<{ resultado: ResultadoConciliacion; traza: TrazaMotor }> {
   const config = payload.config as ConfigMotor;
@@ -72,9 +84,25 @@ export async function ejecutarMotor(
     payload.criterios_declarados ?? [],
   );
   let iaRespondio: boolean | null = null;
+  let origenEjemplos: TrazaMotor["ejemplos"] = "recientes";
   // Sin shortlists no hay nada que adjudicar: no se paga una consulta vacía.
   if (prep.shortlists.length > 0 && opciones.consultarIa) {
-    const respuesta = await opciones.consultarIa(prep.system, prep.user);
+    // Los ejemplos más parecidos a ESTOS casos, si se pueden elegir; si no,
+    // el prompt se queda con los recientes que trae el payload.
+    let { system, user } = prep;
+    const similares = opciones.elegirEjemplos
+      ? await opciones.elegirEjemplos(prep.shortlists)
+      : null;
+    if (similares && similares.length > 0) {
+      ({ system, user } = construirPromptIa(
+        prep.shortlists,
+        config,
+        similares,
+        payload.criterios_declarados ?? [],
+      ));
+      origenEjemplos = "similitud";
+    }
+    const respuesta = await opciones.consultarIa(system, user);
     iaRespondio = respuesta !== null;
     etapa = adjudicarIa(etapa, prep.shortlists, respuesta, config);
   }
@@ -94,6 +122,7 @@ export async function ejecutarMotor(
       consultadasIa: prep.shortlists.length,
       omitidasIa: prep.shortlistsOmitidas,
       iaRespondio,
+      ejemplos: origenEjemplos,
     },
   };
 }

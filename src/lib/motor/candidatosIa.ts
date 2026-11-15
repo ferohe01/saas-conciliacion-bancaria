@@ -252,6 +252,31 @@ export function prepararIa(
     }
   }
 
+  // Se pregunta por los casos con DUDA REAL, y solo por los mejores: ordenar
+  // por el mejor score y cortar convierte un prompt imposible en unos pocos KB.
+  const conDuda = shortlists.filter((s) => (s.candidatos[0]?.score ?? 0) >= SCORE_MINIMO);
+  conDuda.sort((a, b) => (b.candidatos[0]?.score ?? 0) - (a.candidatos[0]?.score ?? 0));
+  const consultadas = conDuda.slice(0, maxConsultas);
+
+  return {
+    shortlists: consultadas,
+    shortlistsOmitidas: shortlists.length - consultadas.length,
+    ...construirPromptIa(consultadas, config, ejemplos, criterios),
+  };
+}
+
+/**
+ * El prompt de adjudicación para unas shortlists ya elegidas.
+ *
+ * Aparte de `prepararIa` para poder rehacerlo con otros ejemplos —los más
+ * parecidos a estos casos, por pgvector (0059)— sin recalcular los candidatos.
+ */
+export function construirPromptIa(
+  consultadas: Shortlist[],
+  config: ConfigMotor,
+  ejemplos: EjemploAprendizaje[] = [],
+  criterios: string[] = [],
+): { system: string; user: string } {
   // Bloque few-shot: patrones aprendidos de decisiones humanas reales. El
   // motivo del rechazo es lo que convierte "este par estaba mal" en "estaba mal
   // PORQUE el nombre no calzaba".
@@ -283,15 +308,7 @@ export function prepararIa(
       ].join("\n")
     : "";
 
-  // Se pregunta por los casos con DUDA REAL, y solo por los mejores: ordenar
-  // por el mejor score y cortar convierte un prompt imposible en unos pocos KB.
-  const conDuda = shortlists.filter((s) => (s.candidatos[0]?.score ?? 0) >= SCORE_MINIMO);
-  conDuda.sort((a, b) => (b.candidatos[0]?.score ?? 0) - (a.candidatos[0]?.score ?? 0));
-  const consultadas = conDuda.slice(0, maxConsultas);
-
   return {
-    shortlists: consultadas,
-    shortlistsOmitidas: shortlists.length - consultadas.length,
     system: SYSTEM_BASE + declarado + fewShot,
     user: `Tolerancias: ${JSON.stringify(config)}\n\nCandidatos por registro interno:\n${JSON.stringify(consultadas)}`,
   };

@@ -211,11 +211,15 @@ export async function POST(request: Request) {
     .limit(30);
   // Los jobs de modo tabla guardan sus pares fuera del JSONB: se hidratan los
   // revisados por una persona, que son los únicos que enseñan algo.
-  const ejemplos = construirEjemplos(
-    (await hidratarJobsModoTabla(
-      (historicos ?? []) as { id: string; lote_extracto_id?: string | null }[],
-    )) as unknown as JobHistorico[],
-  );
+  const jobsHistoricos = (await hidratarJobsModoTabla(
+    (historicos ?? []) as { id: string; lote_extracto_id?: string | null }[],
+  )) as unknown as JobHistorico[];
+  // Los 12 recientes viajan en el payload (y quedan en `payload_entrada` como
+  // traza). El pool amplio —mismo criterio, mismas exclusiones, sin el tope de
+  // 12— no viaja: lo usa el motor para elegir los más PARECIDOS a cada caso
+  // con pgvector (0059), y si no puede, se queda con los recientes.
+  const ejemplos = construirEjemplos(jobsHistoricos);
+  const poolEjemplos = construirEjemplos(jobsHistoricos, { maxPorClase: 500, maxTotal: 1000 });
 
   // Arranque en frío: el criterio que la empresa declaró. Va SIEMPRE, no solo
   // cuando faltan ejemplos — el prompt le dice al modelo que las decisiones
@@ -380,7 +384,7 @@ export async function POST(request: Request) {
   // avance por Realtime + polling. `procesarJob` no lanza: cualquier fallo deja
   // el job en `error` con su motivo.
   const datos = validado.data;
-  after(() => procesarJob(jobId, datos));
+  after(() => procesarJob(jobId, datos, { poolEjemplos }));
 
   return NextResponse.json({ job_id: jobId, modo: "motor" });
 }

@@ -481,6 +481,54 @@ describe("el motor completo", () => {
     expect(resultado.cuadre.diferencias_emparejadas).toBe(367.34);
   });
 
+  it("con ejemplos por similitud, el prompt los usa en vez de los recientes", async () => {
+    let systemVisto = "";
+    const { traza } = await ejecutarMotor(
+      {
+        ...payload(
+          [reg({ id_interno: "REG-1", monto: 12244.56, referencia: "30010182", contraparte: "Rosa Quispe" })],
+          [mov({ id_movimiento: "BCO-1", monto: 11877.22, referencia_banco: "30010182", glosa: "ROSA QUISPE NETO RETENC" })],
+        ),
+        ejemplos_aprendizaje: [{ decision: "aceptado", interno: "RECIENTE", banco: "RECIENTE" }],
+      },
+      {
+        elegirEjemplos: async (s) => {
+          expect(s).toHaveLength(1); // recibe los casos que se van a consultar
+          return [{ decision: "rechazado", interno: "PARECIDO", banco: "PARECIDO", motivo: "es otra contraparte" }];
+        },
+        consultarIa: async (system) => {
+          systemVisto = system;
+          return null;
+        },
+      },
+    );
+    expect(traza.ejemplos).toBe("similitud");
+    expect(systemVisto).toContain("PARECIDO");
+    expect(systemVisto).not.toContain("RECIENTE");
+  });
+
+  it("si no se pueden elegir por similitud, se usan los recientes", async () => {
+    let systemVisto = "";
+    const { traza } = await ejecutarMotor(
+      {
+        ...payload(
+          [reg({ id_interno: "REG-1", monto: 12244.56, referencia: "30010182" })],
+          [mov({ id_movimiento: "BCO-1", monto: 11877.22, referencia_banco: "30010182" })],
+        ),
+        ejemplos_aprendizaje: [{ decision: "aceptado", interno: "RECIENTE", banco: "RECIENTE" }],
+      },
+      {
+        elegirEjemplos: async () => null,
+        consultarIa: async (system) => {
+          systemVisto = system;
+          return null;
+        },
+      },
+    );
+    expect(traza.ejemplos).toBe("recientes");
+    expect(systemVisto).toContain("RECIENTE");
+  });
+
   it("si el modelo no contesta, la conciliación termina igual", async () => {
     const { resultado, traza } = await ejecutarMotor(
       payload(

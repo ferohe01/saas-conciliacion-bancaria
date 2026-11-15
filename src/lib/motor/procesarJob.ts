@@ -1,7 +1,8 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { PayloadConciliacion } from "@/lib/contract/payload";
+import type { EjemploAprendizaje, PayloadConciliacion } from "@/lib/contract/payload";
 import { absorberResultado } from "@/lib/conciliacion/absorber";
+import { elegirEjemplosSimilares } from "@/lib/ejemplosSimilares-servidor";
 import { ejecutarMotor } from "./motor";
 import { consultarModeloConciliacion } from "./llm";
 
@@ -23,16 +24,29 @@ import { consultarModeloConciliacion } from "./llm";
 export async function procesarJob(
   jobId: string,
   payload: PayloadConciliacion,
+  opciones: {
+    /**
+     * Todas las decisiones humanas de la empresa que pueden servir de ejemplo
+     * (no solo las 12 recientes del payload). De ahí se eligen las más
+     * parecidas a los casos de esta corrida (pgvector, 0059).
+     */
+    poolEjemplos?: EjemploAprendizaje[];
+  } = {},
 ): Promise<void> {
   const admin = createAdminClient();
   const actualizar = (campos: Record<string, unknown>) =>
     admin.from("jobs_conciliacion").update(campos).eq("id", jobId);
+  const pool = opciones.poolEjemplos ?? [];
 
   try {
     await actualizar({ estado: "procesando" });
 
     const { resultado, traza } = await ejecutarMotor(payload, {
       consultarIa: consultarModeloConciliacion,
+      elegirEjemplos:
+        pool.length > 0
+          ? (shortlists) => elegirEjemplosSimilares(payload.metadata.empresa_id, pool, shortlists)
+          : null,
       alEntrarEnFase: async (fase) => {
         // El avance es informativo: si una escritura falla, el motor sigue.
         const { error } = await actualizar({ fase_actual: fase });
@@ -42,7 +56,8 @@ export async function procesarJob(
 
     console.info(
       `[motor] ${jobId}: ${resultado.matches.length} pares; IA consultada sobre ${traza.consultadasIa}` +
-        ` (omitidas ${traza.omitidasIa}; respondió: ${traza.iaRespondio ?? "no hizo falta"})`,
+        ` (omitidas ${traza.omitidasIa}; respondió: ${traza.iaRespondio ?? "no hizo falta"};` +
+        ` ejemplos: ${traza.ejemplos})`,
     );
 
     // La escritura del resultado SÍ tiene que salir: tres intentos, como el
