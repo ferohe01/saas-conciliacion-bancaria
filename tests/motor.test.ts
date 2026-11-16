@@ -141,6 +141,34 @@ describe("capa difusa", () => {
     expect(r.matches[0]!.categoria_diferencia).toBe("comision_bancaria");
   });
 
+  // 100 contra 97 puede ser comisión o pago incompleto: concilarlo solo dejaría
+  // el comprobante parcial sin que nadie lo decidiera.
+  it("con diferencia de importe PROPONE, no concilia solo", () => {
+    const r = capaDifusa(
+      etapa(
+        [reg({ id_interno: "REG-1", monto: 100, contraparte: "Comercial Nunez" })],
+        [mov({ id_movimiento: "BCO-1", monto: 97, fecha: "2026-06-03", glosa: "COMERCIAL NUNEZ" })],
+      ),
+      config,
+    );
+    expect(r.matches[0]!.estado_revision).toBe("pendiente");
+    // El par queda reservado: no vuelve a ofrecerse a las capas siguientes.
+    expect(r.pendientesInternos).toHaveLength(0);
+    expect(r.pendientesBancarios).toHaveLength(0);
+  });
+
+  it("con el mismo importe concilia solo, salvo que la empresa pida revisarlo todo", () => {
+    const datos = () =>
+      etapa(
+        [reg({ id_interno: "REG-1", monto: 100, contraparte: "Comercial Nunez" })],
+        [mov({ id_movimiento: "BCO-1", monto: 100, fecha: "2026-06-03", glosa: "COMERCIAL NUNEZ" })],
+      );
+    expect(capaDifusa(datos(), config).matches[0]!.estado_revision).toBe("auto");
+    expect(
+      capaDifusa(datos(), { ...config, revisar_toda_difusa: true }).matches[0]!.estado_revision,
+    ).toBe("pendiente");
+  });
+
   it("no casa fuera de la ventana de días", () => {
     const r = capaDifusa(
       etapa(
@@ -430,6 +458,7 @@ describe("el motor completo", () => {
       tolerancia_monto_abs: 5, tolerancia_monto_pct: 0, tolerancia_dias: 3,
       tolerancia_ia_monto: 10, top_k_candidatos: 3, ventana_ia_dias: 30,
       max_combinacion: 3, umbral_confianza_auto: 0.95, arrastre_meses: 12,
+      revisar_toda_difusa: false,
     },
     registros_internos: internos,
     movimientos_bancarios: bancarios,

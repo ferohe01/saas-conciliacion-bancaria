@@ -34,6 +34,8 @@ export async function guardarConfiguracion(
     max_combinacion: num(formData.get("max_combinacion")),
     arrastre_meses: num(formData.get("arrastre_meses")),
     umbral_confianza_auto: num(formData.get("umbral_confianza_pct")) / 100,
+    // Casilla: el navegador solo la envía si está marcada.
+    revisar_toda_difusa: formData.get("revisar_toda_difusa") === "on",
   };
 
   const parsed = ConfigConciliacion.safeParse(candidato);

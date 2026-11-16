@@ -50,6 +50,14 @@ motor y el esquema Supabase.
    sin que nadie los mirara. Y cada match falso se lleva el movimiento que le
    tocaba al recibo legítimo: el error se propaga e infla el descuadre.
 2. Matching difuso/heurístico con tolerancias (exige ≥1 palabra de nombre en común).
+   ⚠️ **Solo concilia sola (`auto`) un par de importe IDÉNTICO.** Con diferencia
+   lo PROPONE (`pendiente`, apartado «Coincidencias aproximadas» de Por
+   revisar): el motor supone una comisión, pero 100 contra 97 también puede ser
+   un pago incompleto, y al aprobar dejaría el comprobante parcial sin que nadie
+   lo decidiera — mismo criterio que los pagos parciales de la IA.
+   `config.revisar_toda_difusa` (Configuración, apagado por defecto) manda
+   también los de importe idéntico a revisión, para quien quiera que nada que
+   no sea exacto entre sin una persona.
 3. **Agrupación 1:N / N:1** (subset-sum): un depósito bancario que reúne varios
    pagos internos, o un pago reflejado en varios movimientos. Ver nota abajo.
 4. IA con score de confianza que **propone** matches (sobre una shortlist de

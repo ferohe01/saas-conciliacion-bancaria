@@ -228,6 +228,38 @@ export function ConfiguracionForm({ config }: { config: ConfigConciliacion }) {
         </Tarjeta>
       ))}
 
+      <Tarjeta>
+        <h2 className="font-semibold text-neutral-900">Coincidencias aproximadas</h2>
+        <p className="mt-0.5 max-w-prose text-sm text-neutral-600">
+          Pares con el mismo cliente y fecha cercana que no casan por código.
+          Si el importe es distinto, siempre esperan tu revisión: la diferencia
+          puede ser una comisión del banco o un pago incompleto.
+        </p>
+        <label className="mt-5 flex items-start gap-3">
+          <input
+            type="checkbox"
+            name="revisar_toda_difusa"
+            defaultChecked={config.revisar_toda_difusa}
+            aria-describedby="revisar_toda_difusa-ayuda"
+            className="mt-1 h-4 w-4 rounded border-neutral-300 text-blue-600 focus:ring-blue-200"
+          />
+          <span>
+            <span className="block text-sm font-medium text-neutral-800">
+              Revisar también las de importe idéntico
+            </span>
+            <span
+              id="revisar_toda_difusa-ayuda"
+              className="mt-0.5 block max-w-prose text-sm text-neutral-600"
+            >
+              Apagado, un par con el mismo importe se concilia solo. Encendido,
+              nada que no sea una coincidencia exacta por código se concilia sin
+              que una persona lo confirme. Útil si un auditor exige revisarlo
+              todo; con mucho volumen, alarga la revisión.
+            </span>
+          </span>
+        </label>
+      </Tarjeta>
+
       <div aria-live="polite">
         {estado.error && (
           <p

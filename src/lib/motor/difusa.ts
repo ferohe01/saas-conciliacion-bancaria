@@ -10,6 +10,13 @@ import { MS_DIA, type ConfigMotor, type Etapa } from "./tipos";
  * Diferencia de monto tolerada = max(tolerancia_monto_abs, |monto|·pct).
  * Fecha tolerada = tolerancia_dias.
  *
+ * ⚠️ Solo se concilia SOLO el par de importe idéntico. Con diferencia, el
+ * motor SUPONE una comisión bancaria, pero 100 contra 97 también puede ser un
+ * pago incompleto del cliente — y al aprobar, el comprobante quedaría parcial
+ * con 3 pendientes sin que nadie lo decidiera. Ese par se PROPONE (`pendiente`)
+ * y va a «Por revisar», como los pagos parciales de la IA.
+ * `revisar_toda_difusa` manda también los de importe idéntico a revisión.
+ *
  * ⚠️ Nada que dependa de un solo lado se calcula dentro del bucle del otro.
  * Tokenizar la misma glosa una vez por cada registro interno eran 400 millones
  * de `normalize` + regex + Set a 20.000 × 20.000 (en n8n abortaba el runner a
@@ -24,6 +31,7 @@ export function capaDifusa(prev: Etapa, config: ConfigMotor): Etapa {
   const tolAbs = Number(config.tolerancia_monto_abs ?? 0);
   const tolPct = Number(config.tolerancia_monto_pct ?? 0);
   const tolDias = Number(config.tolerancia_dias ?? 0);
+  const revisarTodo = config.revisar_toda_difusa === true;
 
   const bancUsado = new Set<number>();
   const intUsado = new Set<number>();
@@ -72,18 +80,18 @@ export function capaDifusa(prev: Etapa, config: ConfigMotor): Etapa {
       if (Math.abs((tIt - t) / MS_DIA) > tolDias) continue;
       const comunes = [...new Set(palIt.filter((w) => pal.has(w)))];
       if (comunes.length === 0) continue; // exige coincidencia de nombre
+      const conDiferencia = Math.abs(dif) > 0;
       matches.push({
         ids_internos: [it.id_interno],
         ids_movimientos: [bc.id_movimiento],
         metodo: "difusa",
         confianza: null,
         diferencia_monto: dif,
-        categoria_diferencia: Math.abs(dif) > 0 ? "comision_bancaria" : null,
-        justificacion:
-          Math.abs(dif) > 0
-            ? `Coincidencia por nombre (${comunes.join(", ")}); diferencia de ${dif.toFixed(2)} compatible con comisión bancaria.`
-            : `Coincidencia por nombre (${comunes.join(", ")}).`,
-        estado_revision: "auto",
+        categoria_diferencia: conDiferencia ? "comision_bancaria" : null,
+        justificacion: conDiferencia
+          ? `Coincidencia por nombre (${comunes.join(", ")}); diferencia de ${dif.toFixed(2)}: puede ser una comisión bancaria o un pago incompleto, confírmalo.`
+          : `Coincidencia por nombre (${comunes.join(", ")}).`,
+        estado_revision: conDiferencia || revisarTodo ? "pendiente" : "auto",
       });
       intUsado.add(i);
       bancUsado.add(j);

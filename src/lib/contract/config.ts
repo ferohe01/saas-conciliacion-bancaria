@@ -35,6 +35,11 @@ export const ConfigConciliacion = z.object({
   // por su fecha de emisión, así que el par NO SE CONCILIA NUNCA. El arrastre
   // es lo que lo hace posible. Cero devuelve el comportamiento anterior.
   arrastre_meses: z.number().int().min(0).max(120).default(12),
+  // La capa difusa concilia sola un par con el MISMO importe (fecha desplazada
+  // y nombre en común); con diferencia de importe siempre lo propone. Encendido,
+  // también los de mismo importe esperan a una persona: para empresas o
+  // auditores que exigen mirar todo lo que no sea exacto.
+  revisar_toda_difusa: z.boolean().default(false),
 });
 export type ConfigConciliacion = z.infer<typeof ConfigConciliacion>;
 
@@ -48,4 +53,5 @@ export const CONFIG_CONCILIACION_DEFAULT: ConfigConciliacion = {
   ventana_ia_dias: 30,
   max_combinacion: 3,
   arrastre_meses: 12,
+  revisar_toda_difusa: false,
 };

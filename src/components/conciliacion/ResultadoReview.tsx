@@ -56,7 +56,7 @@ const UMBRAL_LOTE = 0.95;
  * una suma determinística, no una apuesta del modelo, y se revisa distinto. Lo
  * que la distingue es `categoria_diferencia = "agrupacion_1aN"`.
  */
-type ClaveGrupo = "ia" | "agrupacion" | "otras";
+type ClaveGrupo = "ia" | "agrupacion" | "difusa" | "otras";
 const GRUPOS_REVISION: { clave: ClaveGrupo; titulo: string; detalle: string }[] = [
   {
     clave: "ia",
@@ -71,6 +71,12 @@ const GRUPOS_REVISION: { clave: ClaveGrupo; titulo: string; detalle: string }[] 
       "Un abono que junta varios de tus registros, o un pago repartido en varios movimientos del banco.",
   },
   {
+    clave: "difusa",
+    titulo: "Coincidencias aproximadas",
+    detalle:
+      "Mismo cliente y fecha cercana, pero con diferencia de importe: puede ser una comisión del banco o un pago incompleto. Si lo aceptas, el comprobante queda con esa diferencia pendiente.",
+  },
+  {
     clave: "otras",
     titulo: "Otras sugerencias",
     detalle: "Pares propuestos por las reglas que esperan tu confirmación.",
@@ -81,7 +87,9 @@ const grupoDe = (m: Match): ClaveGrupo =>
     ? "agrupacion"
     : m.metodo === "ia"
       ? "ia"
-      : "otras";
+      : m.metodo === "difusa"
+        ? "difusa"
+        : "otras";
 
 type Props = {
   jobId: string;
@@ -155,6 +163,7 @@ export function ResultadoReview({
   const [topesCola, setTopesCola] = useState<Record<ClaveGrupo, number>>({
     ia: PAGINA_REVISION,
     agrupacion: PAGINA_REVISION,
+    difusa: PAGINA_REVISION,
     otras: PAGINA_REVISION,
   });
 
