@@ -367,7 +367,8 @@ El ancho del contenedor lo dicta la tarea, no una grilla global:
 | Configuración | 672px | Lista de campos numéricos, lectura en una columna |
 | Wizard | 768px | Un paso a la vez, sin distracción lateral |
 | Resultado de conciliación | 896px | Dos paneles enfrentados necesitan aire |
-| Shell de la app (resto) | 1152px | Tablas, reportes y el panel de control |
+| Panel de control | 1440px | Un tablero que se lee de un vistazo: franja de seis cifras y la mesa análisis (8/12) + carril de acción (4/12) caben en una pantalla. Se pide con `data-ancho="amplio"` en la raíz |
+| Shell de la app (resto) | 1152px | Tablas y reportes |
 | Portada | 1152px | Hero dividido a media página |
 
 **Densidad y responsive.** El sistema es de una sola columna en móvil y abre a

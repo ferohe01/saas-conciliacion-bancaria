@@ -58,7 +58,10 @@ export default async function AppLayout({
       <div className="lg:pl-64">
         <main
           id="contenido"
-          className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8"
+          // Una pantalla puede pedir el ancho amplio marcando su raíz con
+          // data-ancho="amplio" (hoy, solo el panel de control: un tablero que
+          // se lee de un vistazo aprovecha el monitor ancho).
+          className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8 [&:has([data-ancho=amplio])]:max-w-[90rem]"
         >
           {children}
         </main>

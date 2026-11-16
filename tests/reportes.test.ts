@@ -338,7 +338,8 @@ describe("el mismo método se llama igual en todas partes", () => {
   const fs = require("node:fs") as typeof import("node:fs");
   const PANTALLAS = [
     "src/components/ui/Badge.tsx",
-    "src/app/(app)/dashboard/page.tsx",
+    // El panel de control pinta los métodos en sus piezas, no en la página.
+    "src/components/panel/PanelControl.tsx",
     "src/components/reportes/ReporteVista.tsx",
     "src/app/(app)/reportes/tipo/[categoria]/page.tsx",
   ];

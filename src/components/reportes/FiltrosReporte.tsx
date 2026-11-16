@@ -15,11 +15,14 @@ export function FiltrosReporte({
   bancos,
   cuentas,
   valores,
+  enLinea = false,
 }: {
   anios: number[];
   bancos: string[];
   cuentas: Cuenta[];
   valores: { anio: number; mes: string; banco: string; cuenta: string };
+  /** Sin tarjeta y en una sola fila, para la cabecera del panel de control. */
+  enLinea?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -45,8 +48,20 @@ export function FiltrosReporte({
     valores.cuenta !== "todos";
 
   return (
-    <search className="rounded-2xl border border-neutral-200 bg-white p-4">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <search
+      className={
+        enLinea
+          ? "flex flex-wrap items-end gap-2"
+          : "rounded-2xl border border-neutral-200 bg-white p-4"
+      }
+    >
+      <div
+        className={
+          enLinea
+            ? "grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end sm:[&>label]:w-32"
+            : "grid grid-cols-2 gap-3 sm:grid-cols-4"
+        }
+      >
         <Campo label="Año">
         <select
           value={String(valores.anio)}
@@ -111,7 +126,7 @@ export function FiltrosReporte({
         <button
           type="button"
           onClick={() => router.push(`${pathname}?anio=${valores.anio}`)}
-          className="mt-3 min-h-9 rounded-lg px-2 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
+          className={`${enLinea ? "h-10" : "mt-3 min-h-9"} rounded-lg px-2 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-100 hover:text-neutral-900`}
         >
           Quitar filtros
         </button>
