@@ -242,16 +242,39 @@ export default async function DashboardPage({
   const recientes = enFoco.slice(0, 6);
 
   // Lo único que de verdad reclama a la persona: sugerencias sin criterio.
-  const porRevisar = enFoco.reduce(
-    (acc, j) =>
-      acc +
-      (j.resultado?.matches ?? []).filter((m) => m.estado_revision === "pendiente")
-        .length,
-    0,
-  );
-  const jobConPendientes = enFoco.find((j) =>
-    (j.resultado?.matches ?? []).some((m) => m.estado_revision === "pendiente"),
-  );
+  //
+  // ⚠️ Viven en DOS sitios según el tamaño del job. En modo payload, dentro de
+  // `resultado.matches`; en modo tabla (las conciliaciones grandes), en
+  // `matches_conciliacion`, y el JSONB queda vacío. Contar solo el JSONB hacía
+  // que el panel dijera «0 · nada pendiente» sobre las 9 sugerencias de junio
+  // de WIN: el aviso callaba justo cuando había trabajo esperando. La consulta
+  // va por el índice (job_id, estado_revision) y devuelve solo las pendientes.
+  const pendientesPorJob = new Map<string, number>();
+  for (const j of enFoco) {
+    const n = (j.resultado?.matches ?? []).filter(
+      (m) => m.estado_revision === "pendiente",
+    ).length;
+    if (n > 0) pendientesPorJob.set(j.id, n);
+  }
+  if (enFoco.length > 0) {
+    const { data: enTabla, error: errTabla } = await supabase
+      .from("matches_conciliacion")
+      .select("job_id")
+      .in(
+        "job_id",
+        enFoco.map((j) => j.id),
+      )
+      .eq("estado_revision", "pendiente")
+      .limit(5000);
+    if (errTabla) {
+      console.error("[panel] no se pudieron contar las pendientes en tabla:", errTabla);
+    }
+    for (const m of (enTabla ?? []) as { job_id: string }[]) {
+      pendientesPorJob.set(m.job_id, (pendientesPorJob.get(m.job_id) ?? 0) + 1);
+    }
+  }
+  const porRevisar = [...pendientesPorJob.values()].reduce((a, n) => a + n, 0);
+  const jobConPendientes = enFoco.find((j) => (pendientesPorJob.get(j.id) ?? 0) > 0);
 
   // ── De dónde salieron las partidas de la última conciliación ──────────────
   //
@@ -364,7 +387,10 @@ export default async function DashboardPage({
   return (
     <div data-ancho="amplio" className="space-y-5">
       {/* ── 1. Cabecera: quién, qué recorte, y la acción primaria ──────────── */}
-      <header className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
+      {/* Título arriba y, debajo, la barra de filtros con la acción primaria.
+          Antes iban en la misma fila y saltaban a otra al aparecer «Quitar
+          filtros»: el panel cambiaba de forma según el filtro. Ahora es fija. */}
+      <header className="space-y-4">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight text-neutral-900">
             Panel de control
@@ -382,7 +408,7 @@ export default async function DashboardPage({
             <ChipPrueba estado={suscripcion} />
           </p>
         </div>
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
           <FiltrosReporte
             enLinea
             anios={anios}
